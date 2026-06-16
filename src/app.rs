@@ -35,6 +35,7 @@ pub fn App() -> Element {
     let snapshot = history.read().filtered(query().as_str(), active_filter());
     let counts = history.read().counts();
     let entry_count = snapshot.len();
+    let settings_snapshot = settings();
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
@@ -52,6 +53,10 @@ pub fn App() -> Element {
                 let data = event.data();
                 let modifiers = data.modifiers();
                 let primary = modifiers.ctrl() || modifiers.meta();
+
+                if !settings.read().keyboard_shortcuts {
+                    return;
+                }
 
                 if primary && matches!(data.key(), Key::Character(key) if key.eq_ignore_ascii_case("f")) {
                     event.prevent_default();
@@ -98,7 +103,12 @@ pub fn App() -> Element {
                     }
                 }
             },
-            TopBar { query, active_page, search_input }
+            TopBar {
+                query,
+                active_page,
+                search_input,
+                keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
+            }
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {
                     SettingsPage {
@@ -106,7 +116,16 @@ pub fn App() -> Element {
                         history,
                     }
                 } else {
-                    HistoryList { entries: snapshot, history, entry_count, active_filter, counts }
+                    HistoryList {
+                        entries: snapshot,
+                        history,
+                        entry_count,
+                        active_filter,
+                        counts,
+                        keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
+                        auto_focus: settings_snapshot.auto_focus_history,
+                        promote_on_copy: settings_snapshot.promote_copied_entries,
+                    }
                 }
             }
             FloatingSettingsButton { active_page }

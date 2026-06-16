@@ -44,6 +44,9 @@ pub enum ClipboardContent {
 pub struct AppSettings {
     pub history_limit: usize,
     pub launch_at_startup: bool,
+    pub keyboard_shortcuts: bool,
+    pub auto_focus_history: bool,
+    pub promote_copied_entries: bool,
 }
 
 impl Default for AppSettings {
@@ -51,6 +54,9 @@ impl Default for AppSettings {
         Self {
             history_limit: DEFAULT_HISTORY_LIMIT,
             launch_at_startup: false,
+            keyboard_shortcuts: true,
+            auto_focus_history: true,
+            promote_copied_entries: true,
         }
     }
 }

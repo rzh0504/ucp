@@ -52,6 +52,34 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         }
                     }
                 }
+
+                section { class: "settings-group",
+                    h3 { "快捷与交互" }
+                    SettingSwitchRow {
+                        label: "键盘快捷键",
+                        hint: "启用 Ctrl+F 搜索、Ctrl+, 切换设置、数字过滤和列表快捷操作。",
+                        checked: settings_snapshot.keyboard_shortcuts,
+                        on_change: move |checked| {
+                            update_settings(settings, |next| next.keyboard_shortcuts = checked);
+                        },
+                    }
+                    SettingSwitchRow {
+                        label: "自动聚焦历史列表",
+                        hint: "打开历史页后自动聚焦列表，方便直接使用方向键浏览。",
+                        checked: settings_snapshot.auto_focus_history,
+                        on_change: move |checked| {
+                            update_settings(settings, |next| next.auto_focus_history = checked);
+                        },
+                    }
+                    SettingSwitchRow {
+                        label: "复制后置顶",
+                        hint: "从历史中复制记录后，将该记录更新时间并移动到列表顶部。",
+                        checked: settings_snapshot.promote_copied_entries,
+                        on_change: move |checked| {
+                            update_settings(settings, |next| next.promote_copied_entries = checked);
+                        },
+                    }
+                }
             }
         }
     }
@@ -83,10 +111,12 @@ fn SettingSwitchRow(
 
 #[component]
 fn HistoryLimitCombobox(value: usize, on_change: EventHandler<usize>) -> Element {
+    let selected_value = use_memo(move || Some(value));
+
     rsx! {
         Combobox::<usize> {
             class: "settings-combobox",
-            default_value: Some(value),
+            value: Some(ReadSignal::from(selected_value)),
             on_value_change: move |value: Option<usize>| {
                 if let Some(limit) = value {
                     on_change.call(limit);

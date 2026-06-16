@@ -195,6 +195,9 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                     .unwrap_or(AppSettings::default().history_limit)
             }
             "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
+            "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
+            "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
+            "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
             _ => {}
         }
     }
@@ -208,6 +211,18 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
     let values = [
         ("history_limit", settings.history_limit.to_string()),
         ("launch_at_startup", settings.launch_at_startup.to_string()),
+        (
+            "keyboard_shortcuts",
+            settings.keyboard_shortcuts.to_string(),
+        ),
+        (
+            "auto_focus_history",
+            settings.auto_focus_history.to_string(),
+        ),
+        (
+            "promote_copied_entries",
+            settings.promote_copied_entries.to_string(),
+        ),
     ];
 
     for (key, value) in values {

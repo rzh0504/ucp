@@ -20,6 +20,9 @@ pub fn HistoryList(
     entry_count: usize,
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
+    keyboard_shortcuts: bool,
+    auto_focus: bool,
+    promote_on_copy: bool,
 ) -> Element {
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
@@ -80,6 +83,10 @@ pub fn HistoryList(
                 class: "history-list-click-target",
                 tabindex: "-1",
                 onmounted: move |event| {
+                    if !auto_focus {
+                        return;
+                    }
+
                     let element = event.data();
                     spawn(async move {
                         let _ = element.set_focus(true).await;
@@ -90,6 +97,10 @@ pub fn HistoryList(
                     selection_anchor_id.set(None);
                 },
                 onkeydown: move |event| {
+                    if !keyboard_shortcuts {
+                        return;
+                    }
+
                     let data = event.data();
                     let key = data.key();
                     let modifiers = data.modifiers();
@@ -147,7 +158,7 @@ pub fn HistoryList(
                         Key::Enter => {
                             event.prevent_default();
                             if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
-                                copy_entry(id, history);
+                                copy_entry(id, history, promote_on_copy);
                             }
                         }
                         Key::Delete | Key::Backspace => {
@@ -208,6 +219,7 @@ pub fn HistoryList(
                             selected_ids,
                             selection_anchor_id,
                             focused_id,
+                            promote_on_copy,
                         }
                     }
                     div { class: "history-list-clear-space" }
@@ -226,6 +238,7 @@ fn HistoryRow(
     mut selected_ids: Signal<Vec<u64>>,
     mut selection_anchor_id: Signal<Option<u64>>,
     mut focused_id: Signal<Option<u64>>,
+    promote_on_copy: bool,
 ) -> Element {
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
@@ -282,7 +295,7 @@ fn HistoryRow(
                     focused_id.set(Some(id));
                 },
                 ondoubleclick: move |_| {
-                    copy_entry(id, history);
+                    copy_entry(id, history, promote_on_copy);
                 },
                 div { class: "entry-index", "{index}" }
                 if let ClipboardContent::Image(image) = &entry.content {
@@ -419,12 +432,12 @@ fn focus_index(
     focused_id.set(Some(id));
 }
 
-fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>) {
+fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>, promote_on_copy: bool) {
     let Some(content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
         return;
     };
 
-    if platform::clipboard::write_content(&content).is_ok() {
+    if platform::clipboard::write_content(&content).is_ok() && promote_on_copy {
         if let Some(entry) = history.write().promote(id) {
             let _ = storage::save_entry(&entry);
         }
