@@ -4744,6 +4744,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "chrono",
+ "clipboard-win",
  "dioxus",
  "dioxus-primitives",
  "futures-channel",

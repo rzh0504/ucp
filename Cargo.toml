@@ -12,6 +12,9 @@ dioxus-primitives = { path = "C:/Users/RZH12/.dx/components/5e77e58a78250534/pri
 futures-channel = "0.3"
 futures-timer = "3"
 
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+
 [profile.dev]
 opt-level = 0
 debug = true

@@ -296,6 +296,14 @@ button {
     background: #eef6ff;
 }
 
+.history-row.is-favorite {
+    background: #fffaf0;
+}
+
+.history-row.is-current.is-favorite {
+    background: #fff6df;
+}
+
 .history-row-main {
     display: grid;
     grid-template-columns: 38px minmax(0, 1fr);
@@ -322,11 +330,16 @@ button {
 
 .entry-kicker {
     display: flex;
+    align-items: center;
     gap: 8px;
     margin-bottom: 3px;
     color: #8e8e93;
     font-size: 11px;
     font-weight: 600;
+}
+
+.entry-favorite-badge {
+    color: #b7791f;
 }
 
 .entry-title {
@@ -343,6 +356,10 @@ button {
 
 .entry-title.is-muted {
     color: #8e8e93;
+}
+
+.entry-title.is-rich {
+    color: #2c2c2e;
 }
 
 .entry-size {
@@ -362,7 +379,8 @@ button {
 }
 
 .history-row:hover .entry-actions,
-.history-row:focus-within .entry-actions {
+.history-row:focus-within .entry-actions,
+.history-row.is-favorite .entry-actions {
     opacity: 1;
 }
 

@@ -18,17 +18,30 @@ pub fn App() -> Element {
     let mut status = use_signal(|| "启动剪贴板监听...".to_string());
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
+        let mut last_sequence = None;
+
         loop {
-            match platform::clipboard::read_text() {
-                Ok(Some(text)) => {
-                    if history.write().push_text(text) {
-                        status.set("已捕获新的文本剪贴板内容".to_string());
+            let sequence = platform::clipboard::sequence_number();
+            if sequence.is_some() && sequence == last_sequence {
+                Delay::new(CLIPBOARD_POLL_INTERVAL).await;
+                continue;
+            }
+
+            match platform::clipboard::read_content() {
+                Ok(Some(content)) => {
+                    let label = content.kind().label();
+                    if history.write().push(content) {
+                        status.set(format!("已捕获新的{label}剪贴板内容"));
                     } else {
-                        status.set("正在监听文本剪贴板".to_string());
+                        status.set("正在监听剪贴板".to_string());
                     }
                 }
-                Ok(None) => status.set("正在监听剪贴板，当前无文本内容".to_string()),
+                Ok(None) => status.set("正在监听剪贴板，当前无支持内容".to_string()),
                 Err(error) => status.set(format!("剪贴板暂不可用：{error}")),
+            }
+
+            if sequence.is_some() {
+                last_sequence = sequence;
             }
 
             Delay::new(CLIPBOARD_POLL_INTERVAL).await;

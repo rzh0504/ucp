@@ -158,7 +158,13 @@ pub fn HistoryList(
 #[component]
 fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHistory>) -> Element {
     let id = entry.id;
-    let copy_text = entry.content.clone();
+    let copy_content = entry.content.clone();
+    let row_class = match (index == 1, entry.favorite) {
+        (true, true) => "history-row is-current is-favorite",
+        (true, false) => "history-row is-current",
+        (false, true) => "history-row is-favorite",
+        (false, false) => "history-row",
+    };
     let favorite_label = if entry.favorite {
         "取消收藏"
     } else {
@@ -169,14 +175,15 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
     } else {
         "固定"
     };
-    let kind_label = entry.kind.label();
+    let kind_label = entry.kind().label();
+    let entry_title = entry.title();
 
     rsx! {
-        article { class: if index == 1 { "history-row is-current" } else { "history-row" },
+        article { class: "{row_class}",
             button {
                 class: "history-row-main",
                 onclick: move |_| {
-                    if platform::clipboard::write_text(&copy_text).is_ok() {
+                    if platform::clipboard::write_content(&copy_content).is_ok() {
                         history.write().promote(id);
                     }
                 },
@@ -184,13 +191,12 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                 div { class: "entry-content",
                     div { class: "entry-kicker",
                         span { "{kind_label}" }
+                        if entry.favorite {
+                            span { class: "entry-favorite-badge", "已收藏" }
+                        }
                         span { "{entry.age_label()}" }
                     }
-                    if entry.is_text() {
-                        p { class: "entry-title", "{entry.content}" }
-                    } else {
-                        p { class: "entry-title is-muted", "{entry.kind.label()} 暂未启用" }
-                    }
+                    p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
                     p { class: "entry-size", "{entry.size_label()}" }
                 }
             }
