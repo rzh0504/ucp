@@ -46,11 +46,10 @@ pub fn HistoryList(
 fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHistory>) -> Element {
     let id = entry.id;
     let copy_content = entry.content.clone();
-    let row_class = match (index == 1, entry.favorite) {
-        (true, true) => "history-row is-current is-favorite",
-        (true, false) => "history-row is-current",
-        (false, true) => "history-row is-favorite",
-        (false, false) => "history-row",
+    let row_class = if index == 1 {
+        "history-row is-current"
+    } else {
+        "history-row"
     };
     let favorite_label = if entry.favorite {
         "取消收藏"
@@ -97,7 +96,7 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                     div { class: "entry-kicker",
                         span { "{kind_label}" }
                         if entry.favorite {
-                            span { class: "entry-favorite-badge", "已收藏" }
+                            FavoriteBadge {}
                         }
                         span { "{entry.age_label()}" }
                     }
@@ -142,6 +141,13 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                 }
             }
         }
+    }
+}
+
+#[component]
+fn FavoriteBadge() -> Element {
+    rsx! {
+        span { class: "entry-favorite-badge", "收藏" }
     }
 }
 

@@ -539,14 +539,6 @@ button {
     background: #eef6ff;
 }
 
-.history-row.is-favorite {
-    background: #fffaf0;
-}
-
-.history-row.is-current.is-favorite {
-    background: #fff6df;
-}
-
 .history-row-main {
     display: grid;
     grid-template-columns: 38px minmax(0, 1fr);
@@ -605,7 +597,17 @@ button {
 }
 
 .entry-favorite-badge {
-    color: #b7791f;
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 7px;
+    border: 1px solid rgba(0, 122, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(0, 122, 255, 0.08);
+    color: #007aff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
 }
 
 .entry-title {
@@ -645,8 +647,7 @@ button {
 }
 
 .history-row:hover .entry-actions,
-.history-row:focus-within .entry-actions,
-.history-row.is-favorite .entry-actions {
+.history-row:focus-within .entry-actions {
     opacity: 1;
 }
 
