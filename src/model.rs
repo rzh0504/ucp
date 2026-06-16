@@ -42,21 +42,15 @@ pub enum ClipboardContent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppSettings {
-    pub monitor_enabled: bool,
-    pub capture_text: bool,
-    pub capture_image: bool,
-    pub capture_file: bool,
     pub history_limit: usize,
+    pub launch_at_startup: bool,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            monitor_enabled: true,
-            capture_text: true,
-            capture_image: true,
-            capture_file: true,
             history_limit: DEFAULT_HISTORY_LIMIT,
+            launch_at_startup: false,
         }
     }
 }
@@ -67,14 +61,6 @@ impl AppSettings {
             self.history_limit = DEFAULT_HISTORY_LIMIT;
         }
         self
-    }
-
-    pub fn captures(self, content: &ClipboardContent) -> bool {
-        match content {
-            ClipboardContent::Text(_) => self.capture_text,
-            ClipboardContent::Image(_) => self.capture_image,
-            ClipboardContent::Files(_) => self.capture_file,
-        }
     }
 }
 

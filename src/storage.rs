@@ -189,15 +189,12 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
     for row in rows {
         let (key, value) = row?;
         match key.as_str() {
-            "monitor_enabled" => settings.monitor_enabled = parse_bool(&value),
-            "capture_text" => settings.capture_text = parse_bool(&value),
-            "capture_image" => settings.capture_image = parse_bool(&value),
-            "capture_file" => settings.capture_file = parse_bool(&value),
             "history_limit" => {
                 settings.history_limit = value
                     .parse::<usize>()
                     .unwrap_or(AppSettings::default().history_limit)
             }
+            "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
             _ => {}
         }
     }
@@ -209,11 +206,8 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
     let mut connection = open_connection()?;
     let transaction = connection.transaction()?;
     let values = [
-        ("monitor_enabled", settings.monitor_enabled.to_string()),
-        ("capture_text", settings.capture_text.to_string()),
-        ("capture_image", settings.capture_image.to_string()),
-        ("capture_file", settings.capture_file.to_string()),
         ("history_limit", settings.history_limit.to_string()),
+        ("launch_at_startup", settings.launch_at_startup.to_string()),
     ];
 
     for (key, value) in values {

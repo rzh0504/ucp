@@ -41,7 +41,7 @@ pub fn TopBar(query: Signal<String>, active_page: Signal<AppPage>) -> Element {
             if active_page() == AppPage::History {
                 SearchField { query }
             } else {
-                div { class: "top-bar-context", "设置与状态" }
+                div { class: "top-bar-context", "设置" }
             }
             WindowControls {
                 on_minimize: move |_| minimize_window.set_minimized(true),
@@ -211,53 +211,28 @@ pub fn HistoryList(
 pub fn SettingsPage(
     settings: Signal<AppSettings>,
     history: Signal<ClipboardHistory>,
-    status: String,
-    counts: HistoryCounts,
-    storage_path: String,
 ) -> Element {
     let settings_snapshot = settings();
 
     rsx! {
         div { class: "list-header settings-header",
             h2 { "设置" }
-            span { "剪贴板捕获与历史策略" }
+            span { "应用偏好" }
         }
         Separator { class: "list-separator", decorative: true }
         ScrollArea { class: "settings-scroll", direction: ScrollDirection::Vertical, tabindex: "0",
             div { class: "settings-page",
-                section { class: "settings-hero",
-                    div { class: "settings-hero-icon", "⌘" }
-                    div {
-                        h2 { "剪贴板设置" }
-                        p { "这些设置会立即生效并保存到本地数据库。关闭某类捕获后，UCP 会跳过对应类型的新剪贴板内容。" }
-                    }
-                }
-
                 section { class: "settings-group",
-                    h3 { "捕获规则" }
+                    h3 { "系统" }
                     SettingSwitchRow {
-                        label: "启用剪贴板监听",
-                        hint: "关闭后会暂停读取新的剪贴板内容，已有历史不会被删除。",
-                        checked: settings_snapshot.monitor_enabled,
-                        on_change: move |checked| update_settings(settings, |next| next.monitor_enabled = checked),
-                    }
-                    SettingSwitchRow {
-                        label: "捕获文本",
-                        hint: "保存复制的纯文本、代码片段和链接。",
-                        checked: settings_snapshot.capture_text,
-                        on_change: move |checked| update_settings(settings, |next| next.capture_text = checked),
-                    }
-                    SettingSwitchRow {
-                        label: "捕获图像",
-                        hint: "保存截图或复制的位图，并在列表中生成预览。",
-                        checked: settings_snapshot.capture_image,
-                        on_change: move |checked| update_settings(settings, |next| next.capture_image = checked),
-                    }
-                    SettingSwitchRow {
-                        label: "捕获文件",
-                        hint: "保存 Windows 文件剪贴板里的文件路径。",
-                        checked: settings_snapshot.capture_file,
-                        on_change: move |checked| update_settings(settings, |next| next.capture_file = checked),
+                        label: "开机启动",
+                        hint: "登录 Windows 后自动启动 UCP Clipboard。",
+                        checked: settings_snapshot.launch_at_startup,
+                        on_change: move |checked| {
+                            if platform::startup::set_enabled(checked).is_ok() {
+                                update_settings(settings, |next| next.launch_at_startup = checked);
+                            }
+                        },
                     }
                 }
 
@@ -276,27 +251,6 @@ pub fn SettingsPage(
                                 let _ = storage::delete_entries(&removed_ids);
                             },
                         }
-                    }
-                }
-
-                section { class: "settings-group",
-                    h3 { "当前状态" }
-                    SettingInfoRow {
-                        label: "监听状态",
-                        value: status,
-                        hint: "这里显示后台监听器最近一次状态。",
-                    }
-                    SettingInfoRow {
-                        label: "存储位置",
-                        value: storage_path,
-                        hint: "历史内容和设置都存储在本机 SQLite 数据库中。",
-                    }
-                    div { class: "settings-stats",
-                        SettingStat { label: "全部", value: counts.total }
-                        SettingStat { label: "文本", value: counts.text }
-                        SettingStat { label: "图像", value: counts.image }
-                        SettingStat { label: "文件", value: counts.file }
-                        SettingStat { label: "收藏", value: counts.favorite }
                     }
                 }
             }
@@ -356,35 +310,12 @@ fn HistoryLimitCombobox(value: usize, on_change: EventHandler<usize>) -> Element
     }
 }
 
-#[component]
-fn SettingInfoRow(label: &'static str, value: String, hint: &'static str) -> Element {
-    rsx! {
-        div { class: "setting-row",
-            div { class: "setting-row-copy",
-                span { class: "setting-label", "{label}" }
-                p { "{hint}" }
-            }
-            strong { "{value}" }
-        }
-    }
-}
-
 fn update_settings(mut settings: Signal<AppSettings>, update: impl FnOnce(&mut AppSettings)) {
     let mut next = settings();
     update(&mut next);
     next = next.normalized();
     settings.set(next);
     let _ = storage::save_settings(&next);
-}
-
-#[component]
-fn SettingStat(label: &'static str, value: usize) -> Element {
-    rsx! {
-        div { class: "setting-stat",
-            span { "{label}" }
-            strong { "{value}" }
-        }
-    }
 }
 
 #[component]

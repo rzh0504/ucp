@@ -22,11 +22,6 @@ pub fn App() -> Element {
     let active_filter = use_signal(|| ClipboardFilter::All);
     let active_page = use_signal(|| AppPage::History);
     let status = use_signal(|| "启动剪贴板监听...".to_string());
-    let storage_path = use_signal(|| {
-        storage::database_path()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|error| format!("无法读取：{error}"))
-    });
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         watch_clipboard(history, status, settings).await;
@@ -45,9 +40,6 @@ pub fn App() -> Element {
                     SettingsPage {
                         settings,
                         history,
-                        status: status(),
-                        counts,
-                        storage_path: storage_path(),
                     }
                 } else {
                     HistoryList { entries: snapshot, history, selected_count, active_filter, counts }
@@ -124,20 +116,9 @@ fn capture_clipboard(
     mut status: Signal<String>,
     settings: Signal<AppSettings>,
 ) {
-    let settings_snapshot = settings();
-    if !settings_snapshot.monitor_enabled {
-        status.set("剪贴板监听已暂停".to_string());
-        return;
-    }
-
     match platform::clipboard::read_content() {
         Ok(Some(content)) => {
             let label = content.kind().label();
-            if !settings_snapshot.captures(&content) {
-                status.set(format!("{label}剪贴板内容已在设置中关闭捕获"));
-                return;
-            }
-
             let result = history.write().push(content);
             let mut storage_error = None;
 
