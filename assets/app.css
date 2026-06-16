@@ -247,6 +247,14 @@ button {
     font-weight: 600;
 }
 
+.app-icon {
+    display: block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    color: currentColor;
+}
+
 .filter-tab:hover {
     background: rgba(255, 255, 255, 0.48);
 }
@@ -643,6 +651,8 @@ button {
 }
 
 .ghost-action {
+    display: grid;
+    place-items: center;
     width: 28px;
     height: 28px;
     border-radius: 7px;

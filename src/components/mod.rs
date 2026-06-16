@@ -1,6 +1,7 @@
 mod filter_tabs;
 mod floating_settings_button;
 mod history_list;
+mod icons;
 mod settings_page;
 mod tabs;
 mod top_bar;

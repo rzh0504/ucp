@@ -1,3 +1,4 @@
+use super::icons::{AppIcon, Icon};
 use super::tabs::{TabList, TabTrigger, Tabs};
 use crate::model::{ClipboardFilter, HistoryCounts};
 use dioxus::prelude::*;
@@ -35,11 +36,21 @@ pub fn FilterTabs(active_filter: Signal<ClipboardFilter>, counts: HistoryCounts)
 
 #[component]
 fn FilterTab(filter: ClipboardFilter, index: usize, label: &'static str, count: usize) -> Element {
+    let icon = match filter {
+        ClipboardFilter::Image => Some(AppIcon::Image),
+        ClipboardFilter::File => Some(AppIcon::File),
+        ClipboardFilter::Favorite => Some(AppIcon::Favorite),
+        ClipboardFilter::All | ClipboardFilter::Text => None,
+    };
+
     rsx! {
         TabTrigger {
             class: "filter-tab",
             value: filter.key().to_string(),
             index,
+            if let Some(icon) = icon {
+                Icon { icon }
+            }
             span { class: "filter-tab-label", "{label}" }
             span { class: "filter-tab-count", "{count}" }
         }

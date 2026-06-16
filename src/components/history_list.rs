@@ -1,4 +1,5 @@
 use super::filter_tabs::FilterTabs;
+use super::icons::{AppIcon, Icon};
 use crate::model::{
     ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
 };
@@ -114,7 +115,7 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                             let _ = storage::save_entry(&entry);
                         }
                     },
-                    "★"
+                    Icon { icon: AppIcon::Favorite }
                 }
                 ToolbarButton {
                     class: if entry.pinned { "ghost-action is-on" } else { "ghost-action" },
@@ -125,7 +126,7 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                             let _ = storage::save_entry(&entry);
                         }
                     },
-                    "◆"
+                    Icon { icon: AppIcon::Pin }
                 }
                 ToolbarSeparator { class: "entry-action-separator", decorative: true }
                 ToolbarButton {
