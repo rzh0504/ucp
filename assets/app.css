@@ -372,7 +372,7 @@ button {
 }
 
 .settings-group {
-    overflow: hidden;
+    overflow: visible;
     border: 1px solid rgba(60, 60, 67, 0.14);
     border-radius: 14px;
     background: #ffffff;
@@ -400,6 +400,7 @@ button {
 
 .setting-row-control {
     overflow: visible;
+    z-index: 10;
 }
 
 .setting-row:last-child {
