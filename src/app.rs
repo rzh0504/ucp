@@ -2,9 +2,12 @@ use crate::components::{AppPage, FloatingSettingsButton, HistoryList, SettingsPa
 use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::storage;
+use dioxus::events::MountedData;
+use dioxus::html::Key;
 use dioxus::prelude::*;
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_timer::Delay;
+use std::rc::Rc;
 use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
@@ -18,9 +21,11 @@ pub fn App() -> Element {
         storage::load_history(settings.peek().history_limit)
             .unwrap_or_else(|_| ClipboardHistory::new(settings.peek().history_limit))
     });
-    let query = use_signal(String::new);
-    let active_filter = use_signal(|| ClipboardFilter::All);
-    let active_page = use_signal(|| AppPage::History);
+    let mut query = use_signal(String::new);
+    let mut active_filter = use_signal(|| ClipboardFilter::All);
+    let mut active_page = use_signal(|| AppPage::History);
+    let search_input = use_signal(|| None::<Rc<MountedData>>);
+    let mut shell = use_signal(|| None::<Rc<MountedData>>);
     let status = use_signal(|| "启动剪贴板监听...".to_string());
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
@@ -33,8 +38,67 @@ pub fn App() -> Element {
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
-        main { class: "shell",
-            TopBar { query, active_page }
+        main {
+            class: "shell",
+            tabindex: "-1",
+            onmounted: move |event| {
+                let element = event.data();
+                shell.set(Some(element.clone()));
+                spawn(async move {
+                    let _ = element.set_focus(true).await;
+                });
+            },
+            onkeydown: move |event| {
+                let data = event.data();
+                let modifiers = data.modifiers();
+                let primary = modifiers.ctrl() || modifiers.meta();
+
+                if primary && matches!(data.key(), Key::Character(key) if key.eq_ignore_ascii_case("f")) {
+                    event.prevent_default();
+                    active_page.set(AppPage::History);
+                    if let Some(input) = search_input.read().clone() {
+                        spawn(async move {
+                            let _ = input.set_focus(true).await;
+                        });
+                    }
+                    return;
+                }
+
+                if primary && matches!(data.key(), Key::Character(key) if key == ",") {
+                    event.prevent_default();
+                    active_page.set(if active_page() == AppPage::Settings {
+                        AppPage::History
+                    } else {
+                        AppPage::Settings
+                    });
+                    return;
+                }
+
+                if primary {
+                    if let Some(filter) = filter_shortcut(&data.key()) {
+                        event.prevent_default();
+                        active_page.set(AppPage::History);
+                        active_filter.set(filter);
+                        return;
+                    }
+                }
+
+                if data.key() == Key::Escape {
+                    if active_page() == AppPage::Settings {
+                        event.prevent_default();
+                        active_page.set(AppPage::History);
+                    } else if !query.read().is_empty() {
+                        event.prevent_default();
+                        query.set(String::new());
+                        if let Some(element) = shell.read().clone() {
+                            spawn(async move {
+                                let _ = element.set_focus(true).await;
+                            });
+                        }
+                    }
+                }
+            },
+            TopBar { query, active_page, search_input }
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {
                     SettingsPage {
@@ -47,6 +111,17 @@ pub fn App() -> Element {
             }
             FloatingSettingsButton { active_page }
         }
+    }
+}
+
+fn filter_shortcut(key: &Key) -> Option<ClipboardFilter> {
+    match key {
+        Key::Character(key) if key == "1" => Some(ClipboardFilter::All),
+        Key::Character(key) if key == "2" => Some(ClipboardFilter::Text),
+        Key::Character(key) if key == "3" => Some(ClipboardFilter::Image),
+        Key::Character(key) if key == "4" => Some(ClipboardFilter::File),
+        Key::Character(key) if key == "5" => Some(ClipboardFilter::Favorite),
+        _ => None,
     }
 }
 

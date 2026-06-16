@@ -559,13 +559,16 @@ button {
     border-bottom: 0;
 }
 
-.history-row:hover,
-.history-row:focus-within {
+.history-row:hover {
     background: #f5f9ff;
 }
 
 .history-row.is-selected {
     background: #eef6ff;
+}
+
+.history-row.is-focused {
+    box-shadow: inset 3px 0 0 #007aff;
 }
 
 .history-row-main {
@@ -583,7 +586,7 @@ button {
 }
 
 .history-row-main:focus-visible {
-    box-shadow: inset 0 0 0 2px rgba(0, 122, 255, 0.36);
+    box-shadow: none;
 }
 
 .history-row-main.has-preview {
@@ -688,8 +691,8 @@ button {
 .entry-actions .ghost-action.is-pin-visible,
 .history-row:hover .entry-actions .ghost-action,
 .history-row:hover .entry-actions .entry-action-separator,
-.history-row:focus-within .entry-actions .ghost-action,
-.history-row:focus-within .entry-actions .entry-action-separator {
+.history-row.is-focused .entry-actions .ghost-action,
+.history-row.is-focused .entry-actions .entry-action-separator {
     opacity: 1;
 }
 

@@ -1,10 +1,16 @@
 use super::AppPage;
 use dioxus::desktop::use_window;
+use dioxus::events::MountedData;
 use dioxus::prelude::*;
 use dioxus_primitives::toolbar::Toolbar;
+use std::rc::Rc;
 
 #[component]
-pub fn TopBar(query: Signal<String>, active_page: Signal<AppPage>) -> Element {
+pub fn TopBar(
+    query: Signal<String>,
+    active_page: Signal<AppPage>,
+    search_input: Signal<Option<Rc<MountedData>>>,
+) -> Element {
     let window = use_window();
     let drag_window = window.clone();
     let minimize_window = window.clone();
@@ -19,7 +25,7 @@ pub fn TopBar(query: Signal<String>, active_page: Signal<AppPage>) -> Element {
                 h1 { class: "app-title", "UCP Clipboard" }
             }
             if active_page() == AppPage::History {
-                SearchField { query }
+                SearchField { query, search_input }
             } else {
                 div { class: "top-bar-context", "设置" }
             }
@@ -63,7 +69,7 @@ fn WindowControls(
 }
 
 #[component]
-fn SearchField(query: Signal<String>) -> Element {
+fn SearchField(query: Signal<String>, search_input: Signal<Option<Rc<MountedData>>>) -> Element {
     rsx! {
         label { class: "search-field",
             span { class: "search-icon", "⌕" }
@@ -71,6 +77,8 @@ fn SearchField(query: Signal<String>) -> Element {
                 r#type: "search",
                 placeholder: "搜索剪贴板历史",
                 value: "{query}",
+                title: "Ctrl+F 聚焦搜索",
+                onmounted: move |event| search_input.set(Some(event.data())),
                 oninput: move |event| query.set(event.value()),
             }
         }

@@ -5,10 +5,13 @@ use crate::model::{
 };
 use crate::platform;
 use crate::storage;
+use dioxus::events::MountedData;
+use dioxus::html::Key;
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
+use std::rc::Rc;
 
 #[component]
 pub fn HistoryList(
@@ -20,7 +23,9 @@ pub fn HistoryList(
 ) -> Element {
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
+    let mut focused_id = use_signal(|| None::<u64>);
     let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    let keyboard_entry_ids = entry_ids.clone();
     let visible_selected_ids = selected_ids
         .read()
         .iter()
@@ -73,11 +78,126 @@ pub fn HistoryList(
         } else {
             div {
                 class: "history-list-click-target",
+                tabindex: "-1",
+                onmounted: move |event| {
+                    let element = event.data();
+                    spawn(async move {
+                        let _ = element.set_focus(true).await;
+                    });
+                },
                 onclick: move |_| {
                     selected_ids.set(Vec::new());
                     selection_anchor_id.set(None);
                 },
-                ScrollArea { class: "history-list", direction: ScrollDirection::Vertical, tabindex: "0",
+                onkeydown: move |event| {
+                    let data = event.data();
+                    let key = data.key();
+                    let modifiers = data.modifiers();
+                    let primary = modifiers.ctrl() || modifiers.meta();
+
+                    match key {
+                        Key::ArrowDown => {
+                            event.prevent_default();
+                            move_focus(
+                                &keyboard_entry_ids,
+                                &mut focused_id,
+                                &mut selected_ids,
+                                &mut selection_anchor_id,
+                                1,
+                                modifiers.shift(),
+                                primary,
+                            );
+                        }
+                        Key::ArrowUp => {
+                            event.prevent_default();
+                            move_focus(
+                                &keyboard_entry_ids,
+                                &mut focused_id,
+                                &mut selected_ids,
+                                &mut selection_anchor_id,
+                                -1,
+                                modifiers.shift(),
+                                primary,
+                            );
+                        }
+                        Key::Home => {
+                            event.prevent_default();
+                            focus_index(
+                                &keyboard_entry_ids,
+                                &mut focused_id,
+                                &mut selected_ids,
+                                &mut selection_anchor_id,
+                                0,
+                                modifiers.shift(),
+                                primary,
+                            );
+                        }
+                        Key::End => {
+                            event.prevent_default();
+                            focus_index(
+                                &keyboard_entry_ids,
+                                &mut focused_id,
+                                &mut selected_ids,
+                                &mut selection_anchor_id,
+                                keyboard_entry_ids.len().saturating_sub(1),
+                                modifiers.shift(),
+                                primary,
+                            );
+                        }
+                        Key::Enter => {
+                            event.prevent_default();
+                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
+                                copy_entry(id, history);
+                            }
+                        }
+                        Key::Delete | Key::Backspace => {
+                            event.prevent_default();
+                            delete_focused_or_selected(
+                                &keyboard_entry_ids,
+                                focused_id(),
+                                &mut selected_ids,
+                                &mut selection_anchor_id,
+                                history,
+                            );
+                        }
+                        Key::Escape => {
+                            if !selected_ids.read().is_empty() {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                selected_ids.set(Vec::new());
+                                selection_anchor_id.set(None);
+                            }
+                        }
+                        Key::Character(key) if primary && key.eq_ignore_ascii_case("a") => {
+                            event.prevent_default();
+                            selected_ids.set(keyboard_entry_ids.clone());
+                            selection_anchor_id.set(keyboard_entry_ids.first().copied());
+                            focused_id.set(keyboard_entry_ids.last().copied());
+                        }
+                        Key::Character(key) if !primary && key.eq_ignore_ascii_case("f") => {
+                            event.prevent_default();
+                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
+                                if let Some(entry) = history.write().toggle_favorite(id) {
+                                    let _ = storage::save_entry(&entry);
+                                }
+                            }
+                        }
+                        Key::Character(key) if !primary && key.eq_ignore_ascii_case("p") => {
+                            event.prevent_default();
+                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
+                                if let Some(entry) = history.write().toggle_pin(id) {
+                                    let _ = storage::save_entry(&entry);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                },
+                ScrollArea {
+                    class: "history-list",
+                    direction: ScrollDirection::Vertical,
+                    tabindex: "0",
+                    aria_label: "剪贴板历史列表",
                     for (index, entry) in entries.iter().enumerate() {
                         HistoryRow {
                             key: "{entry.id}",
@@ -87,6 +207,7 @@ pub fn HistoryList(
                             history,
                             selected_ids,
                             selection_anchor_id,
+                            focused_id,
                         }
                     }
                     div { class: "history-list-clear-space" }
@@ -104,13 +225,16 @@ fn HistoryRow(
     history: Signal<ClipboardHistory>,
     mut selected_ids: Signal<Vec<u64>>,
     mut selection_anchor_id: Signal<Option<u64>>,
+    mut focused_id: Signal<Option<u64>>,
 ) -> Element {
     let id = entry.id;
-    let copy_content = entry.content.clone();
-    let row_class = if selected_ids.read().contains(&id) {
-        "history-row is-selected"
-    } else {
-        "history-row"
+    let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
+    let is_selected = selected_ids.read().contains(&id);
+    let row_class = match (is_selected, focused_id() == Some(id)) {
+        (true, true) => "history-row is-selected is-focused",
+        (true, false) => "history-row is-selected",
+        (false, true) => "history-row is-focused",
+        (false, false) => "history-row",
     };
     let kind_label = entry.kind().label();
     let entry_title = entry.title();
@@ -120,12 +244,25 @@ fn HistoryRow(
         "history-row-main"
     };
 
+    use_effect(move || {
+        if focused_id() == Some(id) {
+            if let Some(element) = button_ref() {
+                spawn(async move {
+                    let _ = element.set_focus(true).await;
+                });
+            }
+        }
+    });
+
     rsx! {
         article {
             class: "{row_class}",
             onclick: move |event| event.stop_propagation(),
             button {
                 class: "{row_main_class}",
+                aria_selected: if is_selected { "true" } else { "false" },
+                onmounted: move |event| button_ref.set(Some(event.data())),
+                onfocus: move |_| focused_id.set(Some(id)),
                 onclick: move |event| {
                     let modifiers = event.data.modifiers();
                     let mut selection = selected_ids.read().clone();
@@ -136,19 +273,16 @@ fn HistoryRow(
                         &mut selection,
                         &mut anchor,
                         id,
-                        modifiers.ctrl(),
+                        modifiers.ctrl() || modifiers.meta(),
                         modifiers.shift(),
                     );
 
                     selected_ids.set(selection);
                     selection_anchor_id.set(anchor);
+                    focused_id.set(Some(id));
                 },
                 ondoubleclick: move |_| {
-                    if platform::clipboard::write_content(&copy_content).is_ok() {
-                        if let Some(entry) = history.write().promote(id) {
-                            let _ = storage::save_entry(&entry);
-                        }
-                    }
+                    copy_entry(id, history);
                 },
                 div { class: "entry-index", "{index}" }
                 if let ClipboardContent::Image(image) = &entry.content {
@@ -209,6 +343,122 @@ fn HistoryRow(
             }
         }
     }
+}
+
+fn focused_entry_id(entry_ids: &[u64], focused_id: Option<u64>) -> Option<u64> {
+    focused_id
+        .filter(|id| entry_ids.contains(id))
+        .or_else(|| entry_ids.first().copied())
+}
+
+fn focused_index(entry_ids: &[u64], focused_id: Option<u64>) -> Option<usize> {
+    focused_id
+        .and_then(|id| entry_ids.iter().position(|entry_id| *entry_id == id))
+        .or(if entry_ids.is_empty() { None } else { Some(0) })
+}
+
+fn move_focus(
+    entry_ids: &[u64],
+    focused_id: &mut Signal<Option<u64>>,
+    selected_ids: &mut Signal<Vec<u64>>,
+    selection_anchor_id: &mut Signal<Option<u64>>,
+    offset: isize,
+    shift: bool,
+    preserve_selection: bool,
+) {
+    let Some(index) = focused_index(entry_ids, *focused_id.read()) else {
+        return;
+    };
+    let next_index = index
+        .saturating_add_signed(offset)
+        .min(entry_ids.len().saturating_sub(1));
+
+    focus_index(
+        entry_ids,
+        focused_id,
+        selected_ids,
+        selection_anchor_id,
+        next_index,
+        shift,
+        preserve_selection,
+    );
+}
+
+fn focus_index(
+    entry_ids: &[u64],
+    focused_id: &mut Signal<Option<u64>>,
+    selected_ids: &mut Signal<Vec<u64>>,
+    selection_anchor_id: &mut Signal<Option<u64>>,
+    index: usize,
+    shift: bool,
+    preserve_selection: bool,
+) {
+    let Some(id) = entry_ids.get(index).copied() else {
+        return;
+    };
+
+    let mut selection = selected_ids.read().clone();
+    let mut anchor = (*selection_anchor_id.read()).or(*focused_id.read());
+
+    if shift {
+        update_selection(
+            entry_ids,
+            &mut selection,
+            &mut anchor,
+            id,
+            preserve_selection,
+            true,
+        );
+        selected_ids.set(selection);
+        selection_anchor_id.set(anchor);
+    } else if !preserve_selection {
+        selected_ids.set(vec![id]);
+        selection_anchor_id.set(Some(id));
+    }
+
+    focused_id.set(Some(id));
+}
+
+fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>) {
+    let Some(content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
+        return;
+    };
+
+    if platform::clipboard::write_content(&content).is_ok() {
+        if let Some(entry) = history.write().promote(id) {
+            let _ = storage::save_entry(&entry);
+        }
+    }
+}
+
+fn delete_focused_or_selected(
+    entry_ids: &[u64],
+    focused_id: Option<u64>,
+    selected_ids: &mut Signal<Vec<u64>>,
+    selection_anchor_id: &mut Signal<Option<u64>>,
+    mut history: Signal<ClipboardHistory>,
+) {
+    let mut ids = selected_ids
+        .read()
+        .iter()
+        .copied()
+        .filter(|id| entry_ids.contains(id))
+        .collect::<Vec<_>>();
+
+    if ids.is_empty() {
+        if let Some(id) = focused_entry_id(entry_ids, focused_id) {
+            ids.push(id);
+        }
+    }
+
+    for id in ids {
+        if history.write().remove(id) {
+            let _ = storage::delete_entry(id);
+        }
+    }
+
+    selected_ids.set(Vec::new());
+    selection_anchor_id.set(None);
 }
 
 fn update_selection(

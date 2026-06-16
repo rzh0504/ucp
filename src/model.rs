@@ -358,6 +358,10 @@ impl ClipboardHistory {
         counts
     }
 
+    pub fn entry(&self, id: u64) -> Option<&ClipboardEntry> {
+        self.entries.iter().find(|entry| entry.id == id)
+    }
+
     pub fn promote(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
             let mut entry = self.entries.remove(position);
