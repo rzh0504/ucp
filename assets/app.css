@@ -38,7 +38,7 @@ button {
 
 .top-bar {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(260px, 480px) minmax(110px, 1fr);
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 340px) auto;
     align-items: center;
     gap: 12px;
     min-height: 58px;
@@ -69,7 +69,7 @@ button {
 }
 
 .top-bar-context {
-    justify-self: center;
+    justify-self: end;
     color: #6e6e73;
     font-size: 13px;
     font-weight: 600;
@@ -174,7 +174,8 @@ button {
 .search-field {
     position: relative;
     display: block;
-    max-width: 560px;
+    justify-self: end;
+    max-width: 340px;
     width: 100%;
 }
 
@@ -535,7 +536,7 @@ button {
     background: #f5f9ff;
 }
 
-.history-row.is-current {
+.history-row.is-selected {
     background: #eef6ff;
 }
 

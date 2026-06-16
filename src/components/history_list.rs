@@ -18,6 +18,8 @@ pub fn HistoryList(
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
 ) -> Element {
+    let selected_id = use_signal(|| None::<u64>);
+
     rsx! {
         div { class: "list-header",
             h2 { "剪贴板历史" }
@@ -35,6 +37,7 @@ pub fn HistoryList(
                         entry: entry.clone(),
                         index: index + 1,
                         history,
+                        selected_id,
                     }
                 }
             }
@@ -43,11 +46,16 @@ pub fn HistoryList(
 }
 
 #[component]
-fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHistory>) -> Element {
+fn HistoryRow(
+    entry: ClipboardEntry,
+    index: usize,
+    history: Signal<ClipboardHistory>,
+    mut selected_id: Signal<Option<u64>>,
+) -> Element {
     let id = entry.id;
     let copy_content = entry.content.clone();
-    let row_class = if index == 1 {
-        "history-row is-current"
+    let row_class = if selected_id() == Some(id) {
+        "history-row is-selected"
     } else {
         "history-row"
     };
@@ -73,7 +81,8 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
         article { class: "{row_class}",
             button {
                 class: "{row_main_class}",
-                onclick: move |_| {
+                onclick: move |_| selected_id.set(Some(id)),
+                ondoubleclick: move |_| {
                     if platform::clipboard::write_content(&copy_content).is_ok() {
                         if let Some(entry) = history.write().promote(id) {
                             let _ = storage::save_entry(&entry);
