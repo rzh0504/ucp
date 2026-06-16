@@ -14,17 +14,30 @@ use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 pub fn HistoryList(
     entries: Vec<ClipboardEntry>,
     history: Signal<ClipboardHistory>,
-    selected_count: usize,
+    entry_count: usize,
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
 ) -> Element {
-    let selected_id = use_signal(|| None::<u64>);
+    let selected_ids = use_signal(Vec::<u64>::new);
+    let selection_anchor_id = use_signal(|| None::<u64>);
+    let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    let visible_selected_count = selected_ids
+        .read()
+        .iter()
+        .filter(|id| entry_ids.contains(id))
+        .count();
 
     rsx! {
         div { class: "list-header",
             h2 { "剪贴板历史" }
             FilterTabs { active_filter, counts }
-            span { "{selected_count} 项" }
+            span {
+                if visible_selected_count == 0 {
+                    "{entry_count} 项"
+                } else {
+                    "已选 {visible_selected_count} / {entry_count} 项"
+                }
+            }
         }
         Separator { class: "list-separator", decorative: true }
         if entries.is_empty() {
@@ -36,8 +49,10 @@ pub fn HistoryList(
                         key: "{entry.id}",
                         entry: entry.clone(),
                         index: index + 1,
+                        entry_ids: entry_ids.clone(),
                         history,
-                        selected_id,
+                        selected_ids,
+                        selection_anchor_id,
                     }
                 }
             }
@@ -49,12 +64,14 @@ pub fn HistoryList(
 fn HistoryRow(
     entry: ClipboardEntry,
     index: usize,
+    entry_ids: Vec<u64>,
     history: Signal<ClipboardHistory>,
-    mut selected_id: Signal<Option<u64>>,
+    mut selected_ids: Signal<Vec<u64>>,
+    mut selection_anchor_id: Signal<Option<u64>>,
 ) -> Element {
     let id = entry.id;
     let copy_content = entry.content.clone();
-    let row_class = if selected_id() == Some(id) {
+    let row_class = if selected_ids.read().contains(&id) {
         "history-row is-selected"
     } else {
         "history-row"
@@ -81,7 +98,23 @@ fn HistoryRow(
         article { class: "{row_class}",
             button {
                 class: "{row_main_class}",
-                onclick: move |_| selected_id.set(Some(id)),
+                onclick: move |event| {
+                    let modifiers = event.data.modifiers();
+                    let mut selection = selected_ids.read().clone();
+                    let mut anchor = selection_anchor_id();
+
+                    update_selection(
+                        &entry_ids,
+                        &mut selection,
+                        &mut anchor,
+                        id,
+                        modifiers.ctrl(),
+                        modifiers.shift(),
+                    );
+
+                    selected_ids.set(selection);
+                    selection_anchor_id.set(anchor);
+                },
                 ondoubleclick: move |_| {
                     if platform::clipboard::write_content(&copy_content).is_ok() {
                         if let Some(entry) = history.write().promote(id) {
@@ -151,6 +184,71 @@ fn HistoryRow(
             }
         }
     }
+}
+
+fn update_selection(
+    entry_ids: &[u64],
+    selected_ids: &mut Vec<u64>,
+    anchor_id: &mut Option<u64>,
+    id: u64,
+    ctrl: bool,
+    shift: bool,
+) {
+    if shift {
+        let Some(anchor) = *anchor_id else {
+            selected_ids.clear();
+            selected_ids.push(id);
+            *anchor_id = Some(id);
+            return;
+        };
+
+        let Some(anchor_index) = entry_ids.iter().position(|entry_id| *entry_id == anchor) else {
+            selected_ids.clear();
+            selected_ids.push(id);
+            *anchor_id = Some(id);
+            return;
+        };
+
+        let Some(target_index) = entry_ids.iter().position(|entry_id| *entry_id == id) else {
+            return;
+        };
+
+        let (start, end) = if anchor_index <= target_index {
+            (anchor_index, target_index)
+        } else {
+            (target_index, anchor_index)
+        };
+        let range_ids = &entry_ids[start..=end];
+
+        if ctrl {
+            for range_id in range_ids {
+                if !selected_ids.contains(range_id) {
+                    selected_ids.push(*range_id);
+                }
+            }
+        } else {
+            selected_ids.clear();
+            selected_ids.extend_from_slice(range_ids);
+        }
+
+        return;
+    }
+
+    if ctrl {
+        if let Some(index) = selected_ids
+            .iter()
+            .position(|selected_id| *selected_id == id)
+        {
+            selected_ids.remove(index);
+        } else {
+            selected_ids.push(id);
+        }
+    } else {
+        selected_ids.clear();
+        selected_ids.push(id);
+    }
+
+    *anchor_id = Some(id);
 }
 
 #[component]

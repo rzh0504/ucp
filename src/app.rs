@@ -29,7 +29,7 @@ pub fn App() -> Element {
 
     let snapshot = history.read().filtered(query().as_str(), active_filter());
     let counts = history.read().counts();
-    let selected_count = snapshot.len();
+    let entry_count = snapshot.len();
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
@@ -42,7 +42,7 @@ pub fn App() -> Element {
                         history,
                     }
                 } else {
-                    HistoryList { entries: snapshot, history, selected_count, active_filter, counts }
+                    HistoryList { entries: snapshot, history, entry_count, active_filter, counts }
                 }
             }
             FloatingSettingsButton { active_page }
