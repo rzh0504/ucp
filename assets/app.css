@@ -162,18 +162,19 @@ button {
     transform: translateY(-50%);
 }
 
-.content-area {
+.content-panel {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
     min-height: 0;
-    padding: 14px 18px 18px;
+    overflow: hidden;
+    border-top: 1px solid rgba(60, 60, 67, 0.16);
+    background: #ffffff;
 }
 
 .filter-tabs-root {
     justify-self: start;
     max-width: min(100%, 600px);
     width: 100%;
-    margin-bottom: 14px;
 }
 
 .filter-tabs {
@@ -182,8 +183,9 @@ button {
     overflow: hidden;
     width: 100%;
     padding: 3px;
-    border: 1px solid rgba(60, 60, 67, 0.16);
-    border-radius: 9px;
+    border-right: 1px solid rgba(60, 60, 67, 0.16);
+    border-bottom: 1px solid rgba(60, 60, 67, 0.16);
+    border-radius: 0 0 9px 0;
     background: rgba(118, 118, 128, 0.12);
 }
 
@@ -227,16 +229,6 @@ button {
 
 .filter-tab[data-state="active"] .filter-tab-count {
     color: #6e6e73;
-}
-
-.history-panel {
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    min-height: 0;
-    overflow: hidden;
-    border: 1px solid rgba(60, 60, 67, 0.16);
-    border-radius: 12px;
-    background: #ffffff;
 }
 
 .list-header {
@@ -459,16 +451,8 @@ button {
 }
 
 @media (max-width: 560px) {
-    .content-area {
-        padding: 10px;
-    }
-
     .filter-tabs {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .history-panel {
-        border-radius: 10px;
     }
 
     .history-row {

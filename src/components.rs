@@ -4,8 +4,10 @@ use dioxus::desktop::use_window;
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
-use dioxus_primitives::tabs::{TabList, TabTrigger, Tabs};
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
+
+mod tabs;
+use tabs::{TabList, TabTrigger, Tabs};
 
 #[component]
 pub fn TopBar(query: Signal<String>) -> Element {
@@ -128,23 +130,21 @@ pub fn HistoryList(
     selected_count: usize,
 ) -> Element {
     rsx! {
-        section { class: "history-panel",
-            div { class: "list-header",
-                h2 { "剪贴板历史" }
-                span { "{selected_count} 项" }
-            }
-            Separator { class: "list-separator", decorative: true }
-            if entries.is_empty() {
-                EmptyState {}
-            } else {
-                ScrollArea { class: "history-list", direction: ScrollDirection::Vertical, tabindex: "0",
-                    for (index, entry) in entries.iter().enumerate() {
-                        HistoryRow {
-                            key: "{entry.id}",
-                            entry: entry.clone(),
-                            index: index + 1,
-                            history,
-                        }
+        div { class: "list-header",
+            h2 { "剪贴板历史" }
+            span { "{selected_count} 项" }
+        }
+        Separator { class: "list-separator", decorative: true }
+        if entries.is_empty() {
+            EmptyState {}
+        } else {
+            ScrollArea { class: "history-list", direction: ScrollDirection::Vertical, tabindex: "0",
+                for (index, entry) in entries.iter().enumerate() {
+                    HistoryRow {
+                        key: "{entry.id}",
+                        entry: entry.clone(),
+                        index: index + 1,
+                        history,
                     }
                 }
             }

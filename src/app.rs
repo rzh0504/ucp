@@ -43,7 +43,7 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: STYLES }
         main { class: "shell",
             TopBar { query }
-            section { class: "content-area",
+            section { class: "content-panel",
                 FilterTabs { active_filter, counts }
                 HistoryList { entries: snapshot, history, selected_count }
             }
