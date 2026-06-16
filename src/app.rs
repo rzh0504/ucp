@@ -24,7 +24,7 @@ pub fn App() -> Element {
     let status = use_signal(|| "启动剪贴板监听...".to_string());
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
-        watch_clipboard(history, status, settings).await;
+        watch_clipboard(history, status).await;
     });
 
     let snapshot = history.read().filtered(query().as_str(), active_filter());
@@ -51,11 +51,7 @@ pub fn App() -> Element {
 }
 
 #[cfg(windows)]
-async fn watch_clipboard(
-    history: Signal<ClipboardHistory>,
-    mut status: Signal<String>,
-    settings: Signal<AppSettings>,
-) {
+async fn watch_clipboard(history: Signal<ClipboardHistory>, mut status: Signal<String>) {
     use futures_util::StreamExt;
 
     let (updates_tx, mut updates_rx) = futures_channel::mpsc::unbounded();
@@ -67,31 +63,23 @@ async fn watch_clipboard(
         Ok(listener) => listener,
         Err(error) => {
             status.set(format!("剪贴板事件监听失败，已切换轮询：{error}"));
-            poll_clipboard(history, status, settings).await;
+            poll_clipboard(history, status).await;
             return;
         }
     };
 
-    capture_clipboard(history, status, settings);
+    capture_clipboard(history, status);
     while updates_rx.next().await.is_some() {
-        capture_clipboard(history, status, settings);
+        capture_clipboard(history, status);
     }
 }
 
 #[cfg(not(windows))]
-async fn watch_clipboard(
-    history: Signal<ClipboardHistory>,
-    status: Signal<String>,
-    settings: Signal<AppSettings>,
-) {
-    poll_clipboard(history, status, settings).await;
+async fn watch_clipboard(history: Signal<ClipboardHistory>, status: Signal<String>) {
+    poll_clipboard(history, status).await;
 }
 
-async fn poll_clipboard(
-    history: Signal<ClipboardHistory>,
-    status: Signal<String>,
-    settings: Signal<AppSettings>,
-) {
+async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String>) {
     let mut last_sequence = None;
 
     loop {
@@ -101,7 +89,7 @@ async fn poll_clipboard(
             continue;
         }
 
-        capture_clipboard(history, status, settings);
+        capture_clipboard(history, status);
 
         if sequence.is_some() {
             last_sequence = sequence;
@@ -111,11 +99,7 @@ async fn poll_clipboard(
     }
 }
 
-fn capture_clipboard(
-    mut history: Signal<ClipboardHistory>,
-    mut status: Signal<String>,
-    settings: Signal<AppSettings>,
-) {
+fn capture_clipboard(mut history: Signal<ClipboardHistory>, mut status: Signal<String>) {
     match platform::clipboard::read_content() {
         Ok(Some(content)) => {
             let label = content.kind().label();

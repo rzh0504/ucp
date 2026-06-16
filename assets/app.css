@@ -732,9 +732,6 @@ button {
         max-width: none;
     }
 
-    .settings-stats {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
 }
 
 @media (max-width: 560px) {
@@ -756,7 +753,6 @@ button {
         padding: 18px 14px 28px;
     }
 
-    .settings-hero,
     .setting-row {
         grid-template-columns: 1fr;
     }
@@ -768,10 +764,6 @@ button {
     .settings-switch,
     .settings-combobox {
         justify-self: start;
-    }
-
-    .settings-stats {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .floating-settings {

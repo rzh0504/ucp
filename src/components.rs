@@ -208,10 +208,7 @@ pub fn HistoryList(
 }
 
 #[component]
-pub fn SettingsPage(
-    settings: Signal<AppSettings>,
-    history: Signal<ClipboardHistory>,
-) -> Element {
+pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHistory>) -> Element {
     let settings_snapshot = settings();
 
     rsx! {
