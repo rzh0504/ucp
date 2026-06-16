@@ -124,6 +124,45 @@ pub fn write_files(_files: &[String]) -> Result<(), ClipboardError> {
 }
 
 #[cfg(windows)]
+pub struct ClipboardUpdateListener {
+    _shutdown: clipboard_win::monitor::Shutdown,
+}
+
+#[cfg(windows)]
+pub fn listen_for_updates(
+    mut on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let (setup_tx, setup_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let mut monitor = match clipboard_win::Monitor::new() {
+            Ok(monitor) => monitor,
+            Err(error) => {
+                let _ = setup_tx.send(Err(map_clipboard_win_error(error)));
+                return;
+            }
+        };
+
+        let shutdown = monitor.shutdown_channel();
+        if setup_tx.send(Ok(shutdown)).is_err() {
+            return;
+        }
+
+        while let Ok(true) = monitor.recv() {
+            on_update();
+        }
+    });
+
+    let shutdown = setup_rx
+        .recv()
+        .map_err(|error| ClipboardError::Unavailable(format!("启动剪贴板监听失败：{error}")))??;
+
+    Ok(ClipboardUpdateListener {
+        _shutdown: shutdown,
+    })
+}
+
+#[cfg(windows)]
 pub fn sequence_number() -> Option<u32> {
     clipboard_win::raw::seq_num().map(|sequence| sequence.get())
 }
