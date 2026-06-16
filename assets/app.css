@@ -676,12 +676,20 @@ button {
     align-items: center;
     gap: 4px;
     padding: 0 12px 0 4px;
+    transition: opacity 100ms ease;
+}
+
+.entry-actions .ghost-action,
+.entry-actions .entry-action-separator {
     opacity: 0;
     transition: opacity 100ms ease;
 }
 
-.history-row:hover .entry-actions,
-.history-row:focus-within .entry-actions {
+.entry-actions .ghost-action.is-pin-visible,
+.history-row:hover .entry-actions .ghost-action,
+.history-row:hover .entry-actions .entry-action-separator,
+.history-row:focus-within .entry-actions .ghost-action,
+.history-row:focus-within .entry-actions .entry-action-separator {
     opacity: 1;
 }
 

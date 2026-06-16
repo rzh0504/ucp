@@ -112,16 +112,6 @@ fn HistoryRow(
     } else {
         "history-row"
     };
-    let favorite_label = if entry.favorite {
-        "取消收藏"
-    } else {
-        "收藏"
-    };
-    let pin_label = if entry.pinned {
-        "取消固定"
-    } else {
-        "固定"
-    };
     let kind_label = entry.kind().label();
     let entry_title = entry.title();
     let row_main_class = if matches!(&entry.content, ClipboardContent::Image(_)) {
@@ -188,7 +178,6 @@ fn HistoryRow(
                 ToolbarButton {
                     class: if entry.favorite { "ghost-action is-on" } else { "ghost-action" },
                     index: 0usize,
-                    title: "{favorite_label}",
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_favorite(id) {
                             let _ = storage::save_entry(&entry);
@@ -197,9 +186,8 @@ fn HistoryRow(
                     Icon { icon: AppIcon::Favorite }
                 }
                 ToolbarButton {
-                    class: if entry.pinned { "ghost-action is-on" } else { "ghost-action" },
+                    class: if entry.pinned { "ghost-action is-on is-pin-visible" } else { "ghost-action" },
                     index: 1usize,
-                    title: "{pin_label}",
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_pin(id) {
                             let _ = storage::save_entry(&entry);
@@ -211,7 +199,6 @@ fn HistoryRow(
                 ToolbarButton {
                     class: "ghost-action is-danger",
                     index: 2usize,
-                    title: "删除",
                     on_click: move |_| {
                         if history.write().remove(id) {
                             let _ = storage::delete_entry(id);
