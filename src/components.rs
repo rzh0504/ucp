@@ -128,10 +128,13 @@ pub fn HistoryList(
     entries: Vec<ClipboardEntry>,
     history: Signal<ClipboardHistory>,
     selected_count: usize,
+    active_filter: Signal<ClipboardFilter>,
+    counts: HistoryCounts,
 ) -> Element {
     rsx! {
         div { class: "list-header",
             h2 { "剪贴板历史" }
+            FilterTabs { active_filter, counts }
             span { "{selected_count} 项" }
         }
         Separator { class: "list-separator", decorative: true }

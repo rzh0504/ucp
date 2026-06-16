@@ -164,7 +164,7 @@ button {
 
 .content-panel {
     display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
     border-top: 1px solid rgba(60, 60, 67, 0.16);
@@ -173,19 +173,17 @@ button {
 
 .filter-tabs-root {
     justify-self: start;
-    max-width: min(100%, 600px);
-    width: 100%;
+    width: auto;
 }
 
 .filter-tabs {
     display: inline-grid;
-    grid-template-columns: repeat(5, minmax(84px, 1fr));
+    grid-template-columns: repeat(5, minmax(72px, 1fr));
     overflow: hidden;
-    width: 100%;
+    width: auto;
     padding: 3px;
-    border-right: 1px solid rgba(60, 60, 67, 0.16);
-    border-bottom: 1px solid rgba(60, 60, 67, 0.16);
-    border-radius: 0 0 9px 0;
+    border: 1px solid rgba(60, 60, 67, 0.16);
+    border-radius: 9px;
     background: rgba(118, 118, 128, 0.12);
 }
 
@@ -232,13 +230,17 @@ button {
 }
 
 .list-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 44px;
+    gap: 14px;
+    min-height: 58px;
     padding: 0 16px;
     background: #fbfbfd;
+}
+
+.list-header .filter-tabs-root {
+    grid-column: 3;
 }
 
 .list-separator {

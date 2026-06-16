@@ -1,4 +1,4 @@
-use crate::components::{FilterTabs, HistoryList, TopBar};
+use crate::components::{HistoryList, TopBar};
 use crate::model::{ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use dioxus::prelude::*;
@@ -44,8 +44,7 @@ pub fn App() -> Element {
         main { class: "shell",
             TopBar { query }
             section { class: "content-panel",
-                FilterTabs { active_filter, counts }
-                HistoryList { entries: snapshot, history, selected_count }
+                HistoryList { entries: snapshot, history, selected_count, active_filter, counts }
             }
         }
     }
