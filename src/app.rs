@@ -1,4 +1,4 @@
-use crate::components::{ActionRail, FilterTabs, HistoryList, TopBar};
+use crate::components::{FilterTabs, HistoryList, TopBar};
 use crate::model::{ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use dioxus::prelude::*;
@@ -42,15 +42,10 @@ pub fn App() -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
         main { class: "shell",
-            section { class: "workspace",
-                TopBar { query, status: status() }
+            TopBar { query, status: status() }
+            section { class: "content-area",
                 FilterTabs { active_filter, counts }
-                HistoryList { entries: snapshot, history }
-            }
-            ActionRail {
-                platform_label: platform::CURRENT_OS.label(),
-                strategy_label: platform::clipboard::monitor_strategy(),
-                selected_count,
+                HistoryList { entries: snapshot, history, selected_count }
             }
         }
     }

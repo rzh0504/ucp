@@ -6,24 +6,16 @@ use dioxus::prelude::*;
 pub fn TopBar(query: Signal<String>, status: String) -> Element {
     rsx! {
         header { class: "top-bar",
-            BrandBlock {}
+            div { class: "traffic-lights", aria_label: "窗口状态",
+                span { class: "traffic-dot is-close" }
+                span { class: "traffic-dot is-minimize" }
+                span { class: "traffic-dot is-zoom" }
+            }
+            h1 { class: "app-title", "UCP Clipboard" }
             SearchField { query }
             div { class: "status-card",
                 span { class: "status-dot" }
                 span { class: "status-text", "{status}" }
-            }
-        }
-    }
-}
-
-#[component]
-fn BrandBlock() -> Element {
-    rsx! {
-        div { class: "brand-block",
-            div { class: "brand-mark", "U" }
-            div {
-                p { class: "eyebrow", "Universal Clipboard" }
-                h1 { "UCP" }
             }
         }
     }
@@ -36,7 +28,7 @@ fn SearchField(query: Signal<String>) -> Element {
             span { class: "search-icon", "⌕" }
             input {
                 r#type: "search",
-                placeholder: "搜索文本、片段或命令",
+                placeholder: "搜索剪贴板历史",
                 value: "{query}",
                 oninput: move |event| query.set(event.value()),
             }
@@ -47,21 +39,20 @@ fn SearchField(query: Signal<String>) -> Element {
 #[component]
 pub fn FilterTabs(active_filter: Signal<ClipboardFilter>, counts: HistoryCounts) -> Element {
     let tabs = [
-        (ClipboardFilter::All, "All", "全部", counts.total),
-        (ClipboardFilter::Text, "Txt", "文本", counts.text),
-        (ClipboardFilter::Image, "Img", "图像", counts.image),
-        (ClipboardFilter::File, "File", "文件", counts.file),
-        (ClipboardFilter::Favorite, "Star", "收藏", counts.favorite),
+        (ClipboardFilter::All, "全部", counts.total),
+        (ClipboardFilter::Text, "文本", counts.text),
+        (ClipboardFilter::Image, "图像", counts.image),
+        (ClipboardFilter::File, "文件", counts.file),
+        (ClipboardFilter::Favorite, "收藏", counts.favorite),
     ];
 
     rsx! {
         nav { class: "filter-tabs", aria_label: "剪贴板类型筛选",
-            for (filter, icon, label, count) in tabs {
+            for (filter, label, count) in tabs {
                 FilterTab {
                     key: "{filter.key()}",
                     filter,
                     active_filter,
-                    icon,
                     label,
                     count,
                 }
@@ -74,7 +65,6 @@ pub fn FilterTabs(active_filter: Signal<ClipboardFilter>, counts: HistoryCounts)
 fn FilterTab(
     filter: ClipboardFilter,
     active_filter: Signal<ClipboardFilter>,
-    icon: &'static str,
     label: &'static str,
     count: usize,
 ) -> Element {
@@ -82,7 +72,6 @@ fn FilterTab(
         button {
             class: if active_filter() == filter { "filter-tab is-active" } else { "filter-tab" },
             onclick: move |_| active_filter.set(filter),
-            span { class: "filter-tab-icon", "{icon}" }
             span { class: "filter-tab-label", "{label}" }
             span { class: "filter-tab-count", "{count}" }
         }
@@ -90,17 +79,16 @@ fn FilterTab(
 }
 
 #[component]
-pub fn HistoryList(entries: Vec<ClipboardEntry>, history: Signal<ClipboardHistory>) -> Element {
-    let entry_count = entries.len();
-
+pub fn HistoryList(
+    entries: Vec<ClipboardEntry>,
+    history: Signal<ClipboardHistory>,
+    selected_count: usize,
+) -> Element {
     rsx! {
         section { class: "history-panel",
-            div { class: "panel-heading",
-                div {
-                    p { class: "eyebrow", "History" }
-                    h2 { "剪贴板历史" }
-                }
-                span { class: "result-count", "{entry_count} 条" }
+            div { class: "list-header",
+                h2 { "剪贴板历史" }
+                span { "{selected_count} 项" }
             }
             if entries.is_empty() {
                 EmptyState {}
@@ -137,15 +125,15 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
     let kind_label = entry.kind.label();
 
     rsx! {
-        article { class: if index == 1 { "history-card is-current" } else { "history-card" },
+        article { class: if index == 1 { "history-row is-current" } else { "history-row" },
             button {
-                class: "history-card-main",
+                class: "history-row-main",
                 onclick: move |_| {
                     if platform::clipboard::write_text(&copy_text).is_ok() {
                         history.write().promote(id);
                     }
                 },
-                div { class: "entry-badge", "{index}" }
+                div { class: "entry-index", "{index}" }
                 div { class: "entry-content",
                     div { class: "entry-kicker",
                         span { "{kind_label}" }
@@ -187,46 +175,9 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
 fn EmptyState() -> Element {
     rsx! {
         div { class: "empty-state",
-            div { class: "empty-glyph", "⌘" }
+            div { class: "empty-glyph", "⌘C" }
             h2 { "复制任意文本开始" }
             p { "UCP 会在后台监听剪贴板，并把新的文本内容整理成可搜索历史。" }
-        }
-    }
-}
-
-#[component]
-pub fn ActionRail(
-    platform_label: &'static str,
-    strategy_label: &'static str,
-    selected_count: usize,
-) -> Element {
-    rsx! {
-        aside { class: "action-rail",
-            div { class: "rail-section rail-hero",
-                span { class: "rail-label", "Session" }
-                strong { "{selected_count}" }
-                span { "当前结果" }
-            }
-            div { class: "rail-section",
-                p { class: "rail-label", "Quick Actions" }
-                button { class: "rail-command is-primary", title: "复制最近一条", "复制最近" }
-                button { class: "rail-command", title: "仅查看收藏", "查看收藏" }
-                button { class: "rail-command", title: "清理历史", "清理历史" }
-            }
-            div { class: "rail-spacer" }
-            div { class: "rail-section rail-system",
-                p { class: "rail-label", "System" }
-                dl {
-                    div {
-                        dt { "平台" }
-                        dd { "{platform_label}" }
-                    }
-                    div {
-                        dt { "监听" }
-                        dd { "{strategy_label}" }
-                    }
-                }
-            }
         }
     }
 }

@@ -33,18 +33,6 @@ pub fn write_text(text: &str) -> Result<(), ClipboardError> {
         .map_err(map_error)
 }
 
-pub fn monitor_strategy() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "Win polling"
-    } else if cfg!(target_os = "macos") {
-        "mac polling"
-    } else if cfg!(target_os = "android") || cfg!(target_os = "ios") {
-        "mobile pending"
-    } else {
-        "generic polling"
-    }
-}
-
 fn map_error(error: ArboardError) -> ClipboardError {
     ClipboardError::Unavailable(error.to_string())
 }
