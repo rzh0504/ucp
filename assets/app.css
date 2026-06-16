@@ -204,10 +204,13 @@ button {
 
 .search-icon {
     position: absolute;
-    left: 13px;
+    left: 14px;
     top: 50%;
+    display: block;
+    width: 14px;
+    height: 14px;
     color: #6e6e73;
-    font-size: 14px;
+    pointer-events: none;
     transform: translateY(-50%);
 }
 

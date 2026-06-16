@@ -83,7 +83,15 @@ fn SearchField(
 
     rsx! {
         label { class: "search-field",
-            span { class: "search-icon", "⌕" }
+            svg {
+                class: "search-icon",
+                view_box: "0 0 24 24",
+                "aria-hidden": "true",
+                path {
+                    d: "M10.5 5.25a5.25 5.25 0 1 0 0 10.5 5.25 5.25 0 0 0 0-10.5ZM3.75 10.5a6.75 6.75 0 1 1 12.06 4.17l4.01 4.01a.75.75 0 0 1-1.06 1.06l-4.01-4.01A6.75 6.75 0 0 1 3.75 10.5Z",
+                    fill: "currentColor",
+                }
+            }
             input {
                 r#type: "search",
                 placeholder: "搜索剪贴板历史",
