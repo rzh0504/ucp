@@ -21,21 +21,44 @@ pub fn HistoryList(
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
     let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
-    let visible_selected_count = selected_ids
+    let visible_selected_ids = selected_ids
         .read()
         .iter()
+        .copied()
         .filter(|id| entry_ids.contains(id))
-        .count();
+        .collect::<Vec<_>>();
+    let visible_selected_count = visible_selected_ids.len();
 
     rsx! {
         div { class: "list-header",
-            h2 { "剪贴板历史" }
             FilterTabs { active_filter, counts }
-            span {
-                if visible_selected_count == 0 {
-                    "{entry_count} 项"
-                } else {
-                    "已选 {visible_selected_count} / {entry_count} 项"
+            div { class: "list-header-actions",
+                span { class: "list-count",
+                    if visible_selected_count == 0 {
+                        "{entry_count} 项"
+                    } else {
+                        "已选 {visible_selected_count} / {entry_count} 项"
+                    }
+                }
+                if visible_selected_count > 0 {
+                    Toolbar { class: "selection-actions", aria_label: "批量操作",
+                        ToolbarButton {
+                            class: "ghost-action selection-delete-action is-danger",
+                            index: 0usize,
+                            title: "删除已选",
+                            on_click: move |_| {
+                                for id in visible_selected_ids.clone() {
+                                    if history.write().remove(id) {
+                                        let _ = storage::delete_entry(id);
+                                    }
+                                }
+
+                                selected_ids.set(Vec::new());
+                                selection_anchor_id.set(None);
+                            },
+                            Icon { icon: AppIcon::Delete }
+                        }
+                    }
                 }
             }
         }
