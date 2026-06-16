@@ -30,7 +30,12 @@ pub fn HistoryList(
     let visible_selected_count = visible_selected_ids.len();
 
     rsx! {
-        div { class: "list-header",
+        div {
+            class: "list-header",
+            onclick: move |_| {
+                selected_ids.set(Vec::new());
+                selection_anchor_id.set(None);
+            },
             FilterTabs { active_filter, counts }
             div { class: "list-header-actions",
                 span { class: "list-count",
@@ -84,6 +89,7 @@ pub fn HistoryList(
                             selection_anchor_id,
                         }
                     }
+                    div { class: "history-list-clear-space" }
                 }
             }
         }
@@ -266,15 +272,17 @@ fn update_selection(
         return;
     }
 
+    if let Some(index) = selected_ids
+        .iter()
+        .position(|selected_id| *selected_id == id)
+    {
+        selected_ids.remove(index);
+        *anchor_id = selected_ids.last().copied();
+        return;
+    }
+
     if ctrl {
-        if let Some(index) = selected_ids
-            .iter()
-            .position(|selected_id| *selected_id == id)
-        {
-            selected_ids.remove(index);
-        } else {
-            selected_ids.push(id);
-        }
+        selected_ids.push(id);
     } else {
         selected_ids.clear();
         selected_ids.push(id);
