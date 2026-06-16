@@ -1,0 +1,26 @@
+[application]
+name = "ucp"
+out_dir = "dist"
+asset_dir = "assets"
+
+[web.app]
+title = "UCP Clipboard"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets", "Dioxus.toml", "Cargo.toml"]
+
+[web.resource]
+style = []
+script = []
+
+[web.resource.dev]
+style = []
+script = []
+
+[bundle]
+identifier = "dev.ucp.clipboard"
+publisher = "UCP"
+category = "Utility"
+short_description = "Desktop clipboard history manager"
+long_description = "A Windows-first desktop clipboard history manager built with Dioxus."

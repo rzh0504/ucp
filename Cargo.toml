@@ -1,0 +1,20 @@
+[package]
+name = "ucp"
+version = "0.1.0"
+edition = "2024"
+description = "A Windows-first desktop clipboard history app built with Dioxus."
+
+[dependencies]
+arboard = "3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dioxus = { version = "0.7", features = ["desktop"] }
+futures-channel = "0.3"
+futures-timer = "3"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
