@@ -337,6 +337,7 @@ button {
     min-height: 0;
     overflow-y: auto;
     scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
 }
 
@@ -355,6 +356,7 @@ button {
     min-height: 0;
     overflow-y: auto;
     scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
 }
 
