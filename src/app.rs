@@ -42,7 +42,7 @@ pub fn App() -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
         main { class: "shell",
-            TopBar { query, status: status() }
+            TopBar { query }
             section { class: "content-area",
                 FilterTabs { active_filter, counts }
                 HistoryList { entries: snapshot, history, selected_count }

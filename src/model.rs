@@ -36,6 +36,16 @@ impl ClipboardFilter {
             Self::Favorite => "favorite",
         }
     }
+
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "text" => Self::Text,
+            "image" => Self::Image,
+            "file" => Self::File,
+            "favorite" => Self::Favorite,
+            _ => Self::All,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
