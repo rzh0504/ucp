@@ -325,6 +325,12 @@ button {
     scrollbar-width: thin;
 }
 
+.history-list-click-target {
+    display: grid;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .settings-scroll {
     min-height: 0;
     overflow-y: auto;

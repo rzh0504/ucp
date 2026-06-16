@@ -18,8 +18,8 @@ pub fn HistoryList(
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
 ) -> Element {
-    let selected_ids = use_signal(Vec::<u64>::new);
-    let selection_anchor_id = use_signal(|| None::<u64>);
+    let mut selected_ids = use_signal(Vec::<u64>::new);
+    let mut selection_anchor_id = use_signal(|| None::<u64>);
     let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
     let visible_selected_count = selected_ids
         .read()
@@ -43,16 +43,23 @@ pub fn HistoryList(
         if entries.is_empty() {
             EmptyState {}
         } else {
-            ScrollArea { class: "history-list", direction: ScrollDirection::Vertical, tabindex: "0",
-                for (index, entry) in entries.iter().enumerate() {
-                    HistoryRow {
-                        key: "{entry.id}",
-                        entry: entry.clone(),
-                        index: index + 1,
-                        entry_ids: entry_ids.clone(),
-                        history,
-                        selected_ids,
-                        selection_anchor_id,
+            div {
+                class: "history-list-click-target",
+                onclick: move |_| {
+                    selected_ids.set(Vec::new());
+                    selection_anchor_id.set(None);
+                },
+                ScrollArea { class: "history-list", direction: ScrollDirection::Vertical, tabindex: "0",
+                    for (index, entry) in entries.iter().enumerate() {
+                        HistoryRow {
+                            key: "{entry.id}",
+                            entry: entry.clone(),
+                            index: index + 1,
+                            entry_ids: entry_ids.clone(),
+                            history,
+                            selected_ids,
+                            selection_anchor_id,
+                        }
                     }
                 }
             }
@@ -95,7 +102,9 @@ fn HistoryRow(
     };
 
     rsx! {
-        article { class: "{row_class}",
+        article {
+            class: "{row_class}",
+            onclick: move |event| event.stop_propagation(),
             button {
                 class: "{row_main_class}",
                 onclick: move |event| {
