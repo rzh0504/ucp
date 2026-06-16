@@ -59,11 +59,11 @@ pub fn read_image() -> Result<Option<ClipboardImage>, ClipboardError> {
     let mut clipboard = Clipboard::new().map_err(map_error)?;
 
     match clipboard.get_image() {
-        Ok(image) => Ok(Some(ClipboardImage {
-            width: image.width,
-            height: image.height,
-            bytes: image.bytes.into_owned(),
-        })),
+        Ok(image) => Ok(Some(ClipboardImage::from_rgba(
+            image.width,
+            image.height,
+            image.bytes.into_owned(),
+        ))),
         Err(ArboardError::ContentNotAvailable) => Ok(None),
         Err(error) => Err(map_error(error)),
     }

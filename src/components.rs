@@ -1,5 +1,8 @@
-use crate::model::{ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts};
+use crate::model::{
+    ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
+};
 use crate::platform;
+use crate::storage;
 use dioxus::desktop::use_window;
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
@@ -177,17 +180,35 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
     };
     let kind_label = entry.kind().label();
     let entry_title = entry.title();
+    let row_main_class = if matches!(&entry.content, ClipboardContent::Image(_)) {
+        "history-row-main has-preview"
+    } else {
+        "history-row-main"
+    };
 
     rsx! {
         article { class: "{row_class}",
             button {
-                class: "history-row-main",
+                class: "{row_main_class}",
                 onclick: move |_| {
                     if platform::clipboard::write_content(&copy_content).is_ok() {
-                        history.write().promote(id);
+                        if let Some(entry) = history.write().promote(id) {
+                            let _ = storage::save_entry(&entry);
+                        }
                     }
                 },
                 div { class: "entry-index", "{index}" }
+                if let ClipboardContent::Image(image) = &entry.content {
+                    if let Some(preview_url) = &image.preview_url {
+                        img {
+                            class: "entry-image-preview",
+                            src: "{preview_url}",
+                            alt: "剪贴板图像预览",
+                        }
+                    } else {
+                        div { class: "entry-image-preview is-empty", "IMG" }
+                    }
+                }
                 div { class: "entry-content",
                     div { class: "entry-kicker",
                         span { "{kind_label}" }
@@ -205,14 +226,22 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                     class: if entry.favorite { "ghost-action is-on" } else { "ghost-action" },
                     index: 0usize,
                     title: "{favorite_label}",
-                    on_click: move |_| history.write().toggle_favorite(id),
+                    on_click: move |_| {
+                        if let Some(entry) = history.write().toggle_favorite(id) {
+                            let _ = storage::save_entry(&entry);
+                        }
+                    },
                     "★"
                 }
                 ToolbarButton {
                     class: if entry.pinned { "ghost-action is-on" } else { "ghost-action" },
                     index: 1usize,
                     title: "{pin_label}",
-                    on_click: move |_| history.write().toggle_pin(id),
+                    on_click: move |_| {
+                        if let Some(entry) = history.write().toggle_pin(id) {
+                            let _ = storage::save_entry(&entry);
+                        }
+                    },
                     "◆"
                 }
                 ToolbarSeparator { class: "entry-action-separator", decorative: true }
@@ -220,7 +249,11 @@ fn HistoryRow(entry: ClipboardEntry, index: usize, history: Signal<ClipboardHist
                     class: "ghost-action is-danger",
                     index: 2usize,
                     title: "删除",
-                    on_click: move |_| history.write().remove(id),
+                    on_click: move |_| {
+                        if history.write().remove(id) {
+                            let _ = storage::delete_entry(id);
+                        }
+                    },
                     "×"
                 }
             }

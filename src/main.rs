@@ -4,6 +4,7 @@ mod app;
 mod components;
 mod model;
 mod platform;
+mod storage;
 
 use app::App;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};

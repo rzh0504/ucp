@@ -317,6 +317,11 @@ button {
     cursor: pointer;
 }
 
+.history-row-main.has-preview {
+    grid-template-columns: 38px 96px minmax(0, 1fr);
+    gap: 12px;
+}
+
 .entry-index {
     color: #8e8e93;
     font-size: 12px;
@@ -326,6 +331,24 @@ button {
 
 .entry-content {
     min-width: 0;
+}
+
+.entry-image-preview {
+    display: block;
+    width: 96px;
+    height: 64px;
+    border: 1px solid rgba(60, 60, 67, 0.14);
+    border-radius: 8px;
+    background: #f2f2f7;
+    object-fit: cover;
+}
+
+.entry-image-preview.is-empty {
+    display: grid;
+    place-items: center;
+    color: #8e8e93;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 .entry-kicker {

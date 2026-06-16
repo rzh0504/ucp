@@ -1,0 +1,274 @@
+use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage};
+use chrono::{Local, TimeZone};
+use rusqlite::{Connection, params};
+use std::env;
+use std::fmt;
+use std::fs;
+use std::path::PathBuf;
+
+const APP_DIR: &str = "UCP Clipboard";
+const DATABASE_FILE: &str = "history.sqlite3";
+
+#[derive(Debug)]
+pub enum StorageError {
+    Io(String),
+    Database(String),
+}
+
+impl fmt::Display for StorageError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(message) | Self::Database(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for StorageError {}
+
+impl From<std::io::Error> for StorageError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for StorageError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Database(error.to_string())
+    }
+}
+
+pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
+    let connection = open_connection()?;
+    let mut statement = connection.prepare(
+        "SELECT id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
+                captured_at_millis, pinned, favorite \
+         FROM clipboard_entries \
+         ORDER BY pinned DESC, captured_at_millis DESC, id DESC",
+    )?;
+
+    let entries = statement
+        .query_map([], |row| {
+            let id = row.get::<_, i64>(0)? as u64;
+            let kind = row.get::<_, String>(1)?;
+            let captured_at_millis = row.get::<_, i64>(7)?;
+            let captured_at = Local
+                .timestamp_millis_opt(captured_at_millis)
+                .single()
+                .unwrap_or_else(Local::now);
+
+            let content = match kind.as_str() {
+                "text" => {
+                    ClipboardContent::Text(row.get::<_, Option<String>>(2)?.unwrap_or_default())
+                }
+                "image" => ClipboardContent::Image(ClipboardImage {
+                    width: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0) as usize,
+                    height: row.get::<_, Option<i64>>(4)?.unwrap_or_default().max(0) as usize,
+                    bytes: row.get::<_, Option<Vec<u8>>>(5)?.unwrap_or_default(),
+                    preview_url: row.get(6)?,
+                }),
+                "file" => ClipboardContent::Files(load_files(&connection, id)?),
+                _ => ClipboardContent::Text(String::new()),
+            };
+
+            Ok(ClipboardEntry {
+                id,
+                content,
+                captured_at,
+                pinned: row.get::<_, i64>(8)? != 0,
+                favorite: row.get::<_, i64>(9)? != 0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(ClipboardHistory::from_entries(capacity, entries))
+}
+
+pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
+    let mut connection = open_connection()?;
+    let transaction = connection.transaction()?;
+
+    let kind = entry.kind().key();
+    let mut text_content: Option<&str> = None;
+    let mut image_width: Option<i64> = None;
+    let mut image_height: Option<i64> = None;
+    let mut image_rgba: Option<&[u8]> = None;
+    let mut image_preview_url: Option<&str> = None;
+
+    match &entry.content {
+        ClipboardContent::Text(text) => text_content = Some(text),
+        ClipboardContent::Image(image) => {
+            image_width = Some(image.width as i64);
+            image_height = Some(image.height as i64);
+            image_rgba = Some(image.bytes.as_slice());
+            image_preview_url = image.preview_url.as_deref();
+        }
+        ClipboardContent::Files(_) => {}
+    }
+
+    transaction.execute(
+        "INSERT INTO clipboard_entries (\
+             id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
+             captured_at_millis, pinned, favorite\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+         ON CONFLICT(id) DO UPDATE SET \
+             kind = excluded.kind, \
+             text_content = excluded.text_content, \
+             image_width = excluded.image_width, \
+             image_height = excluded.image_height, \
+             image_rgba = excluded.image_rgba, \
+             image_preview_url = excluded.image_preview_url, \
+             captured_at_millis = excluded.captured_at_millis, \
+             pinned = excluded.pinned, \
+             favorite = excluded.favorite",
+        params![
+            entry.id as i64,
+            kind,
+            text_content,
+            image_width,
+            image_height,
+            image_rgba,
+            image_preview_url,
+            entry.captured_at.timestamp_millis(),
+            entry.pinned as i64,
+            entry.favorite as i64,
+        ],
+    )?;
+
+    transaction.execute(
+        "DELETE FROM clipboard_files WHERE entry_id = ?1",
+        params![entry.id as i64],
+    )?;
+
+    if let ClipboardContent::Files(files) = &entry.content {
+        for (position, file) in files.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO clipboard_files (entry_id, position, path) VALUES (?1, ?2, ?3)",
+                params![entry.id as i64, position as i64, file],
+            )?;
+        }
+    }
+
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn delete_entry(id: u64) -> Result<(), StorageError> {
+    delete_entries(&[id])
+}
+
+pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut connection = open_connection()?;
+    let transaction = connection.transaction()?;
+
+    for id in ids {
+        transaction.execute(
+            "DELETE FROM clipboard_entries WHERE id = ?1",
+            params![*id as i64],
+        )?;
+    }
+
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn database_path() -> Result<PathBuf, StorageError> {
+    let directory = data_directory();
+    fs::create_dir_all(&directory)?;
+    Ok(directory.join(DATABASE_FILE))
+}
+
+fn open_connection() -> Result<Connection, StorageError> {
+    let connection = Connection::open(database_path()?)?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    migrate(&connection)?;
+    Ok(connection)
+}
+
+fn migrate(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS clipboard_entries (\
+             id INTEGER PRIMARY KEY NOT NULL, \
+             kind TEXT NOT NULL, \
+             text_content TEXT, \
+             image_width INTEGER, \
+             image_height INTEGER, \
+             image_rgba BLOB, \
+             image_preview_url TEXT, \
+             captured_at_millis INTEGER NOT NULL, \
+             pinned INTEGER NOT NULL DEFAULT 0, \
+             favorite INTEGER NOT NULL DEFAULT 0\
+         );
+
+         CREATE TABLE IF NOT EXISTS clipboard_files (\
+             entry_id INTEGER NOT NULL, \
+             position INTEGER NOT NULL, \
+             path TEXT NOT NULL, \
+             PRIMARY KEY (entry_id, position), \
+             FOREIGN KEY (entry_id) REFERENCES clipboard_entries(id) ON DELETE CASCADE\
+         );
+
+         CREATE INDEX IF NOT EXISTS idx_clipboard_entries_order \
+             ON clipboard_entries (pinned, captured_at_millis, id);
+
+         CREATE INDEX IF NOT EXISTS idx_clipboard_files_entry \
+             ON clipboard_files (entry_id, position);",
+    )?;
+    Ok(())
+}
+
+fn load_files(connection: &Connection, entry_id: u64) -> rusqlite::Result<Vec<String>> {
+    let mut statement = connection
+        .prepare("SELECT path FROM clipboard_files WHERE entry_id = ?1 ORDER BY position ASC")?;
+
+    statement
+        .query_map(params![entry_id as i64], |row| row.get(0))?
+        .collect()
+}
+
+fn data_directory() -> PathBuf {
+    #[cfg(windows)]
+    {
+        env::var_os("LOCALAPPDATA")
+            .or_else(|| env::var_os("APPDATA"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(APP_DIR)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Library")
+            .join("Application Support")
+            .join(APP_DIR)
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(APP_DIR)
+    }
+}
+
+trait ClipboardKindKey {
+    fn key(self) -> &'static str;
+}
+
+impl ClipboardKindKey for crate::model::ClipboardKind {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Image => "image",
+            Self::File => "file",
+        }
+    }
+}

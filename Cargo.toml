@@ -6,11 +6,14 @@ description = "A Windows-first desktop clipboard history app built with Dioxus."
 
 [dependencies]
 arboard = "3"
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dioxus = { version = "0.7", features = ["desktop"] }
 dioxus-primitives = { path = "C:/Users/RZH12/.dx/components/5e77e58a78250534/primitives", default-features = false }
 futures-channel = "0.3"
 futures-timer = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

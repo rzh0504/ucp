@@ -1,6 +1,7 @@
 use crate::components::{HistoryList, TopBar};
 use crate::model::{ClipboardFilter, ClipboardHistory};
 use crate::platform;
+use crate::storage;
 use dioxus::prelude::*;
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_timer::Delay;
@@ -12,7 +13,10 @@ const HISTORY_LIMIT: usize = 200;
 
 #[component]
 pub fn App() -> Element {
-    let mut history = use_signal(|| ClipboardHistory::new(HISTORY_LIMIT));
+    let mut history = use_signal(|| {
+        storage::load_history(HISTORY_LIMIT)
+            .unwrap_or_else(|_| ClipboardHistory::new(HISTORY_LIMIT))
+    });
     let query = use_signal(String::new);
     let active_filter = use_signal(|| ClipboardFilter::All);
     let mut status = use_signal(|| "启动剪贴板监听...".to_string());
@@ -30,7 +34,22 @@ pub fn App() -> Element {
             match platform::clipboard::read_content() {
                 Ok(Some(content)) => {
                     let label = content.kind().label();
-                    if history.write().push(content) {
+                    let result = history.write().push(content);
+                    let mut storage_error = None;
+
+                    if let Some(entry) = &result.entry {
+                        if let Err(error) = storage::save_entry(entry) {
+                            storage_error = Some(format!("历史保存失败：{error}"));
+                        }
+                    }
+
+                    if let Err(error) = storage::delete_entries(&result.removed_ids) {
+                        storage_error = Some(format!("历史清理失败：{error}"));
+                    }
+
+                    if let Some(message) = storage_error {
+                        status.set(message);
+                    } else if result.changed {
                         status.set(format!("已捕获新的{label}剪贴板内容"));
                     } else {
                         status.set("正在监听剪贴板".to_string());

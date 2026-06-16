@@ -1,4 +1,6 @@
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Local};
+use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
@@ -12,6 +14,20 @@ pub struct ClipboardImage {
     pub width: usize,
     pub height: usize,
     pub bytes: Vec<u8>,
+    pub preview_url: Option<String>,
+}
+
+impl ClipboardImage {
+    pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
+        let preview_url = encode_png_data_url(width, height, &bytes);
+
+        Self {
+            width,
+            height,
+            bytes,
+            preview_url,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,6 +213,13 @@ pub struct ClipboardHistory {
     entries: Vec<ClipboardEntry>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PushResult {
+    pub changed: bool,
+    pub entry: Option<ClipboardEntry>,
+    pub removed_ids: Vec<u64>,
+}
+
 impl ClipboardHistory {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -206,10 +229,28 @@ impl ClipboardHistory {
         }
     }
 
-    pub fn push(&mut self, content: ClipboardContent) -> bool {
+    pub fn from_entries(capacity: usize, entries: Vec<ClipboardEntry>) -> Self {
+        let next_id = entries
+            .iter()
+            .map(|entry| entry.id)
+            .max()
+            .unwrap_or_default()
+            + 1;
+
+        let mut history = Self {
+            capacity,
+            next_id,
+            entries,
+        };
+        history.sort_entries();
+        history.truncate();
+        history
+    }
+
+    pub fn push(&mut self, content: ClipboardContent) -> PushResult {
         let content = content.normalized();
         if content.is_empty() {
-            return false;
+            return PushResult::default();
         }
 
         if let Some(position) = self
@@ -220,15 +261,26 @@ impl ClipboardHistory {
             let mut entry = self.entries.remove(position);
             let changed_top = position != 0;
             entry.captured_at = Local::now();
+            let updated_entry = entry.clone();
             self.entries.insert(0, entry);
-            return changed_top;
+            return PushResult {
+                changed: changed_top,
+                entry: Some(updated_entry),
+                removed_ids: Vec::new(),
+            };
         }
 
         let entry = ClipboardEntry::new(self.next_id, content);
+        let inserted_entry = entry.clone();
         self.next_id += 1;
         self.entries.insert(0, entry);
-        self.truncate();
-        true
+        let removed_ids = self.truncate();
+
+        PushResult {
+            changed: true,
+            entry: Some(inserted_entry),
+            removed_ids,
+        }
     }
 
     pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<ClipboardEntry> {
@@ -254,13 +306,7 @@ impl ClipboardHistory {
             .cloned()
             .collect::<Vec<_>>();
 
-        entries.sort_by(|left, right| {
-            right
-                .pinned
-                .cmp(&left.pinned)
-                .then_with(|| right.captured_at.cmp(&left.captured_at))
-                .then_with(|| right.id.cmp(&left.id))
-        });
+        sort_entries(&mut entries);
         entries
     }
 
@@ -285,31 +331,51 @@ impl ClipboardHistory {
         counts
     }
 
-    pub fn promote(&mut self, id: u64) {
+    pub fn promote(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
             let mut entry = self.entries.remove(position);
             entry.captured_at = Local::now();
+            let updated_entry = entry.clone();
             self.entries.insert(0, entry);
+            Some(updated_entry)
+        } else {
+            None
         }
     }
 
-    pub fn toggle_favorite(&mut self, id: u64) {
-        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) {
-            entry.favorite = !entry.favorite;
-        }
+    pub fn toggle_favorite(&mut self, id: u64) -> Option<ClipboardEntry> {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .map(|entry| {
+                entry.favorite = !entry.favorite;
+                entry.clone()
+            })
     }
 
-    pub fn toggle_pin(&mut self, id: u64) {
-        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) {
-            entry.pinned = !entry.pinned;
-        }
+    pub fn toggle_pin(&mut self, id: u64) -> Option<ClipboardEntry> {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .map(|entry| {
+                entry.pinned = !entry.pinned;
+                entry.clone()
+            })
     }
 
-    pub fn remove(&mut self, id: u64) {
+    pub fn remove(&mut self, id: u64) -> bool {
+        let before = self.entries.len();
         self.entries.retain(|entry| entry.id != id);
+        self.entries.len() != before
     }
 
-    fn truncate(&mut self) {
+    fn sort_entries(&mut self) {
+        sort_entries(&mut self.entries);
+    }
+
+    fn truncate(&mut self) -> Vec<u64> {
+        let mut removed_ids = Vec::new();
+
         while self.entries.len() > self.capacity {
             let Some(position) = self
                 .entries
@@ -319,9 +385,21 @@ impl ClipboardHistory {
                 break;
             };
 
-            self.entries.remove(position);
+            removed_ids.push(self.entries.remove(position).id);
         }
+
+        removed_ids
     }
+}
+
+fn sort_entries(entries: &mut [ClipboardEntry]) {
+    entries.sort_by(|left, right| {
+        right
+            .pinned
+            .cmp(&left.pinned)
+            .then_with(|| right.captured_at.cmp(&left.captured_at))
+            .then_with(|| right.id.cmp(&left.id))
+    });
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -335,4 +413,20 @@ fn format_bytes(bytes: usize) -> String {
     } else {
         format!("{:.1} MiB", bytes as f64 / MIB)
     }
+}
+
+fn encode_png_data_url(width: usize, height: usize, bytes: &[u8]) -> Option<String> {
+    if bytes.len() != width.checked_mul(height)?.checked_mul(4)? {
+        return None;
+    }
+
+    let mut png = Vec::new();
+    PngEncoder::new(&mut png)
+        .write_image(bytes, width as u32, height as u32, ColorType::Rgba8.into())
+        .ok()?;
+
+    Some(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(png)
+    ))
 }
