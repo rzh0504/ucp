@@ -1,5 +1,5 @@
-use crate::components::{HistoryList, TopBar};
-use crate::model::{ClipboardFilter, ClipboardHistory};
+use crate::components::{AppPage, FloatingSettingsButton, HistoryList, SettingsPage, TopBar};
+use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::storage;
 use dioxus::prelude::*;
@@ -9,20 +9,27 @@ use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
 const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(650);
-const HISTORY_LIMIT: usize = 200;
 
 #[component]
 pub fn App() -> Element {
+    let settings =
+        use_signal(|| storage::load_settings().unwrap_or_else(|_| AppSettings::default()));
     let history = use_signal(|| {
-        storage::load_history(HISTORY_LIMIT)
-            .unwrap_or_else(|_| ClipboardHistory::new(HISTORY_LIMIT))
+        storage::load_history(settings.peek().history_limit)
+            .unwrap_or_else(|_| ClipboardHistory::new(settings.peek().history_limit))
     });
     let query = use_signal(String::new);
     let active_filter = use_signal(|| ClipboardFilter::All);
+    let active_page = use_signal(|| AppPage::History);
     let status = use_signal(|| "启动剪贴板监听...".to_string());
+    let storage_path = use_signal(|| {
+        storage::database_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|error| format!("无法读取：{error}"))
+    });
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
-        watch_clipboard(history, status).await;
+        watch_clipboard(history, status, settings).await;
     });
 
     let snapshot = history.read().filtered(query().as_str(), active_filter());
@@ -32,16 +39,31 @@ pub fn App() -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
         main { class: "shell",
-            TopBar { query }
+            TopBar { query, active_page }
             section { class: "content-panel",
-                HistoryList { entries: snapshot, history, selected_count, active_filter, counts }
+                if active_page() == AppPage::Settings {
+                    SettingsPage {
+                        settings,
+                        history,
+                        status: status(),
+                        counts,
+                        storage_path: storage_path(),
+                    }
+                } else {
+                    HistoryList { entries: snapshot, history, selected_count, active_filter, counts }
+                }
             }
+            FloatingSettingsButton { active_page }
         }
     }
 }
 
 #[cfg(windows)]
-async fn watch_clipboard(history: Signal<ClipboardHistory>, mut status: Signal<String>) {
+async fn watch_clipboard(
+    history: Signal<ClipboardHistory>,
+    mut status: Signal<String>,
+    settings: Signal<AppSettings>,
+) {
     use futures_util::StreamExt;
 
     let (updates_tx, mut updates_rx) = futures_channel::mpsc::unbounded();
@@ -53,23 +75,31 @@ async fn watch_clipboard(history: Signal<ClipboardHistory>, mut status: Signal<S
         Ok(listener) => listener,
         Err(error) => {
             status.set(format!("剪贴板事件监听失败，已切换轮询：{error}"));
-            poll_clipboard(history, status).await;
+            poll_clipboard(history, status, settings).await;
             return;
         }
     };
 
-    capture_clipboard(history, status);
+    capture_clipboard(history, status, settings);
     while updates_rx.next().await.is_some() {
-        capture_clipboard(history, status);
+        capture_clipboard(history, status, settings);
     }
 }
 
 #[cfg(not(windows))]
-async fn watch_clipboard(history: Signal<ClipboardHistory>, status: Signal<String>) {
-    poll_clipboard(history, status).await;
+async fn watch_clipboard(
+    history: Signal<ClipboardHistory>,
+    status: Signal<String>,
+    settings: Signal<AppSettings>,
+) {
+    poll_clipboard(history, status, settings).await;
 }
 
-async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String>) {
+async fn poll_clipboard(
+    history: Signal<ClipboardHistory>,
+    status: Signal<String>,
+    settings: Signal<AppSettings>,
+) {
     let mut last_sequence = None;
 
     loop {
@@ -79,7 +109,7 @@ async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String
             continue;
         }
 
-        capture_clipboard(history, status);
+        capture_clipboard(history, status, settings);
 
         if sequence.is_some() {
             last_sequence = sequence;
@@ -89,10 +119,25 @@ async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String
     }
 }
 
-fn capture_clipboard(mut history: Signal<ClipboardHistory>, mut status: Signal<String>) {
+fn capture_clipboard(
+    mut history: Signal<ClipboardHistory>,
+    mut status: Signal<String>,
+    settings: Signal<AppSettings>,
+) {
+    let settings_snapshot = settings();
+    if !settings_snapshot.monitor_enabled {
+        status.set("剪贴板监听已暂停".to_string());
+        return;
+    }
+
     match platform::clipboard::read_content() {
         Ok(Some(content)) => {
             let label = content.kind().label();
+            if !settings_snapshot.captures(&content) {
+                status.set(format!("{label}剪贴板内容已在设置中关闭捕获"));
+                return;
+            }
+
             let result = history.write().push(content);
             let mut storage_error = None;
 

@@ -1,19 +1,30 @@
 use crate::model::{
-    ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
+    AppSettings, ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory,
+    HISTORY_LIMIT_OPTIONS, HistoryCounts,
 };
 use crate::platform;
 use crate::storage;
 use dioxus::desktop::use_window;
 use dioxus::prelude::*;
+use dioxus_primitives::combobox::{
+    Combobox, ComboboxInput, ComboboxItemIndicator, ComboboxList, ComboboxOption,
+};
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
+use dioxus_primitives::switch::{Switch, SwitchThumb};
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 
 mod tabs;
 use tabs::{TabList, TabTrigger, Tabs};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppPage {
+    History,
+    Settings,
+}
+
 #[component]
-pub fn TopBar(query: Signal<String>) -> Element {
+pub fn TopBar(query: Signal<String>, active_page: Signal<AppPage>) -> Element {
     let window = use_window();
     let drag_window = window.clone();
     let minimize_window = window.clone();
@@ -27,11 +38,49 @@ pub fn TopBar(query: Signal<String>) -> Element {
                 onmousedown: move |_| drag_window.drag(),
                 h1 { class: "app-title", "UCP Clipboard" }
             }
-            SearchField { query }
+            if active_page() == AppPage::History {
+                SearchField { query }
+            } else {
+                div { class: "top-bar-context", "设置与状态" }
+            }
             WindowControls {
                 on_minimize: move |_| minimize_window.set_minimized(true),
                 on_maximize: move |_| maximize_window.toggle_maximized(),
                 on_close: move |_| close_window.close(),
+            }
+        }
+    }
+}
+
+#[component]
+pub fn FloatingSettingsButton(active_page: Signal<AppPage>) -> Element {
+    let is_settings = active_page() == AppPage::Settings;
+    let button_class = if is_settings {
+        "floating-settings-action is-active"
+    } else {
+        "floating-settings-action"
+    };
+    let title = if is_settings {
+        "返回历史"
+    } else {
+        "设置"
+    };
+
+    rsx! {
+        Toolbar { class: "floating-settings", aria_label: "设置入口",
+            ToolbarButton {
+                class: button_class,
+                index: 0usize,
+                title,
+                on_click: move |_| {
+                    let next_page = if active_page() == AppPage::Settings {
+                        AppPage::History
+                    } else {
+                        AppPage::Settings
+                    };
+                    active_page.set(next_page);
+                },
+                span { class: "floating-settings-icon", "⚙" }
             }
         }
     }
@@ -154,6 +203,186 @@ pub fn HistoryList(
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+pub fn SettingsPage(
+    settings: Signal<AppSettings>,
+    history: Signal<ClipboardHistory>,
+    status: String,
+    counts: HistoryCounts,
+    storage_path: String,
+) -> Element {
+    let settings_snapshot = settings();
+
+    rsx! {
+        div { class: "list-header settings-header",
+            h2 { "设置" }
+            span { "剪贴板捕获与历史策略" }
+        }
+        Separator { class: "list-separator", decorative: true }
+        ScrollArea { class: "settings-scroll", direction: ScrollDirection::Vertical, tabindex: "0",
+            div { class: "settings-page",
+                section { class: "settings-hero",
+                    div { class: "settings-hero-icon", "⌘" }
+                    div {
+                        h2 { "剪贴板设置" }
+                        p { "这些设置会立即生效并保存到本地数据库。关闭某类捕获后，UCP 会跳过对应类型的新剪贴板内容。" }
+                    }
+                }
+
+                section { class: "settings-group",
+                    h3 { "捕获规则" }
+                    SettingSwitchRow {
+                        label: "启用剪贴板监听",
+                        hint: "关闭后会暂停读取新的剪贴板内容，已有历史不会被删除。",
+                        checked: settings_snapshot.monitor_enabled,
+                        on_change: move |checked| update_settings(settings, |next| next.monitor_enabled = checked),
+                    }
+                    SettingSwitchRow {
+                        label: "捕获文本",
+                        hint: "保存复制的纯文本、代码片段和链接。",
+                        checked: settings_snapshot.capture_text,
+                        on_change: move |checked| update_settings(settings, |next| next.capture_text = checked),
+                    }
+                    SettingSwitchRow {
+                        label: "捕获图像",
+                        hint: "保存截图或复制的位图，并在列表中生成预览。",
+                        checked: settings_snapshot.capture_image,
+                        on_change: move |checked| update_settings(settings, |next| next.capture_image = checked),
+                    }
+                    SettingSwitchRow {
+                        label: "捕获文件",
+                        hint: "保存 Windows 文件剪贴板里的文件路径。",
+                        checked: settings_snapshot.capture_file,
+                        on_change: move |checked| update_settings(settings, |next| next.capture_file = checked),
+                    }
+                }
+
+                section { class: "settings-group",
+                    h3 { "历史策略" }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "历史保留数量" }
+                            p { "超过上限时会自动清理较旧且未固定、未收藏的记录。" }
+                        }
+                        HistoryLimitCombobox {
+                            value: settings_snapshot.history_limit,
+                            on_change: move |limit| {
+                                update_settings(settings, |next| next.history_limit = limit);
+                                let removed_ids = history.write().set_capacity(limit);
+                                let _ = storage::delete_entries(&removed_ids);
+                            },
+                        }
+                    }
+                }
+
+                section { class: "settings-group",
+                    h3 { "当前状态" }
+                    SettingInfoRow {
+                        label: "监听状态",
+                        value: status,
+                        hint: "这里显示后台监听器最近一次状态。",
+                    }
+                    SettingInfoRow {
+                        label: "存储位置",
+                        value: storage_path,
+                        hint: "历史内容和设置都存储在本机 SQLite 数据库中。",
+                    }
+                    div { class: "settings-stats",
+                        SettingStat { label: "全部", value: counts.total }
+                        SettingStat { label: "文本", value: counts.text }
+                        SettingStat { label: "图像", value: counts.image }
+                        SettingStat { label: "文件", value: counts.file }
+                        SettingStat { label: "收藏", value: counts.favorite }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SettingSwitchRow(
+    label: &'static str,
+    hint: &'static str,
+    checked: bool,
+    on_change: EventHandler<bool>,
+) -> Element {
+    rsx! {
+        div { class: "setting-row setting-row-control",
+            div { class: "setting-row-copy",
+                span { class: "setting-label", "{label}" }
+                p { "{hint}" }
+            }
+            Switch {
+                class: "settings-switch",
+                checked,
+                aria_label: label,
+                on_checked_change: move |value| on_change.call(value),
+                SwitchThumb { class: "settings-switch-thumb" }
+            }
+        }
+    }
+}
+
+#[component]
+fn HistoryLimitCombobox(value: usize, on_change: EventHandler<usize>) -> Element {
+    rsx! {
+        Combobox::<usize> {
+            class: "settings-combobox",
+            default_value: Some(value),
+            on_value_change: move |value: Option<usize>| {
+                if let Some(limit) = value {
+                    on_change.call(limit);
+                }
+            },
+            ComboboxInput { class: "settings-combobox-input", placeholder: "选择保留数量" }
+            ComboboxList { class: "settings-combobox-list",
+                for (index, limit) in HISTORY_LIMIT_OPTIONS.into_iter().enumerate() {
+                    ComboboxOption::<usize> {
+                        class: "settings-combobox-option",
+                        index,
+                        value: limit,
+                        text_value: Some(format!("{limit} 项")),
+                        "{limit} 项"
+                        ComboboxItemIndicator { span { "✓" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SettingInfoRow(label: &'static str, value: String, hint: &'static str) -> Element {
+    rsx! {
+        div { class: "setting-row",
+            div { class: "setting-row-copy",
+                span { class: "setting-label", "{label}" }
+                p { "{hint}" }
+            }
+            strong { "{value}" }
+        }
+    }
+}
+
+fn update_settings(mut settings: Signal<AppSettings>, update: impl FnOnce(&mut AppSettings)) {
+    let mut next = settings();
+    update(&mut next);
+    next = next.normalized();
+    settings.set(next);
+    let _ = storage::save_settings(&next);
+}
+
+#[component]
+fn SettingStat(label: &'static str, value: usize) -> Element {
+    rsx! {
+        div { class: "setting-stat",
+            span { "{label}" }
+            strong { "{value}" }
         }
     }
 }

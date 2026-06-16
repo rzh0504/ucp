@@ -2,6 +2,9 @@ use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Local};
 use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 
+pub const DEFAULT_HISTORY_LIMIT: usize = 200;
+pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
     Text,
@@ -35,6 +38,44 @@ pub enum ClipboardContent {
     Text(String),
     Image(ClipboardImage),
     Files(Vec<String>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AppSettings {
+    pub monitor_enabled: bool,
+    pub capture_text: bool,
+    pub capture_image: bool,
+    pub capture_file: bool,
+    pub history_limit: usize,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            monitor_enabled: true,
+            capture_text: true,
+            capture_image: true,
+            capture_file: true,
+            history_limit: DEFAULT_HISTORY_LIMIT,
+        }
+    }
+}
+
+impl AppSettings {
+    pub fn normalized(mut self) -> Self {
+        if !HISTORY_LIMIT_OPTIONS.contains(&self.history_limit) {
+            self.history_limit = DEFAULT_HISTORY_LIMIT;
+        }
+        self
+    }
+
+    pub fn captures(self, content: &ClipboardContent) -> bool {
+        match content {
+            ClipboardContent::Text(_) => self.capture_text,
+            ClipboardContent::Image(_) => self.capture_image,
+            ClipboardContent::Files(_) => self.capture_file,
+        }
+    }
 }
 
 impl ClipboardContent {
@@ -367,6 +408,11 @@ impl ClipboardHistory {
         let before = self.entries.len();
         self.entries.retain(|entry| entry.id != id);
         self.entries.len() != before
+    }
+
+    pub fn set_capacity(&mut self, capacity: usize) -> Vec<u64> {
+        self.capacity = capacity.max(1);
+        self.truncate()
     }
 
     fn sort_entries(&mut self) {

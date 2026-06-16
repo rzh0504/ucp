@@ -1,4 +1,6 @@
-use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage};
+use crate::model::{
+    AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
+};
 use chrono::{Local, TimeZone};
 use rusqlite::{Connection, params};
 use std::env;
@@ -175,6 +177,57 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
     Ok(())
 }
 
+pub fn load_settings() -> Result<AppSettings, StorageError> {
+    let connection = open_connection()?;
+    let mut settings = AppSettings::default();
+    let mut statement = connection.prepare("SELECT key, value FROM app_settings")?;
+
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    for row in rows {
+        let (key, value) = row?;
+        match key.as_str() {
+            "monitor_enabled" => settings.monitor_enabled = parse_bool(&value),
+            "capture_text" => settings.capture_text = parse_bool(&value),
+            "capture_image" => settings.capture_image = parse_bool(&value),
+            "capture_file" => settings.capture_file = parse_bool(&value),
+            "history_limit" => {
+                settings.history_limit = value
+                    .parse::<usize>()
+                    .unwrap_or(AppSettings::default().history_limit)
+            }
+            _ => {}
+        }
+    }
+
+    Ok(settings.normalized())
+}
+
+pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
+    let mut connection = open_connection()?;
+    let transaction = connection.transaction()?;
+    let values = [
+        ("monitor_enabled", settings.monitor_enabled.to_string()),
+        ("capture_text", settings.capture_text.to_string()),
+        ("capture_image", settings.capture_image.to_string()),
+        ("capture_file", settings.capture_file.to_string()),
+        ("history_limit", settings.history_limit.to_string()),
+    ];
+
+    for (key, value) in values {
+        transaction.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+    }
+
+    transaction.commit()?;
+    Ok(())
+}
+
 pub fn database_path() -> Result<PathBuf, StorageError> {
     let directory = data_directory();
     fs::create_dir_all(&directory)?;
@@ -214,10 +267,19 @@ fn migrate(connection: &Connection) -> Result<(), StorageError> {
          CREATE INDEX IF NOT EXISTS idx_clipboard_entries_order \
              ON clipboard_entries (pinned, captured_at_millis, id);
 
-         CREATE INDEX IF NOT EXISTS idx_clipboard_files_entry \
-             ON clipboard_files (entry_id, position);",
+          CREATE INDEX IF NOT EXISTS idx_clipboard_files_entry \
+              ON clipboard_files (entry_id, position);
+
+          CREATE TABLE IF NOT EXISTS app_settings (\
+              key TEXT PRIMARY KEY NOT NULL, \
+              value TEXT NOT NULL\
+          );",
     )?;
     Ok(())
+}
+
+fn parse_bool(value: &str) -> bool {
+    matches!(value, "true" | "1" | "yes" | "on")
 }
 
 fn load_files(connection: &Connection, entry_id: u64) -> rusqlite::Result<Vec<String>> {
