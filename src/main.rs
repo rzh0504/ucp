@@ -7,7 +7,7 @@ mod platform;
 mod storage;
 
 use app::App;
-use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour};
 
 fn main() {
     dioxus::LaunchBuilder::new()
@@ -21,6 +21,7 @@ fn main() {
                         .with_min_inner_size(LogicalSize::new(860.0, 620.0)),
                 )
                 .with_menu(None)
+                .with_close_behaviour(WindowCloseBehaviour::WindowHides)
                 .with_disable_context_menu(true)
                 .with_background_color((246, 247, 251, 255)),
         )

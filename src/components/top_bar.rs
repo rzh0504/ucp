@@ -61,7 +61,7 @@ fn WindowControls(
             }
             button {
                 class: "window-dot is-close",
-                title: "关闭",
+                title: "隐藏到后台",
                 onclick: move |_| on_close.call(()),
                 span { "×" }
             }

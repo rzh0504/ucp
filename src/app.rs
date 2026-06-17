@@ -2,6 +2,9 @@ use crate::components::{AppPage, FloatingSettingsButton, HistoryList, SettingsPa
 use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::storage;
+use dioxus::desktop::{
+    self, DesktopContext, HotKeyState, WindowCloseBehaviour, use_global_shortcut, use_window,
+};
 use dioxus::events::MountedData;
 use dioxus::html::Key;
 use dioxus::prelude::*;
@@ -12,6 +15,9 @@ use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
 const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(650);
+const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
+const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
+const TRAY_QUIT_ID: &str = "ucp-quit";
 
 #[component]
 pub fn App() -> Element {
@@ -27,6 +33,37 @@ pub fn App() -> Element {
     let search_input = use_signal(|| None::<Rc<MountedData>>);
     let mut shell = use_signal(|| None::<Rc<MountedData>>);
     let status = use_signal(|| "启动剪贴板监听...".to_string());
+    let desktop = use_window();
+    let mut shortcut_error_reported = use_signal(|| false);
+
+    use_app_tray(desktop.clone(), status);
+
+    let global_shortcut = use_global_shortcut(GLOBAL_SHOW_SHORTCUT, {
+        let desktop = desktop.clone();
+        let mut status = status;
+        move |state| {
+            if state == HotKeyState::Pressed {
+                show_desktop_window(&desktop);
+                status.set("已通过全局快捷键打开窗口".to_string());
+            }
+        }
+    });
+
+    let shortcut_error = global_shortcut
+        .as_ref()
+        .err()
+        .map(|error| format!("{error:?}"));
+    use_effect(move || {
+        if let Some(error) = shortcut_error.as_ref()
+            && !shortcut_error_reported()
+        {
+            shortcut_error_reported.set(true);
+            let mut status = status;
+            status.set(format!(
+                "全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败：{error}"
+            ));
+        }
+    });
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         watch_clipboard(history, status).await;
@@ -142,6 +179,44 @@ pub fn App() -> Element {
             FloatingSettingsButton { active_page }
         }
     }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>) {
+    let _tray = use_hook(|| {
+        use desktop::trayicon::menu::{Menu, MenuItem, PredefinedMenuItem};
+
+        let menu = Menu::new();
+        let show_window = MenuItem::with_id(TRAY_SHOW_WINDOW_ID, "显示窗口", true, None);
+        let separator = PredefinedMenuItem::separator();
+        let quit = MenuItem::with_id(TRAY_QUIT_ID, "退出", true, None);
+        menu.append_items(&[&show_window, &separator, &quit])
+            .expect("tray menu creation failed");
+
+        desktop::trayicon::init_tray_icon(menu, None)
+    });
+
+    desktop::use_tray_menu_event_handler(move |event| match event.id().0.as_str() {
+        TRAY_SHOW_WINDOW_ID => {
+            show_desktop_window(&desktop);
+            status.set("已从系统托盘打开窗口".to_string());
+        }
+        TRAY_QUIT_ID => {
+            status.set("正在退出 UCP Clipboard".to_string());
+            desktop.set_close_behavior(WindowCloseBehaviour::WindowCloses);
+            desktop.close();
+        }
+        _ => {}
+    });
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+fn use_app_tray(_desktop: DesktopContext, _status: Signal<String>) {}
+
+fn show_desktop_window(desktop: &DesktopContext) {
+    desktop.set_visible(true);
+    desktop.set_minimized(false);
+    desktop.set_focus();
 }
 
 fn filter_shortcut(key: &Key) -> Option<ClipboardFilter> {
