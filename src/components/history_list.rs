@@ -292,8 +292,8 @@ fn HistoryRow(
     });
 
     rsx! {
-        ContextMenu { class: "history-row-menu", tabindex: "-1", disabled: !quick_paste,
-            ContextMenuTrigger { class: "history-row-trigger",
+        ContextMenu { tabindex: "-1", disabled: !quick_paste,
+            ContextMenuTrigger {
                 article {
                     class: "{row_class}",
                     onclick: move |event| event.stop_propagation(),

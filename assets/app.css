@@ -253,6 +253,11 @@ button {
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
+    line-height: 16px;
+}
+
+.filter-tab .app-icon {
+    align-self: center;
 }
 
 .app-icon {
@@ -274,15 +279,22 @@ button {
 }
 
 .filter-tab-label {
+    display: inline-flex;
+    align-items: center;
+    height: 16px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .filter-tab-count {
+    display: inline-flex;
+    align-items: center;
+    height: 16px;
     color: #8e8e93;
     font-size: 12px;
     font-weight: 600;
+    line-height: 16px;
 }
 
 .filter-tab[data-state="active"] .filter-tab-count {
