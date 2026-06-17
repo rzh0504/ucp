@@ -330,12 +330,19 @@ impl ClipboardHistory {
                 ClipboardFilter::Favorite => entry.favorite,
             })
             .filter(|entry| {
-                normalized_query.is_empty()
-                    || entry
-                        .content
-                        .searchable_text()
-                        .to_lowercase()
-                        .contains(normalized_query.as_str())
+                if normalized_query.is_empty() {
+                    return true;
+                }
+
+                if entry.kind() == ClipboardKind::Image {
+                    return false;
+                }
+
+                entry
+                    .content
+                    .searchable_text()
+                    .to_lowercase()
+                    .contains(normalized_query.as_str())
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -472,4 +479,32 @@ fn encode_png_data_url(width: usize, height: usize, bytes: &[u8]) -> Option<Stri
         "data:image/png;base64,{}",
         general_purpose::STANDARD.encode(png)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_query_does_not_match_image_metadata() {
+        let mut history = ClipboardHistory::new(10);
+        history.push(ClipboardContent::Image(ClipboardImage {
+            width: 5,
+            height: 10,
+            bytes: vec![0, 0, 0, 0],
+            preview_url: None,
+        }));
+        history.push(ClipboardContent::Text("5".to_string()));
+
+        let empty_results = history.filtered("", ClipboardFilter::All);
+        assert!(
+            empty_results
+                .iter()
+                .any(|entry| entry.kind() == ClipboardKind::Image)
+        );
+
+        let search_results = history.filtered("5", ClipboardFilter::All);
+        assert_eq!(search_results.len(), 1);
+        assert_eq!(search_results[0].kind(), ClipboardKind::Text);
+    }
 }
