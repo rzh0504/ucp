@@ -249,7 +249,6 @@ fn HistoryRow(
         (false, true) => "history-row is-focused",
         (false, false) => "history-row",
     };
-    let kind_label = entry.kind().label();
     let is_image = matches!(&entry.content, ClipboardContent::Image(_));
     let entry_title = entry.title();
     let entry_size = entry.size_label();
@@ -314,7 +313,6 @@ fn HistoryRow(
                 }
                 div { class: "entry-content",
                     div { class: "entry-kicker",
-                        span { "{kind_label}" }
                         if is_image {
                             span { "{entry_size}" }
                         }
