@@ -9,6 +9,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
+
 const APP_DIR: &str = "UCP Clipboard";
 const DATABASE_FILE: &str = "history.sqlite3";
 
@@ -308,6 +311,11 @@ fn load_files(connection: &Connection, entry_id: u64) -> rusqlite::Result<Vec<St
 }
 
 fn data_directory() -> PathBuf {
+    #[cfg(test)]
+    if let Some(directory) = test_data_directory().lock().unwrap().clone() {
+        return directory;
+    }
+
     #[cfg(windows)]
     {
         env::var_os("LOCALAPPDATA")
@@ -337,6 +345,12 @@ fn data_directory() -> PathBuf {
     }
 }
 
+#[cfg(test)]
+fn test_data_directory() -> &'static Mutex<Option<PathBuf>> {
+    static TEST_DATA_DIRECTORY: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+    TEST_DATA_DIRECTORY.get_or_init(|| Mutex::new(None))
+}
+
 trait ClipboardKindKey {
     fn key(self) -> &'static str;
 }
@@ -348,5 +362,83 @@ impl ClipboardKindKey for crate::model::ClipboardKind {
             Self::Image => "image",
             Self::File => "file",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn storage_round_trips_settings_and_clipboard_entries() {
+        let directory = unique_test_directory();
+        *test_data_directory().lock().unwrap() = Some(directory.clone());
+
+        let settings = AppSettings {
+            history_limit: 50,
+            launch_at_startup: true,
+            keyboard_shortcuts: false,
+            auto_focus_history: false,
+            promote_copied_entries: false,
+            quick_paste: true,
+            show_copy_time: false,
+            show_text_length: false,
+        };
+        save_settings(&settings).unwrap();
+
+        let mut text_entry = ClipboardEntry::new(10, ClipboardContent::Text("hello".to_string()));
+        text_entry.favorite = true;
+        save_entry(&text_entry).unwrap();
+
+        let mut image_entry = ClipboardEntry::new(
+            11,
+            ClipboardContent::Image(ClipboardImage::from_rgba(1, 1, vec![10, 20, 30, 255])),
+        );
+        image_entry.pinned = true;
+        save_entry(&image_entry).unwrap();
+
+        let file_entry = ClipboardEntry::new(
+            12,
+            ClipboardContent::Files(vec!["C:\\tmp\\a.txt".to_string(), "D:\\b.png".to_string()]),
+        );
+        save_entry(&file_entry).unwrap();
+
+        let loaded_settings = load_settings().unwrap();
+        let loaded_history = load_history(10).unwrap();
+
+        assert_eq!(loaded_settings, settings);
+        assert_eq!(loaded_history.counts().text, 1);
+        assert_eq!(loaded_history.counts().image, 1);
+        assert_eq!(loaded_history.counts().file, 1);
+        assert!(loaded_history.entry(10).unwrap().favorite);
+        assert!(loaded_history.entry(11).unwrap().pinned);
+        assert!(matches!(
+            &loaded_history.entry(10).unwrap().content,
+            ClipboardContent::Text(text) if text == "hello"
+        ));
+        assert!(matches!(
+            &loaded_history.entry(11).unwrap().content,
+            ClipboardContent::Image(image) if image.bytes.as_slice() == [10, 20, 30, 255]
+        ));
+        assert!(matches!(
+            &loaded_history.entry(12).unwrap().content,
+            ClipboardContent::Files(files) if files == &["C:\\tmp\\a.txt", "D:\\b.png"]
+        ));
+
+        delete_entry(10).unwrap();
+        assert!(load_history(10).unwrap().entry(10).is_none());
+
+        *test_data_directory().lock().unwrap() = None;
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    fn unique_test_directory() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        env::temp_dir().join(format!("ucp-storage-test-{}-{nanos}", std::process::id()))
     }
 }

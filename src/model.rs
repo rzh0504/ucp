@@ -496,6 +496,73 @@ fn encode_png(bytes: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn duplicate_text_is_normalized_and_not_duplicated() {
+        let mut history = ClipboardHistory::new(10);
+
+        let first = history.push(ClipboardContent::Text("hello".to_string()));
+        let duplicate = history.push(ClipboardContent::Text("  hello  ".to_string()));
+
+        assert!(first.changed);
+        assert!(!duplicate.changed);
+        assert_eq!(history.counts().total, 1);
+        assert_eq!(history.counts().text, 1);
+    }
+
+    #[test]
+    fn capacity_keeps_pinned_and_favorite_entries() {
+        let mut history = ClipboardHistory::new(2);
+        let pinned_id = history
+            .push(ClipboardContent::Text("pinned".to_string()))
+            .entry
+            .unwrap()
+            .id;
+        let favorite_id = history
+            .push(ClipboardContent::Text("favorite".to_string()))
+            .entry
+            .unwrap()
+            .id;
+
+        history.toggle_pin(pinned_id);
+        history.toggle_favorite(favorite_id);
+
+        let overflow = history.push(ClipboardContent::Text("overflow".to_string()));
+
+        assert_eq!(overflow.removed_ids, vec![overflow.entry.unwrap().id]);
+        assert_eq!(history.counts().total, 2);
+        assert!(history.entry(pinned_id).is_some());
+        assert!(history.entry(favorite_id).is_some());
+    }
+
+    #[test]
+    fn reducing_capacity_removes_old_unprotected_entries() {
+        let mut history = ClipboardHistory::new(5);
+        let old_id = history
+            .push(ClipboardContent::Text("old".to_string()))
+            .entry
+            .unwrap()
+            .id;
+        let pinned_id = history
+            .push(ClipboardContent::Text("pinned".to_string()))
+            .entry
+            .unwrap()
+            .id;
+        let latest_id = history
+            .push(ClipboardContent::Text("latest".to_string()))
+            .entry
+            .unwrap()
+            .id;
+
+        history.toggle_pin(pinned_id);
+        let removed = history.set_capacity(2);
+
+        assert_eq!(removed, vec![old_id]);
+        assert!(history.entry(old_id).is_none());
+        assert!(history.entry(pinned_id).is_some());
+        assert!(history.entry(latest_id).is_some());
+    }
 
     #[test]
     fn text_query_does_not_match_image_metadata() {
