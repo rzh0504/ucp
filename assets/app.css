@@ -607,8 +607,26 @@ button {
 }
 
 .history-row-main.has-preview {
-    grid-template-columns: 38px 96px minmax(0, 1fr);
-    gap: 12px;
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 10px;
+    padding: 14px 18px 16px;
+}
+
+.history-row-main.has-preview .entry-index {
+    position: absolute;
+    left: 14px;
+    top: 14px;
+}
+
+.history-row-main.has-preview .entry-content {
+    grid-column: 1;
+    grid-row: 2;
+    display: grid;
+    justify-items: center;
+    max-width: 280px;
+    text-align: center;
 }
 
 .entry-index {
@@ -624,12 +642,15 @@ button {
 
 .entry-image-preview {
     display: block;
-    width: 96px;
-    height: 64px;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: center;
+    width: min(240px, 72%);
+    height: 148px;
     border: 1px solid rgba(60, 60, 67, 0.14);
-    border-radius: 8px;
+    border-radius: 10px;
     background: #f2f2f7;
-    object-fit: cover;
+    object-fit: contain;
 }
 
 .entry-image-preview.is-empty {
@@ -643,11 +664,17 @@ button {
 .entry-kicker {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 8px;
     margin-bottom: 3px;
     color: #8e8e93;
     font-size: 11px;
     font-weight: 600;
+}
+
+.history-row-main.has-preview .entry-kicker {
+    justify-content: center;
+    margin-bottom: 0;
 }
 
 .entry-title {

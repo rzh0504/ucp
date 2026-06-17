@@ -112,7 +112,7 @@ impl ClipboardContent {
     pub fn title(&self) -> String {
         match self {
             Self::Text(text) => text.clone(),
-            Self::Image(image) => format!("图像 {} x {}", image.width, image.height),
+            Self::Image(_) => "图像".to_string(),
             Self::Files(files) => {
                 if files.len() == 1 {
                     files[0].clone()
@@ -126,12 +126,7 @@ impl ClipboardContent {
     pub fn size_label(&self) -> String {
         match self {
             Self::Text(text) => format!("{} 字符", text.chars().count()),
-            Self::Image(image) => format!(
-                "{} x {} · {}",
-                image.width,
-                image.height,
-                format_bytes(image.bytes.len())
-            ),
+            Self::Image(image) => format_bytes(image.bytes.len()),
             Self::Files(files) => format!("{} 个文件", files.len()),
         }
     }

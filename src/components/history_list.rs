@@ -250,8 +250,11 @@ fn HistoryRow(
         (false, false) => "history-row",
     };
     let kind_label = entry.kind().label();
+    let is_image = matches!(&entry.content, ClipboardContent::Image(_));
     let entry_title = entry.title();
-    let row_main_class = if matches!(&entry.content, ClipboardContent::Image(_)) {
+    let entry_size = entry.size_label();
+    let entry_age = entry.age_label();
+    let row_main_class = if is_image {
         "history-row-main has-preview"
     } else {
         "history-row-main"
@@ -312,10 +315,15 @@ fn HistoryRow(
                 div { class: "entry-content",
                     div { class: "entry-kicker",
                         span { "{kind_label}" }
-                        span { "{entry.age_label()}" }
+                        if is_image {
+                            span { "{entry_size}" }
+                        }
+                        span { "{entry_age}" }
                     }
-                    p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
-                    p { class: "entry-size", "{entry.size_label()}" }
+                    if !is_image {
+                        p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
+                        p { class: "entry-size", "{entry_size}" }
+                    }
                 }
             }
             Toolbar { class: "entry-actions", aria_label: "条目操作",
