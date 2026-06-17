@@ -65,6 +65,7 @@ pub struct AppSettings {
     pub auto_focus_history: bool,
     pub promote_copied_entries: bool,
     pub quick_paste: bool,
+    pub image_hover_preview: bool,
     pub show_copy_time: bool,
     pub show_text_length: bool,
 }
@@ -79,6 +80,7 @@ impl Default for AppSettings {
             auto_focus_history: true,
             promote_copied_entries: true,
             quick_paste: false,
+            image_hover_preview: false,
             show_copy_time: true,
             show_text_length: true,
         }

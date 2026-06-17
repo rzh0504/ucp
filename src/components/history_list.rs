@@ -36,6 +36,7 @@ pub fn HistoryList(
     auto_focus: bool,
     promote_on_copy: bool,
     quick_paste: bool,
+    image_hover_preview: bool,
     show_copy_time: bool,
     show_text_length: bool,
     mut status: Signal<String>,
@@ -239,6 +240,7 @@ pub fn HistoryList(
                             focused_id,
                             promote_on_copy,
                             quick_paste,
+                            image_hover_preview,
                             show_copy_time,
                             show_text_length,
                             status,
@@ -262,6 +264,7 @@ fn HistoryRow(
     mut focused_id: Signal<Option<u64>>,
     promote_on_copy: bool,
     quick_paste: bool,
+    image_hover_preview: bool,
     show_copy_time: bool,
     show_text_length: bool,
     mut status: Signal<String>,
@@ -340,23 +343,35 @@ fn HistoryRow(
                 div { class: "entry-index", "{index}" }
                 if is_image {
                     if let Some(preview_url) = &image_preview_url {
-                        HoverCard { class: "entry-image-hover-card",
-                            HoverCardTrigger { class: "entry-image-hover-trigger", tabindex: "-1", role: "presentation",
-                                img {
-                                    class: "entry-image-preview",
-                                    src: "{preview_url}",
-                                    alt: "剪贴板图像预览",
+                        if image_hover_preview {
+                            HoverCard { class: "entry-image-hover-card",
+                                HoverCardTrigger { class: "entry-image-hover-trigger", tabindex: "-1", role: "presentation",
+                                    img {
+                                        class: "entry-image-preview",
+                                        src: "{preview_url}",
+                                        alt: "剪贴板图像预览",
+                                    }
+                                }
+                                HoverCardContent {
+                                    class: "entry-image-hover-content",
+                                    side: ContentSide::Right,
+                                    align: ContentAlign::Center,
+                                    force_mount: false,
+                                    img {
+                                        class: "entry-image-large-preview",
+                                        src: "{preview_url}",
+                                        alt: "放大的剪贴板图像预览",
+                                    }
                                 }
                             }
-                            HoverCardContent {
-                                class: "entry-image-hover-content",
-                                side: ContentSide::Right,
-                                align: ContentAlign::Center,
-                                force_mount: false,
-                                img {
-                                    class: "entry-image-large-preview",
-                                    src: "{preview_url}",
-                                    alt: "放大的剪贴板图像预览",
+                        } else {
+                            div { class: "entry-image-hover-card",
+                                div { class: "entry-image-hover-trigger", role: "presentation",
+                                    img {
+                                        class: "entry-image-preview",
+                                        src: "{preview_url}",
+                                        alt: "剪贴板图像预览",
+                                    }
                                 }
                             }
                         }
