@@ -10,7 +10,11 @@ use dioxus_primitives::separator::Separator;
 use dioxus_primitives::switch::{Switch, SwitchThumb};
 
 #[component]
-pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHistory>) -> Element {
+pub fn SettingsPage(
+    settings: Signal<AppSettings>,
+    history: Signal<ClipboardHistory>,
+    status: Signal<String>,
+) -> Element {
     let settings_snapshot = settings();
 
     rsx! {
@@ -28,8 +32,14 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "登录 Windows 后自动启动 UCP Clipboard。",
                         checked: settings_snapshot.launch_at_startup,
                         on_change: move |checked| {
-                            if platform::startup::set_enabled(checked).is_ok() {
-                                update_settings(settings, |next| next.launch_at_startup = checked);
+                            match platform::startup::set_enabled(checked) {
+                                Ok(()) => {
+                                    update_settings(settings, status, |next| next.launch_at_startup = checked);
+                                }
+                                Err(error) => {
+                                    let mut status = status;
+                                    status.set(format!("开机启动设置失败：{error}"));
+                                }
                             }
                         },
                     }
@@ -45,9 +55,13 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         HistoryLimitCombobox {
                             value: settings_snapshot.history_limit,
                             on_change: move |limit| {
-                                update_settings(settings, |next| next.history_limit = limit);
-                                let removed_ids = history.write().set_capacity(limit);
-                                let _ = storage::delete_entries(&removed_ids);
+                                if update_settings(settings, status, |next| next.history_limit = limit) {
+                                    let removed_ids = history.write().set_capacity(limit);
+                                    if let Err(error) = storage::delete_entries(&removed_ids) {
+                                        let mut status = status;
+                                        status.set(format!("历史清理失败：{error}"));
+                                    }
+                                }
                             },
                         }
                     }
@@ -60,7 +74,7 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "启用 Ctrl+F 搜索、Ctrl+, 切换设置、数字过滤和列表快捷操作。",
                         checked: settings_snapshot.keyboard_shortcuts,
                         on_change: move |checked| {
-                            update_settings(settings, |next| next.keyboard_shortcuts = checked);
+                            update_settings(settings, status, |next| next.keyboard_shortcuts = checked);
                         },
                     }
                     SettingSwitchRow {
@@ -68,7 +82,7 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "打开历史页后自动聚焦列表，方便直接使用方向键浏览。",
                         checked: settings_snapshot.auto_focus_history,
                         on_change: move |checked| {
-                            update_settings(settings, |next| next.auto_focus_history = checked);
+                            update_settings(settings, status, |next| next.auto_focus_history = checked);
                         },
                     }
                     SettingSwitchRow {
@@ -76,7 +90,7 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "从历史中复制记录后，将该记录更新时间并移动到列表顶部。",
                         checked: settings_snapshot.promote_copied_entries,
                         on_change: move |checked| {
-                            update_settings(settings, |next| next.promote_copied_entries = checked);
+                            update_settings(settings, status, |next| next.promote_copied_entries = checked);
                         },
                     }
                     SettingSwitchRow {
@@ -84,7 +98,7 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "右键历史项选择快捷粘贴后，将该内容粘贴到当前光标位置。",
                         checked: settings_snapshot.quick_paste,
                         on_change: move |checked| {
-                            update_settings(settings, |next| next.quick_paste = checked);
+                            update_settings(settings, status, |next| next.quick_paste = checked);
                         },
                     }
                 }
@@ -96,7 +110,7 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "在历史记录中显示每项的复制时间。",
                         checked: settings_snapshot.show_copy_time,
                         on_change: move |checked| {
-                            update_settings(settings, |next| next.show_copy_time = checked);
+                            update_settings(settings, status, |next| next.show_copy_time = checked);
                         },
                     }
                     SettingSwitchRow {
@@ -104,7 +118,7 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         hint: "在文本记录中显示字符数量。",
                         checked: settings_snapshot.show_text_length,
                         on_change: move |checked| {
-                            update_settings(settings, |next| next.show_text_length = checked);
+                            update_settings(settings, status, |next| next.show_text_length = checked);
                         },
                     }
                 }
@@ -167,10 +181,24 @@ fn HistoryLimitCombobox(value: usize, on_change: EventHandler<usize>) -> Element
     }
 }
 
-fn update_settings(mut settings: Signal<AppSettings>, update: impl FnOnce(&mut AppSettings)) {
+fn update_settings(
+    mut settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+    update: impl FnOnce(&mut AppSettings),
+) -> bool {
     let mut next = settings();
     update(&mut next);
     next = next.normalized();
-    settings.set(next);
-    let _ = storage::save_settings(&next);
+
+    match storage::save_settings(&next) {
+        Ok(()) => {
+            settings.set(next);
+            status.set("设置已保存".to_string());
+            true
+        }
+        Err(error) => {
+            status.set(format!("设置保存失败：{error}"));
+            false
+        }
+    }
 }

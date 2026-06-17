@@ -1,9 +1,11 @@
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Local};
 use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
+use std::sync::Arc;
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
+const MAX_INLINE_IMAGE_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
@@ -16,29 +18,33 @@ pub enum ClipboardKind {
 pub struct ClipboardImage {
     pub width: usize,
     pub height: usize,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<Vec<u8>>,
     pub preview_url: Option<String>,
 }
 
 impl ClipboardImage {
     pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
-        let preview_url = encode_png(&bytes, width, height).map(|png| {
-            format!(
-                "data:image/png;base64,{}",
-                general_purpose::STANDARD.encode(png)
-            )
-        });
+        let preview_url = if bytes.len() <= MAX_INLINE_IMAGE_PREVIEW_BYTES {
+            encode_png(&bytes, width, height).map(|png| {
+                format!(
+                    "data:image/png;base64,{}",
+                    general_purpose::STANDARD.encode(png)
+                )
+            })
+        } else {
+            None
+        };
 
         Self {
             width,
             height,
-            bytes,
+            bytes: Arc::new(bytes),
             preview_url,
         }
     }
 
     pub fn to_png_bytes(&self) -> Option<Vec<u8>> {
-        encode_png(&self.bytes, self.width, self.height)
+        encode_png(self.bytes.as_slice(), self.width, self.height)
     }
 }
 
@@ -497,7 +503,7 @@ mod tests {
         history.push(ClipboardContent::Image(ClipboardImage {
             width: 5,
             height: 10,
-            bytes: vec![0, 0, 0, 0],
+            bytes: Arc::new(vec![0, 0, 0, 0]),
             preview_url: None,
         }));
         history.push(ClipboardContent::Text("5".to_string()));

@@ -120,7 +120,7 @@ pub fn write_image(image: &ClipboardImage) -> Result<(), ClipboardError> {
         .set_image(ImageData {
             width: image.width,
             height: image.height,
-            bytes: Cow::Borrowed(&image.bytes),
+            bytes: Cow::Borrowed(image.bytes.as_slice()),
         })
         .map_err(map_error)
 }

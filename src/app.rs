@@ -79,13 +79,11 @@ pub fn App() -> Element {
                     return;
                 }
 
-                if primary {
-                    if let Some(filter) = filter_shortcut(&data.key()) {
-                        event.prevent_default();
-                        active_page.set(AppPage::History);
-                        active_filter.set(filter);
-                        return;
-                    }
+                if primary && let Some(filter) = filter_shortcut(&data.key()) {
+                    event.prevent_default();
+                    active_page.set(AppPage::History);
+                    active_filter.set(filter);
+                    return;
                 }
 
                 if data.key() == Key::Escape {
@@ -114,6 +112,7 @@ pub fn App() -> Element {
                     SettingsPage {
                         settings,
                         history,
+                        status,
                     }
                 } else {
                     HistoryList {
@@ -131,6 +130,12 @@ pub fn App() -> Element {
                         status,
                     }
                 }
+            }
+            div {
+                class: "status-bar",
+                "aria-live": "polite",
+                role: "status",
+                span { "{status}" }
             }
             FloatingSettingsButton { active_page }
         }
@@ -204,10 +209,10 @@ fn capture_clipboard(mut history: Signal<ClipboardHistory>, mut status: Signal<S
             let result = history.write().push(content);
             let mut storage_error = None;
 
-            if let Some(entry) = &result.entry {
-                if let Err(error) = storage::save_entry(entry) {
-                    storage_error = Some(format!("历史保存失败：{error}"));
-                }
+            if let Some(entry) = &result.entry
+                && let Err(error) = storage::save_entry(entry)
+            {
+                storage_error = Some(format!("历史保存失败：{error}"));
             }
 
             if let Err(error) = storage::delete_entries(&result.removed_ids) {

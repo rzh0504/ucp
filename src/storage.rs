@@ -7,6 +7,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 const APP_DIR: &str = "UCP Clipboard";
 const DATABASE_FILE: &str = "history.sqlite3";
@@ -65,7 +66,7 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
                 "image" => ClipboardContent::Image(ClipboardImage {
                     width: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0) as usize,
                     height: row.get::<_, Option<i64>>(4)?.unwrap_or_default().max(0) as usize,
-                    bytes: row.get::<_, Option<Vec<u8>>>(5)?.unwrap_or_default(),
+                    bytes: Arc::new(row.get::<_, Option<Vec<u8>>>(5)?.unwrap_or_default()),
                     preview_url: row.get(6)?,
                 }),
                 "file" => ClipboardContent::Files(load_files(&connection, id)?),

@@ -36,7 +36,7 @@ pub fn HistoryList(
     quick_paste: bool,
     show_copy_time: bool,
     show_text_length: bool,
-    status: Signal<String>,
+    mut status: Signal<String>,
 ) -> Element {
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
@@ -76,12 +76,13 @@ pub fn HistoryList(
                             on_click: move |_| {
                                 for id in visible_selected_ids.clone() {
                                     if history.write().remove(id) {
-                                        let _ = storage::delete_entry(id);
+                                        delete_entry_with_status(id, status);
                                     }
                                 }
 
                                 selected_ids.set(Vec::new());
                                 selection_anchor_id.set(None);
+                                status.set("已删除所选历史".to_string());
                             },
                             Icon { icon: AppIcon::Delete }
                         }
@@ -172,7 +173,7 @@ pub fn HistoryList(
                         Key::Enter => {
                             event.prevent_default();
                             if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
-                                copy_entry(id, history, promote_on_copy);
+                                copy_entry(id, history, promote_on_copy, status);
                             }
                         }
                         Key::Delete | Key::Backspace => {
@@ -183,6 +184,7 @@ pub fn HistoryList(
                                 &mut selected_ids,
                                 &mut selection_anchor_id,
                                 history,
+                                status,
                             );
                         }
                         Key::Escape => {
@@ -201,18 +203,18 @@ pub fn HistoryList(
                         }
                         Key::Character(key) if !primary && key.eq_ignore_ascii_case("f") => {
                             event.prevent_default();
-                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
-                                if let Some(entry) = history.write().toggle_favorite(id) {
-                                    let _ = storage::save_entry(&entry);
-                                }
+                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id())
+                                && let Some(entry) = history.write().toggle_favorite(id)
+                            {
+                                save_entry_with_status(&entry, status, "收藏状态已更新");
                             }
                         }
                         Key::Character(key) if !primary && key.eq_ignore_ascii_case("p") => {
                             event.prevent_default();
-                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
-                                if let Some(entry) = history.write().toggle_pin(id) {
-                                    let _ = storage::save_entry(&entry);
-                                }
+                            if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id())
+                                && let Some(entry) = history.write().toggle_pin(id)
+                            {
+                                save_entry_with_status(&entry, status, "置顶状态已更新");
                             }
                         }
                         _ => {}
@@ -288,12 +290,12 @@ fn HistoryRow(
     };
 
     use_effect(move || {
-        if focused_id() == Some(id) {
-            if let Some(element) = button_ref() {
-                spawn(async move {
-                    let _ = element.set_focus(true).await;
-                });
-            }
+        if focused_id() == Some(id)
+            && let Some(element) = button_ref()
+        {
+            spawn(async move {
+                let _ = element.set_focus(true).await;
+            });
         }
     });
 
@@ -327,7 +329,7 @@ fn HistoryRow(
                     focused_id.set(Some(id));
                 },
                 ondoubleclick: move |_| {
-                    copy_entry(id, history, promote_on_copy);
+                    copy_entry(id, history, promote_on_copy, status);
                 },
                 div { class: "entry-index", "{index}" }
                 if let ClipboardContent::Image(image) = &entry.content {
@@ -364,7 +366,7 @@ fn HistoryRow(
                     index: 0usize,
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_favorite(id) {
-                            let _ = storage::save_entry(&entry);
+                            save_entry_with_status(&entry, status, "收藏状态已更新");
                         }
                     },
                     Icon { icon: if entry.favorite { AppIcon::FavoriteFilled } else { AppIcon::Favorite } }
@@ -374,7 +376,7 @@ fn HistoryRow(
                     index: 1usize,
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_pin(id) {
-                            let _ = storage::save_entry(&entry);
+                            save_entry_with_status(&entry, status, "置顶状态已更新");
                         }
                     },
                     Icon { icon: if entry.pinned { AppIcon::PinFilled } else { AppIcon::Pin } }
@@ -385,7 +387,7 @@ fn HistoryRow(
                     index: 2usize,
                     on_click: move |_| {
                         if history.write().remove(id) {
-                            let _ = storage::delete_entry(id);
+                            delete_entry_with_status(id, status);
                         }
                     },
                     Icon { icon: AppIcon::Delete }
@@ -400,7 +402,7 @@ fn HistoryRow(
                         value: "quick-paste".to_string(),
                         index: 0usize,
                         on_select: move |_| {
-                            if copy_entry(id, history, promote_on_copy) {
+                            if copy_entry(id, history, promote_on_copy, status) {
                                 paste_window.set_minimized(true);
                                 status.set("已发送快捷粘贴".to_string());
                                 spawn(async move {
@@ -511,22 +513,46 @@ fn focus_index(
     focused_id.set(Some(id));
 }
 
-fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>, promote_on_copy: bool) -> bool {
+fn copy_entry(
+    id: u64,
+    mut history: Signal<ClipboardHistory>,
+    promote_on_copy: bool,
+    mut status: Signal<String>,
+) -> bool {
     let Some(content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
         return false;
     };
 
-    if platform::clipboard::write_content(&content).is_err() {
+    if let Err(error) = platform::clipboard::write_content(&content) {
+        status.set(format!("复制失败：{error}"));
         return false;
     }
 
     if promote_on_copy {
         if let Some(entry) = history.write().promote(id) {
-            let _ = storage::save_entry(&entry);
+            save_entry_with_status(&entry, status, "已复制到剪贴板");
+        } else {
+            status.set("已复制到剪贴板".to_string());
         }
+    } else {
+        status.set("已复制到剪贴板".to_string());
     }
 
     true
+}
+
+fn save_entry_with_status(entry: &ClipboardEntry, mut status: Signal<String>, success: &str) {
+    match storage::save_entry(entry) {
+        Ok(()) => status.set(success.to_string()),
+        Err(error) => status.set(format!("历史保存失败：{error}")),
+    }
+}
+
+fn delete_entry_with_status(id: u64, mut status: Signal<String>) {
+    match storage::delete_entry(id) {
+        Ok(()) => status.set("历史已删除".to_string()),
+        Err(error) => status.set(format!("历史删除失败：{error}")),
+    }
 }
 
 fn save_image_file(image: ClipboardImage, default_file_name: String, mut status: Signal<String>) {
@@ -567,6 +593,7 @@ fn delete_focused_or_selected(
     selected_ids: &mut Signal<Vec<u64>>,
     selection_anchor_id: &mut Signal<Option<u64>>,
     mut history: Signal<ClipboardHistory>,
+    status: Signal<String>,
 ) {
     let mut ids = selected_ids
         .read()
@@ -575,15 +602,15 @@ fn delete_focused_or_selected(
         .filter(|id| entry_ids.contains(id))
         .collect::<Vec<_>>();
 
-    if ids.is_empty() {
-        if let Some(id) = focused_entry_id(entry_ids, focused_id) {
-            ids.push(id);
-        }
+    if ids.is_empty()
+        && let Some(id) = focused_entry_id(entry_ids, focused_id)
+    {
+        ids.push(id);
     }
 
     for id in ids {
         if history.write().remove(id) {
-            let _ = storage::delete_entry(id);
+            delete_entry_with_status(id, status);
         }
     }
 
