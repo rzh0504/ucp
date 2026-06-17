@@ -198,6 +198,7 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
             "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
             "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
             "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
+            "quick_paste" => settings.quick_paste = parse_bool(&value),
             "show_copy_time" => settings.show_copy_time = parse_bool(&value),
             "show_text_length" => settings.show_text_length = parse_bool(&value),
             _ => {}
@@ -225,6 +226,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
             "promote_copied_entries",
             settings.promote_copied_entries.to_string(),
         ),
+        ("quick_paste", settings.quick_paste.to_string()),
         ("show_copy_time", settings.show_copy_time.to_string()),
         ("show_text_length", settings.show_text_length.to_string()),
     ];

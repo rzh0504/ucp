@@ -18,6 +18,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5", features = ["monitor"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
 
 [profile.dev]
 opt-level = 0

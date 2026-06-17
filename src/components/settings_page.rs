@@ -79,6 +79,14 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                             update_settings(settings, |next| next.promote_copied_entries = checked);
                         },
                     }
+                    SettingSwitchRow {
+                        label: "快捷粘贴",
+                        hint: "右键历史项选择快捷粘贴后，将该内容粘贴到当前光标位置。",
+                        checked: settings_snapshot.quick_paste,
+                        on_change: move |checked| {
+                            update_settings(settings, |next| next.quick_paste = checked);
+                        },
+                    }
                 }
 
                 section { class: "settings-group",

@@ -572,7 +572,16 @@ button {
     background: #ffffff;
 }
 
-.history-row:last-child {
+.history-row-menu,
+.history-row-trigger {
+    display: block;
+}
+
+.history-row-menu[data-state="open"] .history-row {
+    background: #eef6ff;
+}
+
+.history-list > .history-row:last-child {
     border-bottom: 0;
 }
 
@@ -759,6 +768,46 @@ button {
 
 .ghost-action.is-danger:hover {
     background: rgba(255, 59, 48, 0.12);
+}
+
+.entry-context-menu {
+    z-index: 100;
+    display: grid;
+    min-width: 176px;
+    padding: 6px;
+    border: 1px solid rgba(60, 60, 67, 0.14);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.08);
+    backdrop-filter: saturate(180%) blur(18px);
+}
+
+.entry-context-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 7px;
+    color: #1d1d1f;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 650;
+    outline: none;
+}
+
+.entry-context-menu-item:hover,
+.entry-context-menu-item:focus-visible {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+}
+
+.entry-context-menu-item kbd {
+    color: #8e8e93;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
 }
 
 .empty-state {

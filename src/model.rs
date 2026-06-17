@@ -47,6 +47,7 @@ pub struct AppSettings {
     pub keyboard_shortcuts: bool,
     pub auto_focus_history: bool,
     pub promote_copied_entries: bool,
+    pub quick_paste: bool,
     pub show_copy_time: bool,
     pub show_text_length: bool,
 }
@@ -59,6 +60,7 @@ impl Default for AppSettings {
             keyboard_shortcuts: true,
             auto_focus_history: true,
             promote_copied_entries: true,
+            quick_paste: false,
             show_copy_time: true,
             show_text_length: true,
         }

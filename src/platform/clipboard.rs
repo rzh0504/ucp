@@ -55,6 +55,51 @@ pub fn write_content(content: &ClipboardContent) -> Result<(), ClipboardError> {
     }
 }
 
+#[cfg(windows)]
+pub fn paste_shortcut() -> Result<(), ClipboardError> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_KEYBOARD, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_V,
+    };
+
+    unsafe {
+        let mut inputs = [INPUT::default(); 4];
+        inputs[0].r#type = INPUT_KEYBOARD;
+        inputs[0].Anonymous.ki.wVk = VK_CONTROL;
+
+        inputs[1].r#type = INPUT_KEYBOARD;
+        inputs[1].Anonymous.ki.wVk = VK_V;
+
+        inputs[2].r#type = INPUT_KEYBOARD;
+        inputs[2].Anonymous.ki.wVk = VK_V;
+        inputs[2].Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+
+        inputs[3].r#type = INPUT_KEYBOARD;
+        inputs[3].Anonymous.ki.wVk = VK_CONTROL;
+        inputs[3].Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+
+        let sent = SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+
+        if sent == inputs.len() as u32 {
+            Ok(())
+        } else {
+            Err(ClipboardError::Unavailable(
+                "发送粘贴快捷键失败".to_string(),
+            ))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn paste_shortcut() -> Result<(), ClipboardError> {
+    Err(ClipboardError::Unavailable(
+        "当前平台暂不支持快捷粘贴".to_string(),
+    ))
+}
+
 pub fn read_image() -> Result<Option<ClipboardImage>, ClipboardError> {
     let mut clipboard = Clipboard::new().map_err(map_error)?;
 

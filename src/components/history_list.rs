@@ -5,13 +5,21 @@ use crate::model::{
 };
 use crate::platform;
 use crate::storage;
+use dioxus::desktop::use_window;
 use dioxus::events::MountedData;
 use dioxus::html::Key;
 use dioxus::prelude::*;
+use dioxus_primitives::context_menu::{
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
+};
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
+use futures_timer::Delay;
 use std::rc::Rc;
+use std::time::Duration;
+
+const QUICK_PASTE_DELAY: Duration = Duration::from_millis(160);
 
 #[component]
 pub fn HistoryList(
@@ -23,8 +31,10 @@ pub fn HistoryList(
     keyboard_shortcuts: bool,
     auto_focus: bool,
     promote_on_copy: bool,
+    quick_paste: bool,
     show_copy_time: bool,
     show_text_length: bool,
+    status: Signal<String>,
 ) -> Element {
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
@@ -222,8 +232,10 @@ pub fn HistoryList(
                             selection_anchor_id,
                             focused_id,
                             promote_on_copy,
+                            quick_paste,
                             show_copy_time,
                             show_text_length,
+                            status,
                         }
                     }
                     div { class: "history-list-clear-space" }
@@ -243,11 +255,14 @@ fn HistoryRow(
     mut selection_anchor_id: Signal<Option<u64>>,
     mut focused_id: Signal<Option<u64>>,
     promote_on_copy: bool,
+    quick_paste: bool,
     show_copy_time: bool,
     show_text_length: bool,
+    mut status: Signal<String>,
 ) -> Element {
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
+    let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
     let row_class = match (is_selected, focused_id() == Some(id)) {
         (true, true) => "history-row is-selected is-focused",
@@ -277,10 +292,12 @@ fn HistoryRow(
     });
 
     rsx! {
-        article {
-            class: "{row_class}",
-            onclick: move |event| event.stop_propagation(),
-            button {
+        ContextMenu { class: "history-row-menu", tabindex: "-1", disabled: !quick_paste,
+            ContextMenuTrigger { class: "history-row-trigger",
+                article {
+                    class: "{row_class}",
+                    onclick: move |event| event.stop_propagation(),
+                    button {
                 class: "{row_main_class}",
                 aria_selected: if is_selected { "true" } else { "false" },
                 onmounted: move |event| button_ref.set(Some(event.data())),
@@ -368,6 +385,31 @@ fn HistoryRow(
                     Icon { icon: AppIcon::Delete }
                 }
             }
+                }
+            }
+            ContextMenuContent { class: "entry-context-menu",
+                ContextMenuItem {
+                    class: "entry-context-menu-item",
+                    value: "quick-paste".to_string(),
+                    index: 0usize,
+                    on_select: move |_| {
+                        if copy_entry(id, history, promote_on_copy) {
+                            paste_window.set_minimized(true);
+                            status.set("已发送快捷粘贴".to_string());
+                            spawn(async move {
+                                Delay::new(QUICK_PASTE_DELAY).await;
+                                if let Err(error) = platform::clipboard::paste_shortcut() {
+                                    status.set(format!("快捷粘贴失败：{error}"));
+                                }
+                            });
+                        } else {
+                            status.set("快捷粘贴失败：剪贴板暂不可用".to_string());
+                        }
+                    },
+                    span { "快捷粘贴" }
+                    kbd { "Ctrl+V" }
+                }
+            }
         }
     }
 }
@@ -446,16 +488,22 @@ fn focus_index(
     focused_id.set(Some(id));
 }
 
-fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>, promote_on_copy: bool) {
+fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>, promote_on_copy: bool) -> bool {
     let Some(content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
-        return;
+        return false;
     };
 
-    if platform::clipboard::write_content(&content).is_ok() && promote_on_copy {
+    if platform::clipboard::write_content(&content).is_err() {
+        return false;
+    }
+
+    if promote_on_copy {
         if let Some(entry) = history.write().promote(id) {
             let _ = storage::save_entry(&entry);
         }
     }
+
+    true
 }
 
 fn delete_focused_or_selected(
