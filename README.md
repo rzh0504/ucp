@@ -5,7 +5,7 @@ Windows-first desktop clipboard history app built with Dioxus 0.7.
 ## Features
 
 - Captures text, image, and file clipboard entries on Windows.
-- Stores history and settings locally in SQLite.
+- Stores history and settings locally in a SQLite database with a `.ucp` extension.
 - Searches text and file entries, with filters for all, text, image, file, and favorite items.
 - Supports favorite, pin, multi-select deletion, copying entries back to the clipboard, and optional quick paste.
 - Saves captured images as PNG files from the item context menu.
@@ -61,10 +61,12 @@ cargo clippy --all-targets -- -D warnings
 On Windows, UCP stores its SQLite database under:
 
 ```text
-%LOCALAPPDATA%\UCP Clipboard\history.sqlite3
+%LOCALAPPDATA%\UCP Clipboard\history.ucp
 ```
 
 If `%LOCALAPPDATA%` is unavailable, it falls back to `%APPDATA%`, then the current directory.
+
+If a previous SQLCipher `history.ucp` is found during rollback and an old plaintext `history.sqlite3` or `history.ucp.plaintext-backup` exists, UCP restores the plaintext database into `history.ucp` and keeps the unreadable file as a `.sqlcipher-backup` file.
 
 ## Scope
 

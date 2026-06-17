@@ -110,6 +110,7 @@ pub fn read_image() -> Result<Option<ClipboardImage>, ClipboardError> {
             image.bytes.into_owned(),
         ))),
         Err(ArboardError::ContentNotAvailable) => Ok(None),
+        Err(error) if image_data_is_unreadable(&error) => Ok(None),
         Err(error) => Err(map_error(error)),
     }
 }
@@ -218,7 +219,26 @@ pub fn sequence_number() -> Option<u32> {
 }
 
 fn map_error(error: ArboardError) -> ClipboardError {
-    ClipboardError::Unavailable(error.to_string())
+    let message = match error {
+        ArboardError::ContentNotAvailable => "剪贴板中没有可读取的内容".to_string(),
+        ArboardError::ClipboardNotSupported => "当前系统剪贴板不可用".to_string(),
+        ArboardError::ClipboardOccupied => "剪贴板正被其他程序占用，请稍后重试".to_string(),
+        ArboardError::ConversionFailure => "剪贴板内容格式暂不支持".to_string(),
+        ArboardError::Unknown { description } => match description.as_str() {
+            "failed to read clipboard image data" => "剪贴板图片数据暂不可读取".to_string(),
+            _ => format!("剪贴板操作失败：{description}"),
+        },
+        _ => "剪贴板操作失败".to_string(),
+    };
+
+    ClipboardError::Unavailable(message)
+}
+
+fn image_data_is_unreadable(error: &ArboardError) -> bool {
+    matches!(
+        error,
+        ArboardError::Unknown { description } if description == "failed to read clipboard image data"
+    )
 }
 
 #[cfg(windows)]

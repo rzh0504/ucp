@@ -6,15 +6,18 @@ use rusqlite::{Connection, params};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 const APP_DIR: &str = "UCP Clipboard";
-const DATABASE_FILE: &str = "history.sqlite3";
+const DATABASE_FILE: &str = "history.ucp";
+const LEGACY_DATABASE_FILE: &str = "history.sqlite3";
 const SCHEMA_VERSION: i32 = 1;
+static DATABASE_CONNECTION: Mutex<Option<Connection>> = Mutex::new(None);
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -45,118 +48,120 @@ impl From<rusqlite::Error> for StorageError {
 }
 
 pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
-    let connection = open_connection()?;
-    let mut statement = connection.prepare(
-        "SELECT id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
-                captured_at_millis, pinned, favorite \
-         FROM clipboard_entries \
-         ORDER BY pinned DESC, captured_at_millis DESC, id DESC",
-    )?;
+    with_connection(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
+                    captured_at_millis, pinned, favorite \
+             FROM clipboard_entries \
+             ORDER BY pinned DESC, captured_at_millis DESC, id DESC",
+        )?;
 
-    let entries = statement
-        .query_map([], |row| {
-            let id = row.get::<_, i64>(0)? as u64;
-            let kind = row.get::<_, String>(1)?;
-            let captured_at_millis = row.get::<_, i64>(7)?;
-            let captured_at = Local
-                .timestamp_millis_opt(captured_at_millis)
-                .single()
-                .unwrap_or_else(Local::now);
+        let entries = statement
+            .query_map([], |row| {
+                let id = row.get::<_, i64>(0)? as u64;
+                let kind = row.get::<_, String>(1)?;
+                let captured_at_millis = row.get::<_, i64>(7)?;
+                let captured_at = Local
+                    .timestamp_millis_opt(captured_at_millis)
+                    .single()
+                    .unwrap_or_else(Local::now);
 
-            let content = match kind.as_str() {
-                "text" => {
-                    ClipboardContent::Text(row.get::<_, Option<String>>(2)?.unwrap_or_default())
-                }
-                "image" => ClipboardContent::Image(ClipboardImage {
-                    width: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0) as usize,
-                    height: row.get::<_, Option<i64>>(4)?.unwrap_or_default().max(0) as usize,
-                    bytes: Arc::new(row.get::<_, Option<Vec<u8>>>(5)?.unwrap_or_default()),
-                    preview_url: row.get(6)?,
-                }),
-                "file" => ClipboardContent::Files(load_files(&connection, id)?),
-                _ => ClipboardContent::Text(String::new()),
-            };
+                let content = match kind.as_str() {
+                    "text" => {
+                        ClipboardContent::Text(row.get::<_, Option<String>>(2)?.unwrap_or_default())
+                    }
+                    "image" => ClipboardContent::Image(ClipboardImage {
+                        width: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0) as usize,
+                        height: row.get::<_, Option<i64>>(4)?.unwrap_or_default().max(0) as usize,
+                        bytes: Arc::new(row.get::<_, Option<Vec<u8>>>(5)?.unwrap_or_default()),
+                        preview_url: row.get(6)?,
+                    }),
+                    "file" => ClipboardContent::Files(load_files(connection, id)?),
+                    _ => ClipboardContent::Text(String::new()),
+                };
 
-            Ok(ClipboardEntry {
-                id,
-                content,
-                captured_at,
-                pinned: row.get::<_, i64>(8)? != 0,
-                favorite: row.get::<_, i64>(9)? != 0,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+                Ok(ClipboardEntry {
+                    id,
+                    content,
+                    captured_at,
+                    pinned: row.get::<_, i64>(8)? != 0,
+                    favorite: row.get::<_, i64>(9)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(ClipboardHistory::from_entries(capacity, entries))
+        Ok(ClipboardHistory::from_entries(capacity, entries))
+    })
 }
 
 pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
-    let mut connection = open_connection()?;
-    let transaction = connection.transaction()?;
+    with_connection(|connection| {
+        let transaction = connection.transaction()?;
 
-    let kind = entry.kind().key();
-    let mut text_content: Option<&str> = None;
-    let mut image_width: Option<i64> = None;
-    let mut image_height: Option<i64> = None;
-    let mut image_rgba: Option<&[u8]> = None;
-    let mut image_preview_url: Option<&str> = None;
+        let kind = entry.kind().key();
+        let mut text_content: Option<&str> = None;
+        let mut image_width: Option<i64> = None;
+        let mut image_height: Option<i64> = None;
+        let mut image_rgba: Option<&[u8]> = None;
+        let mut image_preview_url: Option<&str> = None;
 
-    match &entry.content {
-        ClipboardContent::Text(text) => text_content = Some(text),
-        ClipboardContent::Image(image) => {
-            image_width = Some(image.width as i64);
-            image_height = Some(image.height as i64);
-            image_rgba = Some(image.bytes.as_slice());
-            image_preview_url = image.preview_url.as_deref();
+        match &entry.content {
+            ClipboardContent::Text(text) => text_content = Some(text),
+            ClipboardContent::Image(image) => {
+                image_width = Some(image.width as i64);
+                image_height = Some(image.height as i64);
+                image_rgba = Some(image.bytes.as_slice());
+                image_preview_url = image.preview_url.as_deref();
+            }
+            ClipboardContent::Files(_) => {}
         }
-        ClipboardContent::Files(_) => {}
-    }
 
-    transaction.execute(
-        "INSERT INTO clipboard_entries (\
-             id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
-             captured_at_millis, pinned, favorite\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
-         ON CONFLICT(id) DO UPDATE SET \
-             kind = excluded.kind, \
-             text_content = excluded.text_content, \
-             image_width = excluded.image_width, \
-             image_height = excluded.image_height, \
-             image_rgba = excluded.image_rgba, \
-             image_preview_url = excluded.image_preview_url, \
-             captured_at_millis = excluded.captured_at_millis, \
-             pinned = excluded.pinned, \
-             favorite = excluded.favorite",
-        params![
-            entry.id as i64,
-            kind,
-            text_content,
-            image_width,
-            image_height,
-            image_rgba,
-            image_preview_url,
-            entry.captured_at.timestamp_millis(),
-            entry.pinned as i64,
-            entry.favorite as i64,
-        ],
-    )?;
+        transaction.execute(
+            "INSERT INTO clipboard_entries (\
+                 id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
+                 captured_at_millis, pinned, favorite\
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+             ON CONFLICT(id) DO UPDATE SET \
+                 kind = excluded.kind, \
+                 text_content = excluded.text_content, \
+                 image_width = excluded.image_width, \
+                 image_height = excluded.image_height, \
+                 image_rgba = excluded.image_rgba, \
+                 image_preview_url = excluded.image_preview_url, \
+                 captured_at_millis = excluded.captured_at_millis, \
+                 pinned = excluded.pinned, \
+                 favorite = excluded.favorite",
+            params![
+                entry.id as i64,
+                kind,
+                text_content,
+                image_width,
+                image_height,
+                image_rgba,
+                image_preview_url,
+                entry.captured_at.timestamp_millis(),
+                entry.pinned as i64,
+                entry.favorite as i64,
+            ],
+        )?;
 
-    transaction.execute(
-        "DELETE FROM clipboard_files WHERE entry_id = ?1",
-        params![entry.id as i64],
-    )?;
+        transaction.execute(
+            "DELETE FROM clipboard_files WHERE entry_id = ?1",
+            params![entry.id as i64],
+        )?;
 
-    if let ClipboardContent::Files(files) = &entry.content {
-        for (position, file) in files.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO clipboard_files (entry_id, position, path) VALUES (?1, ?2, ?3)",
-                params![entry.id as i64, position as i64, file],
-            )?;
+        if let ClipboardContent::Files(files) = &entry.content {
+            for (position, file) in files.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO clipboard_files (entry_id, position, path) VALUES (?1, ?2, ?3)",
+                    params![entry.id as i64, position as i64, file],
+                )?;
+            }
         }
-    }
 
-    transaction.commit()?;
-    Ok(())
+        transaction.commit()?;
+        Ok(())
+    })
 }
 
 pub fn delete_entry(id: u64) -> Result<(), StorageError> {
@@ -168,113 +173,118 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
         return Ok(());
     }
 
-    let mut connection = open_connection()?;
-    let transaction = connection.transaction()?;
+    with_connection(|connection| {
+        let transaction = connection.transaction()?;
 
-    for id in ids {
-        transaction.execute(
-            "DELETE FROM clipboard_entries WHERE id = ?1",
-            params![*id as i64],
-        )?;
-    }
+        for id in ids {
+            transaction.execute(
+                "DELETE FROM clipboard_entries WHERE id = ?1",
+                params![*id as i64],
+            )?;
+        }
 
-    transaction.commit()?;
-    Ok(())
+        transaction.commit()?;
+        Ok(())
+    })
 }
 
 pub fn clear_history() -> Result<(), StorageError> {
-    let connection = open_connection()?;
-    connection.execute("DELETE FROM clipboard_entries", [])?;
-    Ok(())
+    with_connection(|connection| {
+        connection.execute("DELETE FROM clipboard_entries", [])?;
+        Ok(())
+    })
 }
 
 pub fn delete_entries_older_than(cutoff: DateTime<Local>) -> Result<usize, StorageError> {
-    let connection = open_connection()?;
-    connection
-        .execute(
-            "DELETE FROM clipboard_entries WHERE captured_at_millis < ?1",
-            params![cutoff.timestamp_millis()],
-        )
-        .map_err(StorageError::from)
+    with_connection(|connection| {
+        connection
+            .execute(
+                "DELETE FROM clipboard_entries WHERE captured_at_millis < ?1",
+                params![cutoff.timestamp_millis()],
+            )
+            .map_err(StorageError::from)
+    })
 }
 
 pub fn load_settings() -> Result<AppSettings, StorageError> {
-    let connection = open_connection()?;
-    let mut settings = AppSettings::default();
-    let mut statement = connection.prepare("SELECT key, value FROM app_settings")?;
+    with_connection(|connection| {
+        let mut settings = AppSettings::default();
+        let mut statement = connection.prepare("SELECT key, value FROM app_settings")?;
 
-    let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
 
-    for row in rows {
-        let (key, value) = row?;
-        match key.as_str() {
-            "history_limit" => {
-                settings.history_limit = value
-                    .parse::<usize>()
-                    .unwrap_or(AppSettings::default().history_limit)
+        for row in rows {
+            let (key, value) = row?;
+            match key.as_str() {
+                "history_limit" => {
+                    settings.history_limit = value
+                        .parse::<usize>()
+                        .unwrap_or(AppSettings::default().history_limit)
+                }
+                "auto_cleanup_days" => settings.auto_cleanup_days = parse_auto_cleanup_days(&value),
+                "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
+                "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
+                "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
+                "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
+                "quick_paste" => settings.quick_paste = parse_bool(&value),
+                "image_hover_preview" => settings.image_hover_preview = parse_bool(&value),
+                "show_copy_time" => settings.show_copy_time = parse_bool(&value),
+                "show_text_length" => settings.show_text_length = parse_bool(&value),
+                _ => {}
             }
-            "auto_cleanup_days" => settings.auto_cleanup_days = parse_auto_cleanup_days(&value),
-            "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
-            "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
-            "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
-            "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
-            "quick_paste" => settings.quick_paste = parse_bool(&value),
-            "image_hover_preview" => settings.image_hover_preview = parse_bool(&value),
-            "show_copy_time" => settings.show_copy_time = parse_bool(&value),
-            "show_text_length" => settings.show_text_length = parse_bool(&value),
-            _ => {}
         }
-    }
 
-    Ok(settings.normalized())
+        Ok(settings.normalized())
+    })
 }
 
 pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
-    let mut connection = open_connection()?;
-    let transaction = connection.transaction()?;
-    let values = [
-        ("history_limit", settings.history_limit.to_string()),
-        (
-            "auto_cleanup_days",
-            settings
-                .auto_cleanup_days
-                .map(|days| days.to_string())
-                .unwrap_or_else(|| "none".to_string()),
-        ),
-        ("launch_at_startup", settings.launch_at_startup.to_string()),
-        (
-            "keyboard_shortcuts",
-            settings.keyboard_shortcuts.to_string(),
-        ),
-        (
-            "auto_focus_history",
-            settings.auto_focus_history.to_string(),
-        ),
-        (
-            "promote_copied_entries",
-            settings.promote_copied_entries.to_string(),
-        ),
-        ("quick_paste", settings.quick_paste.to_string()),
-        (
-            "image_hover_preview",
-            settings.image_hover_preview.to_string(),
-        ),
-        ("show_copy_time", settings.show_copy_time.to_string()),
-        ("show_text_length", settings.show_text_length.to_string()),
-    ];
+    with_connection(|connection| {
+        let transaction = connection.transaction()?;
+        let values = [
+            ("history_limit", settings.history_limit.to_string()),
+            (
+                "auto_cleanup_days",
+                settings
+                    .auto_cleanup_days
+                    .map(|days| days.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            ),
+            ("launch_at_startup", settings.launch_at_startup.to_string()),
+            (
+                "keyboard_shortcuts",
+                settings.keyboard_shortcuts.to_string(),
+            ),
+            (
+                "auto_focus_history",
+                settings.auto_focus_history.to_string(),
+            ),
+            (
+                "promote_copied_entries",
+                settings.promote_copied_entries.to_string(),
+            ),
+            ("quick_paste", settings.quick_paste.to_string()),
+            (
+                "image_hover_preview",
+                settings.image_hover_preview.to_string(),
+            ),
+            ("show_copy_time", settings.show_copy_time.to_string()),
+            ("show_text_length", settings.show_text_length.to_string()),
+        ];
 
-    for (key, value) in values {
-        transaction.execute(
-            "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
-    }
+        for (key, value) in values {
+            transaction.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+        }
 
-    transaction.commit()?;
-    Ok(())
+        transaction.commit()?;
+        Ok(())
+    })
 }
 
 pub fn database_path() -> Result<PathBuf, StorageError> {
@@ -283,11 +293,96 @@ pub fn database_path() -> Result<PathBuf, StorageError> {
     Ok(directory.join(DATABASE_FILE))
 }
 
+fn with_connection<T>(
+    operation: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
+) -> Result<T, StorageError> {
+    let mut connection = DATABASE_CONNECTION
+        .lock()
+        .map_err(|_| StorageError::Database("数据库连接锁已损坏".to_string()))?;
+
+    if connection.is_none() {
+        *connection = Some(open_connection()?);
+    }
+
+    operation(
+        connection
+            .as_mut()
+            .expect("database connection initialized"),
+    )
+}
+
 fn open_connection() -> Result<Connection, StorageError> {
-    let connection = Connection::open(database_path()?)?;
+    let path = database_path()?;
+    restore_plaintext_database_if_needed(&path)?;
+
+    let connection = Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     migrate(&connection)?;
     Ok(connection)
+}
+
+fn restore_plaintext_database_if_needed(database_path: &Path) -> Result<(), StorageError> {
+    if database_path.exists() && is_plaintext_sqlite(database_path)? {
+        return Ok(());
+    }
+
+    if let Some(source_path) = plaintext_restore_source()? {
+        if database_path.exists() {
+            fs::rename(
+                database_path,
+                unique_backup_path(database_path, "sqlcipher-backup"),
+            )?;
+        }
+        fs::copy(source_path, database_path)?;
+        return Ok(());
+    }
+
+    if database_path.exists() {
+        return Err(StorageError::Database(format!(
+            "数据库文件不是普通 SQLite：{}。如果要回退 SQLCipher，请保留旧的 history.sqlite3 或 history.ucp.plaintext-backup 后再启动。",
+            database_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn plaintext_restore_source() -> Result<Option<PathBuf>, StorageError> {
+    for file_name in [LEGACY_DATABASE_FILE, "history.ucp.plaintext-backup"] {
+        let path = data_directory().join(file_name);
+        if is_plaintext_sqlite(&path)? {
+            return Ok(Some(path));
+        }
+    }
+
+    Ok(None)
+}
+
+fn is_plaintext_sqlite(path: &Path) -> Result<bool, StorageError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    let mut header = [0; 16];
+    let mut file = fs::File::open(path)?;
+    let bytes_read = file.read(&mut header)?;
+    Ok(bytes_read == header.len() && header == *b"SQLite format 3\0")
+}
+
+fn unique_backup_path(path: &Path, suffix: &str) -> PathBuf {
+    for index in 0.. {
+        let extension = if index == 0 {
+            format!("ucp.{suffix}")
+        } else {
+            format!("ucp.{suffix}-{index}")
+        };
+        let candidate = path.with_extension(extension);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!()
 }
 
 fn migrate(connection: &Connection) -> Result<(), StorageError> {
@@ -404,6 +499,11 @@ fn test_data_directory() -> &'static Mutex<Option<PathBuf>> {
     TEST_DATA_DIRECTORY.get_or_init(|| Mutex::new(None))
 }
 
+#[cfg(test)]
+fn reset_storage_for_tests() {
+    *DATABASE_CONNECTION.lock().unwrap() = None;
+}
+
 trait ClipboardKindKey {
     fn key(self) -> &'static str;
 }
@@ -426,7 +526,11 @@ mod tests {
 
     #[test]
     fn storage_round_trips_settings_and_clipboard_entries() {
+        let _guard = test_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let directory = unique_test_directory();
+        reset_storage_for_tests();
         *test_data_directory().lock().unwrap() = Some(directory.clone());
 
         let settings = AppSettings {
@@ -462,10 +566,13 @@ mod tests {
 
         let loaded_settings = load_settings().unwrap();
         let loaded_history = load_history(10).unwrap();
-        let connection = Connection::open(database_path().unwrap()).unwrap();
+        let database_bytes = fs::read(database_path().unwrap()).unwrap();
+        assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
+
+        let schema_version = with_connection(|connection| schema_version(connection)).unwrap();
 
         assert_eq!(loaded_settings, settings);
-        assert_eq!(schema_version(&connection).unwrap(), SCHEMA_VERSION);
+        assert_eq!(schema_version, SCHEMA_VERSION);
         assert_eq!(loaded_history.counts().text, 1);
         assert_eq!(loaded_history.counts().image, 1);
         assert_eq!(loaded_history.counts().file, 1);
@@ -487,8 +594,87 @@ mod tests {
         delete_entry(10).unwrap();
         assert!(load_history(10).unwrap().entry(10).is_none());
 
+        reset_storage_for_tests();
         *test_data_directory().lock().unwrap() = None;
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn legacy_plaintext_database_restores_ucp() {
+        let _guard = test_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let directory = unique_test_directory();
+        reset_storage_for_tests();
+        fs::create_dir_all(&directory).unwrap();
+        *test_data_directory().lock().unwrap() = Some(directory.clone());
+
+        let legacy_path = directory.join(LEGACY_DATABASE_FILE);
+        let legacy_connection = Connection::open(&legacy_path).unwrap();
+        legacy_connection
+            .execute_batch(
+                "CREATE TABLE app_settings (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                INSERT INTO app_settings (key, value) VALUES ('history_limit', '100');
+                PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        legacy_connection.close().unwrap();
+
+        let settings = load_settings().unwrap();
+        let database_bytes = fs::read(database_path().unwrap()).unwrap();
+
+        assert_eq!(settings.history_limit, 100);
+        assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
+        assert!(legacy_path.exists());
+
+        reset_storage_for_tests();
+        *test_data_directory().lock().unwrap() = None;
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn unreadable_ucp_restores_from_legacy_plaintext_database() {
+        let _guard = test_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let directory = unique_test_directory();
+        reset_storage_for_tests();
+        fs::create_dir_all(&directory).unwrap();
+        *test_data_directory().lock().unwrap() = Some(directory.clone());
+
+        let legacy_path = directory.join(LEGACY_DATABASE_FILE);
+        let legacy_connection = Connection::open(&legacy_path).unwrap();
+        legacy_connection
+            .execute_batch(
+                "CREATE TABLE app_settings (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                INSERT INTO app_settings (key, value) VALUES ('history_limit', '500');
+                PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        legacy_connection.close().unwrap();
+        fs::write(directory.join(DATABASE_FILE), b"not a sqlite database").unwrap();
+
+        let settings = load_settings().unwrap();
+        let database_bytes = fs::read(database_path().unwrap()).unwrap();
+
+        assert_eq!(settings.history_limit, 500);
+        assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
+        assert!(directory.join("history.ucp.sqlcipher-backup").exists());
+
+        reset_storage_for_tests();
+        *test_data_directory().lock().unwrap() = None;
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    fn test_lock() -> &'static Mutex<()> {
+        static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        TEST_LOCK.get_or_init(|| Mutex::new(()))
     }
 
     fn unique_test_directory() -> PathBuf {

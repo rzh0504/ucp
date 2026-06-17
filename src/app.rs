@@ -4,7 +4,8 @@ use crate::platform;
 use crate::storage;
 use chrono::{Duration as ChronoDuration, Local};
 use dioxus::desktop::{
-    self, DesktopContext, HotKeyState, WindowCloseBehaviour, use_global_shortcut, use_window,
+    self, DesktopContext, HotKeyState, ShortcutRegistryError, WindowCloseBehaviour,
+    use_global_shortcut, use_window,
 };
 use dioxus::events::MountedData;
 use dioxus::html::Key;
@@ -24,20 +25,27 @@ const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
 
+#[derive(Clone)]
+struct InitialStorageState {
+    settings: AppSettings,
+    history: ClipboardHistory,
+    status: String,
+}
+
 #[component]
 pub fn App() -> Element {
-    let settings =
-        use_signal(|| storage::load_settings().unwrap_or_else(|_| AppSettings::default()));
-    let history = use_signal(|| {
-        storage::load_history(settings.peek().history_limit)
-            .unwrap_or_else(|_| ClipboardHistory::new(settings.peek().history_limit))
-    });
+    let initial_storage = use_hook(load_initial_storage);
+    let initial_settings = initial_storage.settings;
+    let initial_history = initial_storage.history.clone();
+    let initial_status = initial_storage.status.clone();
+    let settings = use_signal(move || initial_settings);
+    let history = use_signal(move || initial_history);
     let mut query = use_signal(String::new);
     let mut active_filter = use_signal(|| ClipboardFilter::All);
     let mut active_page = use_signal(|| AppPage::History);
     let search_input = use_signal(|| None::<Rc<MountedData>>);
     let mut shell = use_signal(|| None::<Rc<MountedData>>);
-    let status = use_signal(|| "启动剪贴板监听...".to_string());
+    let status = use_signal(move || initial_status);
     let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
@@ -55,19 +63,14 @@ pub fn App() -> Element {
         }
     });
 
-    let shortcut_error = global_shortcut
-        .as_ref()
-        .err()
-        .map(|error| format!("{error:?}"));
+    let shortcut_error = global_shortcut.as_ref().err().map(shortcut_error_message);
     use_effect(move || {
         if let Some(error) = shortcut_error.as_ref()
             && !shortcut_error_reported()
         {
             shortcut_error_reported.set(true);
             let mut status = status;
-            status.set(format!(
-                "全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败：{error}"
-            ));
+            status.set(error.clone());
         }
     });
 
@@ -210,6 +213,51 @@ pub fn App() -> Element {
                     history_count: counts_snapshot.total,
                     status,
                 }
+            }
+        }
+    }
+}
+
+fn shortcut_error_message(error: &ShortcutRegistryError) -> String {
+    match error {
+        ShortcutRegistryError::InvalidShortcut(shortcut) => {
+            format!("全局快捷键配置无效：{shortcut}")
+        }
+        ShortcutRegistryError::Other(error) => {
+            let message = error.to_string();
+            let debug_message = format!("{error:?}");
+            if message.to_ascii_lowercase().contains("already registered")
+                || debug_message.contains("AlreadyRegistered")
+            {
+                format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 已被占用，仍可通过托盘打开窗口")
+            } else {
+                format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败：{message}")
+            }
+        }
+        _ => format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败"),
+    }
+}
+
+fn load_initial_storage() -> InitialStorageState {
+    match storage::load_settings() {
+        Ok(settings) => match storage::load_history(settings.history_limit) {
+            Ok(history) => InitialStorageState {
+                settings,
+                history,
+                status: "启动剪贴板监听...".to_string(),
+            },
+            Err(error) => InitialStorageState {
+                settings,
+                history: ClipboardHistory::new(settings.history_limit),
+                status: format!("存储初始化失败：{error}"),
+            },
+        },
+        Err(error) => {
+            let settings = AppSettings::default();
+            InitialStorageState {
+                settings,
+                history: ClipboardHistory::new(settings.history_limit),
+                status: format!("存储初始化失败：{error}"),
             }
         }
     }
