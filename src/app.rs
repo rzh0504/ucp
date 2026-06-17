@@ -125,6 +125,8 @@ pub fn App() -> Element {
                         keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
                         auto_focus: settings_snapshot.auto_focus_history,
                         promote_on_copy: settings_snapshot.promote_copied_entries,
+                        show_copy_time: settings_snapshot.show_copy_time,
+                        show_text_length: settings_snapshot.show_text_length,
                     }
                 }
             }

@@ -23,6 +23,8 @@ pub fn HistoryList(
     keyboard_shortcuts: bool,
     auto_focus: bool,
     promote_on_copy: bool,
+    show_copy_time: bool,
+    show_text_length: bool,
 ) -> Element {
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
@@ -220,6 +222,8 @@ pub fn HistoryList(
                             selection_anchor_id,
                             focused_id,
                             promote_on_copy,
+                            show_copy_time,
+                            show_text_length,
                         }
                     }
                     div { class: "history-list-clear-space" }
@@ -239,6 +243,8 @@ fn HistoryRow(
     mut selection_anchor_id: Signal<Option<u64>>,
     mut focused_id: Signal<Option<u64>>,
     promote_on_copy: bool,
+    show_copy_time: bool,
+    show_text_length: bool,
 ) -> Element {
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
@@ -253,6 +259,7 @@ fn HistoryRow(
     let entry_title = entry.title();
     let entry_size = entry.size_label();
     let entry_age = entry.age_label();
+    let show_size = !entry.is_text() || show_text_length;
     let row_main_class = if is_image {
         "history-row-main has-preview"
     } else {
@@ -316,11 +323,15 @@ fn HistoryRow(
                         if is_image {
                             span { "{entry_size}" }
                         }
-                        span { "{entry_age}" }
+                        if show_copy_time {
+                            span { "{entry_age}" }
+                        }
                     }
                     if !is_image {
                         p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
-                        p { class: "entry-size", "{entry_size}" }
+                        if show_size {
+                            p { class: "entry-size", "{entry_size}" }
+                        }
                     }
                 }
             }

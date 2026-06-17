@@ -80,6 +80,26 @@ pub fn SettingsPage(settings: Signal<AppSettings>, history: Signal<ClipboardHist
                         },
                     }
                 }
+
+                section { class: "settings-group",
+                    h3 { "显示" }
+                    SettingSwitchRow {
+                        label: "显示复制时间",
+                        hint: "在历史记录中显示每项的复制时间。",
+                        checked: settings_snapshot.show_copy_time,
+                        on_change: move |checked| {
+                            update_settings(settings, |next| next.show_copy_time = checked);
+                        },
+                    }
+                    SettingSwitchRow {
+                        label: "显示文本字符长度",
+                        hint: "在文本记录中显示字符数量。",
+                        checked: settings_snapshot.show_text_length,
+                        on_change: move |checked| {
+                            update_settings(settings, |next| next.show_text_length = checked);
+                        },
+                    }
+                }
             }
         }
     }
