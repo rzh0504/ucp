@@ -323,14 +323,14 @@ fn HistoryRow(
             }
             Toolbar { class: "entry-actions", aria_label: "条目操作",
                 ToolbarButton {
-                    class: if entry.favorite { "ghost-action is-on" } else { "ghost-action" },
+                    class: if entry.favorite { "ghost-action is-favorite is-on" } else { "ghost-action is-favorite" },
                     index: 0usize,
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_favorite(id) {
                             let _ = storage::save_entry(&entry);
                         }
                     },
-                    Icon { icon: AppIcon::Favorite }
+                    Icon { icon: if entry.favorite { AppIcon::FavoriteFilled } else { AppIcon::Favorite } }
                 }
                 ToolbarButton {
                     class: if entry.pinned { "ghost-action is-on is-pin-visible" } else { "ghost-action" },
@@ -340,7 +340,7 @@ fn HistoryRow(
                             let _ = storage::save_entry(&entry);
                         }
                     },
-                    Icon { icon: AppIcon::Pin }
+                    Icon { icon: if entry.pinned { AppIcon::PinFilled } else { AppIcon::Pin } }
                 }
                 ToolbarSeparator { class: "entry-action-separator", decorative: true }
                 ToolbarButton {
@@ -351,7 +351,7 @@ fn HistoryRow(
                             let _ = storage::delete_entry(id);
                         }
                     },
-                    "×"
+                    Icon { icon: AppIcon::Delete }
                 }
             }
         }
