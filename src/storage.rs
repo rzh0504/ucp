@@ -1,7 +1,7 @@
 use crate::model::{
     AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
 };
-use chrono::{Local, TimeZone};
+use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, params};
 use std::env;
 use std::fmt;
@@ -182,6 +182,22 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
     Ok(())
 }
 
+pub fn clear_history() -> Result<(), StorageError> {
+    let connection = open_connection()?;
+    connection.execute("DELETE FROM clipboard_entries", [])?;
+    Ok(())
+}
+
+pub fn delete_entries_older_than(cutoff: DateTime<Local>) -> Result<usize, StorageError> {
+    let connection = open_connection()?;
+    connection
+        .execute(
+            "DELETE FROM clipboard_entries WHERE captured_at_millis < ?1",
+            params![cutoff.timestamp_millis()],
+        )
+        .map_err(StorageError::from)
+}
+
 pub fn load_settings() -> Result<AppSettings, StorageError> {
     let connection = open_connection()?;
     let mut settings = AppSettings::default();
@@ -199,6 +215,7 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                     .parse::<usize>()
                     .unwrap_or(AppSettings::default().history_limit)
             }
+            "auto_cleanup_days" => settings.auto_cleanup_days = parse_auto_cleanup_days(&value),
             "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
             "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
             "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
@@ -218,6 +235,13 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
     let transaction = connection.transaction()?;
     let values = [
         ("history_limit", settings.history_limit.to_string()),
+        (
+            "auto_cleanup_days",
+            settings
+                .auto_cleanup_days
+                .map(|days| days.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        ),
         ("launch_at_startup", settings.launch_at_startup.to_string()),
         (
             "keyboard_shortcuts",
@@ -316,6 +340,15 @@ fn parse_bool(value: &str) -> bool {
     matches!(value, "true" | "1" | "yes" | "on")
 }
 
+fn parse_auto_cleanup_days(value: &str) -> Option<u16> {
+    match value {
+        "7" => Some(7),
+        "30" => Some(30),
+        "60" => Some(60),
+        _ => None,
+    }
+}
+
 fn load_files(connection: &Connection, entry_id: u64) -> rusqlite::Result<Vec<String>> {
     let mut statement = connection
         .prepare("SELECT path FROM clipboard_files WHERE entry_id = ?1 ORDER BY position ASC")?;
@@ -393,6 +426,7 @@ mod tests {
 
         let settings = AppSettings {
             history_limit: 50,
+            auto_cleanup_days: Some(30),
             launch_at_startup: true,
             keyboard_shortcuts: false,
             auto_focus_history: false,

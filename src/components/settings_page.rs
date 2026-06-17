@@ -1,6 +1,9 @@
-use crate::model::{AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS};
+use crate::model::{
+    AUTO_CLEANUP_DAY_OPTIONS, AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS,
+};
 use crate::platform;
 use crate::storage;
+use chrono::{Duration as ChronoDuration, Local};
 use dioxus::prelude::*;
 use dioxus_primitives::combobox::{
     Combobox, ComboboxInput, ComboboxItemIndicator, ComboboxList, ComboboxOption,
@@ -65,6 +68,32 @@ pub fn SettingsPage(
                             },
                         }
                     }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "按时间自动清理" }
+                            p { "只保留所选天数内的复制项；选择不自动清理则不会按时间删除。" }
+                        }
+                        AutoCleanupCombobox {
+                            value: settings_snapshot.auto_cleanup_days,
+                            on_change: move |days| {
+                                if update_settings(settings, status, |next| next.auto_cleanup_days = days)
+                                    && let Some(days) = days
+                                {
+                                    match apply_auto_cleanup(history, days) {
+                                        Ok(removed) if removed > 0 => {
+                                            let mut status = status;
+                                            status.set(format!("已清理 {removed} 项过期历史"));
+                                        }
+                                        Err(error) => {
+                                            let mut status = status;
+                                            status.set(format!("自动清理历史失败：{error}"));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            },
+                        }
+                    }
                 }
 
                 section { class: "settings-group",
@@ -120,6 +149,36 @@ pub fn SettingsPage(
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.show_text_length = checked);
                         },
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn AutoCleanupCombobox(value: Option<u16>, on_change: EventHandler<Option<u16>>) -> Element {
+    let selected_value = use_memo(move || Some(value));
+
+    rsx! {
+        Combobox::<Option<u16>> {
+            class: "settings-combobox",
+            value: Some(ReadSignal::from(selected_value)),
+            on_value_change: move |value: Option<Option<u16>>| {
+                if let Some(days) = value {
+                    on_change.call(days);
+                }
+            },
+            ComboboxInput { class: "settings-combobox-input", placeholder: "选择清理周期" }
+            ComboboxList { class: "settings-combobox-list",
+                for (index, days) in AUTO_CLEANUP_DAY_OPTIONS.into_iter().enumerate() {
+                    ComboboxOption::<Option<u16>> {
+                        class: "settings-combobox-option",
+                        index,
+                        value: days,
+                        text_value: Some(auto_cleanup_label(days).to_string()),
+                        "{auto_cleanup_label(days)}"
+                        ComboboxItemIndicator { span { "✓" } }
                     }
                 }
             }
@@ -200,5 +259,23 @@ fn update_settings(
             status.set(format!("设置保存失败：{error}"));
             false
         }
+    }
+}
+
+fn apply_auto_cleanup(
+    mut history: Signal<ClipboardHistory>,
+    days: u16,
+) -> Result<usize, storage::StorageError> {
+    let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
+    storage::delete_entries_older_than(cutoff)?;
+    Ok(history.write().remove_older_than_days(days))
+}
+
+fn auto_cleanup_label(days: Option<u16>) -> &'static str {
+    match days {
+        Some(7) => "7 天",
+        Some(30) => "30 天",
+        Some(60) => "60 天",
+        _ => "不自动清理",
     }
 }

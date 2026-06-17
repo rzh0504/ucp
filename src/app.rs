@@ -2,12 +2,17 @@ use crate::components::{AppPage, FloatingSettingsButton, HistoryList, SettingsPa
 use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::storage;
+use chrono::{Duration as ChronoDuration, Local};
 use dioxus::desktop::{
     self, DesktopContext, HotKeyState, WindowCloseBehaviour, use_global_shortcut, use_window,
 };
 use dioxus::events::MountedData;
 use dioxus::html::Key;
 use dioxus::prelude::*;
+use dioxus_primitives::alert_dialog::{
+    AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
+};
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_timer::Delay;
 use std::rc::Rc;
@@ -33,6 +38,7 @@ pub fn App() -> Element {
     let search_input = use_signal(|| None::<Rc<MountedData>>);
     let mut shell = use_signal(|| None::<Rc<MountedData>>);
     let status = use_signal(|| "启动剪贴板监听...".to_string());
+    let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
 
@@ -66,7 +72,28 @@ pub fn App() -> Element {
     });
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
-        watch_clipboard(history, status).await;
+        watch_clipboard(history, settings, status).await;
+    });
+
+    use_effect(move || {
+        if startup_cleanup_done() {
+            return;
+        }
+
+        startup_cleanup_done.set(true);
+        if let Some(days) = settings.peek().auto_cleanup_days {
+            match prune_history_by_age(history, days) {
+                Ok(removed) if removed > 0 => {
+                    let mut status = status;
+                    status.set(format!("已自动清理 {removed} 项过期历史"));
+                }
+                Err(error) => {
+                    let mut status = status;
+                    status.set(format!("自动清理历史失败：{error}"));
+                }
+                _ => {}
+            }
+        }
     });
 
     let snapshot = use_memo(move || history.read().filtered(query().as_str(), active_filter()));
@@ -175,8 +202,61 @@ pub fn App() -> Element {
                 "aria-live": "polite",
                 role: "status",
                 span { "{status}" }
+                ClearHistoryButton {
+                    history,
+                    history_count: counts_snapshot.total,
+                    status,
+                }
             }
             FloatingSettingsButton { active_page }
+        }
+    }
+}
+
+#[component]
+fn ClearHistoryButton(
+    history: Signal<ClipboardHistory>,
+    history_count: usize,
+    mut status: Signal<String>,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let disabled = history_count == 0;
+
+    rsx! {
+        button {
+            class: "status-clear-action",
+            type: "button",
+            disabled,
+            title: if disabled { "暂无历史可清空" } else { "清空全部历史" },
+            onclick: move |_| open.set(true),
+            "清空历史"
+        }
+        AlertDialogRoot {
+            open: open(),
+            on_open_change: move |value| open.set(value),
+            div { class: "alert-dialog-backdrop" }
+            AlertDialogContent { class: "alert-dialog-content",
+                AlertDialogTitle { class: "alert-dialog-title", "清空全部历史？" }
+                AlertDialogDescription { class: "alert-dialog-description",
+                    "这会删除所有剪贴板历史记录，操作不可撤销。"
+                }
+                AlertDialogActions { class: "alert-dialog-actions",
+                    AlertDialogCancel { class: "alert-dialog-button", "取消" }
+                    AlertDialogAction {
+                        class: "alert-dialog-button is-danger",
+                        on_click: move |_| {
+                            match storage::clear_history() {
+                                Ok(()) => {
+                                    history.write().clear();
+                                    status.set("历史已清空".to_string());
+                                }
+                                Err(error) => status.set(format!("历史清空失败：{error}")),
+                            }
+                        },
+                        "确认清空"
+                    }
+                }
+            }
         }
     }
 }
@@ -231,7 +311,11 @@ fn filter_shortcut(key: &Key) -> Option<ClipboardFilter> {
 }
 
 #[cfg(windows)]
-async fn watch_clipboard(history: Signal<ClipboardHistory>, mut status: Signal<String>) {
+async fn watch_clipboard(
+    history: Signal<ClipboardHistory>,
+    settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+) {
     use futures_util::StreamExt;
 
     let (updates_tx, mut updates_rx) = futures_channel::mpsc::unbounded();
@@ -243,23 +327,31 @@ async fn watch_clipboard(history: Signal<ClipboardHistory>, mut status: Signal<S
         Ok(listener) => listener,
         Err(error) => {
             status.set(format!("剪贴板事件监听失败，已切换轮询：{error}"));
-            poll_clipboard(history, status).await;
+            poll_clipboard(history, settings, status).await;
             return;
         }
     };
 
-    capture_clipboard(history, status);
+    capture_clipboard(history, settings, status);
     while updates_rx.next().await.is_some() {
-        capture_clipboard(history, status);
+        capture_clipboard(history, settings, status);
     }
 }
 
 #[cfg(not(windows))]
-async fn watch_clipboard(history: Signal<ClipboardHistory>, status: Signal<String>) {
-    poll_clipboard(history, status).await;
+async fn watch_clipboard(
+    history: Signal<ClipboardHistory>,
+    settings: Signal<AppSettings>,
+    status: Signal<String>,
+) {
+    poll_clipboard(history, settings, status).await;
 }
 
-async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String>) {
+async fn poll_clipboard(
+    history: Signal<ClipboardHistory>,
+    settings: Signal<AppSettings>,
+    status: Signal<String>,
+) {
     let mut last_sequence = None;
 
     loop {
@@ -269,7 +361,7 @@ async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String
             continue;
         }
 
-        capture_clipboard(history, status);
+        capture_clipboard(history, settings, status);
 
         if sequence.is_some() {
             last_sequence = sequence;
@@ -279,7 +371,11 @@ async fn poll_clipboard(history: Signal<ClipboardHistory>, status: Signal<String
     }
 }
 
-fn capture_clipboard(mut history: Signal<ClipboardHistory>, mut status: Signal<String>) {
+fn capture_clipboard(
+    mut history: Signal<ClipboardHistory>,
+    settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+) {
     match platform::clipboard::read_content() {
         Ok(Some(content)) => {
             let label = content.kind().label();
@@ -296,10 +392,24 @@ fn capture_clipboard(mut history: Signal<ClipboardHistory>, mut status: Signal<S
                 storage_error = Some(format!("历史清理失败：{error}"));
             }
 
+            let mut expired_count = 0;
+            if let Some(days) = settings.peek().auto_cleanup_days {
+                match prune_history_by_age(history, days) {
+                    Ok(removed) => expired_count = removed,
+                    Err(error) => storage_error = Some(format!("自动清理历史失败：{error}")),
+                }
+            }
+
             if let Some(message) = storage_error {
                 status.set(message);
             } else if result.changed {
-                status.set(format!("已捕获新的{label}剪贴板内容"));
+                if expired_count > 0 {
+                    status.set(format!(
+                        "已捕获新的{label}剪贴板内容，并清理 {expired_count} 项过期历史"
+                    ));
+                } else {
+                    status.set(format!("已捕获新的{label}剪贴板内容"));
+                }
             } else {
                 status.set("正在监听剪贴板".to_string());
             }
@@ -307,4 +417,13 @@ fn capture_clipboard(mut history: Signal<ClipboardHistory>, mut status: Signal<S
         Ok(None) => status.set("正在监听剪贴板，当前无支持内容".to_string()),
         Err(error) => status.set(format!("剪贴板暂不可用：{error}")),
     }
+}
+
+fn prune_history_by_age(
+    mut history: Signal<ClipboardHistory>,
+    days: u16,
+) -> Result<usize, storage::StorageError> {
+    let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
+    storage::delete_entries_older_than(cutoff)?;
+    Ok(history.write().remove_older_than_days(days))
 }

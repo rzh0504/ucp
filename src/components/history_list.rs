@@ -13,9 +13,11 @@ use dioxus::prelude::*;
 use dioxus_primitives::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
+use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
+use dioxus_primitives::{ContentAlign, ContentSide};
 use futures_timer::Delay;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -283,6 +285,10 @@ fn HistoryRow(
         ClipboardContent::Image(image) => Some(image.clone()),
         _ => None,
     };
+    let image_preview_url = match &entry.content {
+        ClipboardContent::Image(image) => image.preview_url.clone(),
+        _ => None,
+    };
     let row_main_class = if is_image {
         "history-row-main has-preview"
     } else {
@@ -332,12 +338,27 @@ fn HistoryRow(
                     copy_entry(id, history, promote_on_copy, status);
                 },
                 div { class: "entry-index", "{index}" }
-                if let ClipboardContent::Image(image) = &entry.content {
-                    if let Some(preview_url) = &image.preview_url {
-                        img {
-                            class: "entry-image-preview",
-                            src: "{preview_url}",
-                            alt: "剪贴板图像预览",
+                if is_image {
+                    if let Some(preview_url) = &image_preview_url {
+                        HoverCard { class: "entry-image-hover-card",
+                            HoverCardTrigger { class: "entry-image-hover-trigger", tabindex: "-1", role: "presentation",
+                                img {
+                                    class: "entry-image-preview",
+                                    src: "{preview_url}",
+                                    alt: "剪贴板图像预览",
+                                }
+                            }
+                            HoverCardContent {
+                                class: "entry-image-hover-content",
+                                side: ContentSide::Right,
+                                align: ContentAlign::Center,
+                                force_mount: false,
+                                img {
+                                    class: "entry-image-large-preview",
+                                    src: "{preview_url}",
+                                    alt: "放大的剪贴板图像预览",
+                                }
+                            }
                         }
                     } else {
                         div { class: "entry-image-preview is-empty", "IMG" }

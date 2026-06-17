@@ -1,10 +1,11 @@
 use base64::{Engine as _, engine::general_purpose};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Duration as ChronoDuration, Local};
 use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 use std::sync::Arc;
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
+pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
 const MAX_INLINE_IMAGE_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +59,7 @@ pub enum ClipboardContent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     pub history_limit: usize,
+    pub auto_cleanup_days: Option<u16>,
     pub launch_at_startup: bool,
     pub keyboard_shortcuts: bool,
     pub auto_focus_history: bool,
@@ -71,6 +73,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             history_limit: DEFAULT_HISTORY_LIMIT,
+            auto_cleanup_days: None,
             launch_at_startup: false,
             keyboard_shortcuts: true,
             auto_focus_history: true,
@@ -86,6 +89,9 @@ impl AppSettings {
     pub fn normalized(mut self) -> Self {
         if !HISTORY_LIMIT_OPTIONS.contains(&self.history_limit) {
             self.history_limit = DEFAULT_HISTORY_LIMIT;
+        }
+        if !AUTO_CLEANUP_DAY_OPTIONS.contains(&self.auto_cleanup_days) {
+            self.auto_cleanup_days = None;
         }
         self
     }
@@ -427,6 +433,17 @@ impl ClipboardHistory {
         let before = self.entries.len();
         self.entries.retain(|entry| entry.id != id);
         self.entries.len() != before
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    pub fn remove_older_than_days(&mut self, days: u16) -> usize {
+        let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
+        let before = self.entries.len();
+        self.entries.retain(|entry| entry.captured_at >= cutoff);
+        before - self.entries.len()
     }
 
     pub fn set_capacity(&mut self, capacity: usize) -> Vec<u64> {
