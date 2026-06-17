@@ -13,17 +13,16 @@ use dioxus::prelude::*;
 use dioxus_primitives::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
-use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
-use dioxus_primitives::{ContentAlign, ContentSide};
 use futures_timer::Delay;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
 const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
+const IMAGE_HOVER_PREVIEW_DELAY: Duration = Duration::from_millis(140);
 
 #[component]
 pub fn HistoryList(
@@ -271,6 +270,8 @@ fn HistoryRow(
 ) -> Element {
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
+    let mut hover_preview_open = use_signal(|| false);
+    let mut hover_preview_request = use_signal(|| 0u64);
     let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
     let row_class = match (is_selected, focused_id() == Some(id)) {
@@ -344,23 +345,42 @@ fn HistoryRow(
                 if is_image {
                     if let Some(preview_url) = &image_preview_url {
                         if image_hover_preview {
-                            HoverCard { class: "entry-image-hover-card",
-                                HoverCardTrigger { class: "entry-image-hover-trigger", tabindex: "-1", role: "presentation",
+                            div {
+                                class: "entry-image-hover-card",
+                                onmouseenter: move |_| {
+                                    if hover_preview_open() {
+                                        return;
+                                    }
+
+                                    let request = hover_preview_request().wrapping_add(1);
+                                    hover_preview_request.set(request);
+                                    spawn(async move {
+                                        Delay::new(IMAGE_HOVER_PREVIEW_DELAY).await;
+                                        if hover_preview_request() == request && !hover_preview_open() {
+                                            hover_preview_open.set(true);
+                                        }
+                                    });
+                                },
+                                onmouseleave: move |_| {
+                                    hover_preview_request.set(hover_preview_request().wrapping_add(1));
+                                    if hover_preview_open() {
+                                        hover_preview_open.set(false);
+                                    }
+                                },
+                                div { class: "entry-image-hover-trigger", role: "presentation",
                                     img {
                                         class: "entry-image-preview",
                                         src: "{preview_url}",
                                         alt: "剪贴板图像预览",
                                     }
                                 }
-                                HoverCardContent {
-                                    class: "entry-image-hover-content",
-                                    side: ContentSide::Right,
-                                    align: ContentAlign::Center,
-                                    force_mount: false,
-                                    img {
-                                        class: "entry-image-large-preview",
-                                        src: "{preview_url}",
-                                        alt: "放大的剪贴板图像预览",
+                                if hover_preview_open() {
+                                    div { class: "entry-image-hover-content", "data-state": "open",
+                                        img {
+                                            class: "entry-image-large-preview",
+                                            src: "{preview_url}",
+                                            alt: "放大的剪贴板图像预览",
+                                        }
                                     }
                                 }
                             }
