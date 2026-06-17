@@ -4799,6 +4799,7 @@ dependencies = [
  "futures-timer",
  "futures-util",
  "image",
+ "rfd",
  "rusqlite",
  "windows-sys 0.61.2",
 ]

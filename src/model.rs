@@ -22,7 +22,12 @@ pub struct ClipboardImage {
 
 impl ClipboardImage {
     pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
-        let preview_url = encode_png_data_url(width, height, &bytes);
+        let preview_url = encode_png(&bytes, width, height).map(|png| {
+            format!(
+                "data:image/png;base64,{}",
+                general_purpose::STANDARD.encode(png)
+            )
+        });
 
         Self {
             width,
@@ -30,6 +35,10 @@ impl ClipboardImage {
             bytes,
             preview_url,
         }
+    }
+
+    pub fn to_png_bytes(&self) -> Option<Vec<u8>> {
+        encode_png(&self.bytes, self.width, self.height)
     }
 }
 
@@ -465,7 +474,7 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
-fn encode_png_data_url(width: usize, height: usize, bytes: &[u8]) -> Option<String> {
+fn encode_png(bytes: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
     if bytes.len() != width.checked_mul(height)?.checked_mul(4)? {
         return None;
     }
@@ -475,10 +484,7 @@ fn encode_png_data_url(width: usize, height: usize, bytes: &[u8]) -> Option<Stri
         .write_image(bytes, width as u32, height as u32, ColorType::Rgba8.into())
         .ok()?;
 
-    Some(format!(
-        "data:image/png;base64,{}",
-        general_purpose::STANDARD.encode(png)
-    ))
+    Some(png)
 }
 
 #[cfg(test)]

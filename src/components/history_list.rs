@@ -1,7 +1,8 @@
 use super::filter_tabs::FilterTabs;
 use super::icons::{AppIcon, Icon};
 use crate::model::{
-    ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
+    ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, ClipboardImage,
+    HistoryCounts,
 };
 use crate::platform;
 use crate::storage;
@@ -16,6 +17,7 @@ use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 use futures_timer::Delay;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -275,6 +277,10 @@ fn HistoryRow(
     let entry_size = entry.size_label();
     let entry_age = entry.age_label();
     let show_size = !entry.is_text() || show_text_length;
+    let image_to_save = match &entry.content {
+        ClipboardContent::Image(image) => Some(image.clone()),
+        _ => None,
+    };
     let row_main_class = if is_image {
         "history-row-main has-preview"
     } else {
@@ -292,7 +298,7 @@ fn HistoryRow(
     });
 
     rsx! {
-        ContextMenu { tabindex: "-1", disabled: !quick_paste,
+        ContextMenu { tabindex: "-1", disabled: !quick_paste && !is_image,
             ContextMenuTrigger {
                 article {
                     class: "{row_class}",
@@ -388,26 +394,43 @@ fn HistoryRow(
                 }
             }
             ContextMenuContent { class: "entry-context-menu",
-                ContextMenuItem {
-                    class: "entry-context-menu-item",
-                    value: "quick-paste".to_string(),
-                    index: 0usize,
-                    on_select: move |_| {
-                        if copy_entry(id, history, promote_on_copy) {
-                            paste_window.set_minimized(true);
-                            status.set("已发送快捷粘贴".to_string());
-                            spawn(async move {
-                                Delay::new(QUICK_PASTE_DELAY).await;
-                                if let Err(error) = platform::clipboard::paste_shortcut() {
-                                    status.set(format!("快捷粘贴失败：{error}"));
-                                }
-                            });
-                        } else {
-                            status.set("快捷粘贴失败：剪贴板暂不可用".to_string());
-                        }
-                    },
-                    span { "快捷粘贴" }
-                    kbd { "Ctrl+V" }
+                if quick_paste {
+                    ContextMenuItem {
+                        class: "entry-context-menu-item",
+                        value: "quick-paste".to_string(),
+                        index: 0usize,
+                        on_select: move |_| {
+                            if copy_entry(id, history, promote_on_copy) {
+                                paste_window.set_minimized(true);
+                                status.set("已发送快捷粘贴".to_string());
+                                spawn(async move {
+                                    Delay::new(QUICK_PASTE_DELAY).await;
+                                    if let Err(error) = platform::clipboard::paste_shortcut() {
+                                        status.set(format!("快捷粘贴失败：{error}"));
+                                    }
+                                });
+                            } else {
+                                status.set("快捷粘贴失败：剪贴板暂不可用".to_string());
+                            }
+                        },
+                        span { "快捷粘贴" }
+                        kbd { "Ctrl+V" }
+                    }
+                }
+                if let Some(image) = image_to_save.clone() {
+                    ContextMenuItem {
+                        class: "entry-context-menu-item",
+                        value: "save-image".to_string(),
+                        index: 1usize,
+                        on_select: move |_| {
+                            save_image_file(
+                                image.clone(),
+                                entry.captured_at.format("ucp-image-%Y%m%d-%H%M%S.png").to_string(),
+                                status,
+                            );
+                        },
+                        span { "保存为图片文件" }
+                    }
                 }
             }
         }
@@ -504,6 +527,38 @@ fn copy_entry(id: u64, mut history: Signal<ClipboardHistory>, promote_on_copy: b
     }
 
     true
+}
+
+fn save_image_file(image: ClipboardImage, default_file_name: String, mut status: Signal<String>) {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("PNG 图像", &["png"])
+        .set_file_name(default_file_name)
+        .save_file()
+    else {
+        return;
+    };
+
+    let Some(png) = image.to_png_bytes() else {
+        status.set("保存图片失败：图像数据无效".to_string());
+        return;
+    };
+
+    let path = path_with_png_extension(path);
+    match std::fs::write(&path, png) {
+        Ok(()) => status.set(format!("已保存图片：{}", path.display())),
+        Err(error) => status.set(format!("保存图片失败：{error}")),
+    }
+}
+
+fn path_with_png_extension(mut path: PathBuf) -> PathBuf {
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+    {
+        path.set_extension("png");
+    }
+
+    path
 }
 
 fn delete_focused_or_selected(
