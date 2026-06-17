@@ -312,9 +312,6 @@ fn HistoryRow(
                 div { class: "entry-content",
                     div { class: "entry-kicker",
                         span { "{kind_label}" }
-                        if entry.favorite {
-                            FavoriteBadge {}
-                        }
                         span { "{entry.age_label()}" }
                     }
                     p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
@@ -323,7 +320,7 @@ fn HistoryRow(
             }
             Toolbar { class: "entry-actions", aria_label: "条目操作",
                 ToolbarButton {
-                    class: if entry.favorite { "ghost-action is-favorite is-on" } else { "ghost-action is-favorite" },
+                    class: if entry.favorite { "ghost-action is-favorite is-on is-favorite-visible" } else { "ghost-action is-favorite" },
                     index: 0usize,
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_favorite(id) {
@@ -539,13 +536,6 @@ fn update_selection(
     }
 
     *anchor_id = Some(id);
-}
-
-#[component]
-fn FavoriteBadge() -> Element {
-    rsx! {
-        span { class: "entry-favorite-badge", "收藏" }
-    }
 }
 
 #[component]

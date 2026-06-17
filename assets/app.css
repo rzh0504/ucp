@@ -650,20 +650,6 @@ button {
     font-weight: 600;
 }
 
-.entry-favorite-badge {
-    display: inline-flex;
-    align-items: center;
-    height: 18px;
-    padding: 0 7px;
-    border: 1px solid rgba(0, 122, 255, 0.22);
-    border-radius: 999px;
-    background: rgba(0, 122, 255, 0.08);
-    color: #007aff;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-}
-
 .entry-title {
     display: -webkit-box;
     margin: 0;
@@ -706,6 +692,7 @@ button {
 }
 
 .entry-actions .ghost-action.is-pin-visible,
+.entry-actions .ghost-action.is-favorite-visible,
 .history-row:hover .entry-actions .ghost-action,
 .history-row:hover .entry-actions .entry-action-separator,
 .history-row.is-focused .entry-actions .ghost-action,
