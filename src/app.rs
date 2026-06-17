@@ -32,9 +32,11 @@ pub fn App() -> Element {
         watch_clipboard(history, status).await;
     });
 
-    let snapshot = history.read().filtered(query().as_str(), active_filter());
-    let counts = history.read().counts();
-    let entry_count = snapshot.len();
+    let snapshot = use_memo(move || history.read().filtered(query().as_str(), active_filter()));
+    let counts = use_memo(move || history.read().counts());
+    let snapshot_entries = snapshot();
+    let counts_snapshot = counts();
+    let entry_count = snapshot_entries.len();
     let settings_snapshot = settings();
 
     rsx! {
@@ -116,11 +118,11 @@ pub fn App() -> Element {
                     }
                 } else {
                     HistoryList {
-                        entries: snapshot,
+                        entries: snapshot_entries,
                         history,
                         entry_count,
                         active_filter,
-                        counts,
+                        counts: counts_snapshot,
                         keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
                         auto_focus: settings_snapshot.auto_focus_history,
                         promote_on_copy: settings_snapshot.promote_copied_entries,

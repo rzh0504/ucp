@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-const QUICK_PASTE_DELAY: Duration = Duration::from_millis(160);
+const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
 
 #[component]
 pub fn HistoryList(
@@ -404,15 +404,14 @@ fn HistoryRow(
                         on_select: move |_| {
                             if copy_entry(id, history, promote_on_copy, status) {
                                 paste_window.set_minimized(true);
-                                status.set("已发送快捷粘贴".to_string());
+                                status.set("正在切换窗口并粘贴...".to_string());
                                 spawn(async move {
                                     Delay::new(QUICK_PASTE_DELAY).await;
-                                    if let Err(error) = platform::clipboard::paste_shortcut() {
-                                        status.set(format!("快捷粘贴失败：{error}"));
+                                    match platform::clipboard::paste_shortcut() {
+                                        Ok(()) => status.set("已快捷粘贴".to_string()),
+                                        Err(error) => status.set(format!("快捷粘贴失败：{error}")),
                                     }
                                 });
-                            } else {
-                                status.set("快捷粘贴失败：剪贴板暂不可用".to_string());
                             }
                         },
                         span { "快捷粘贴" }

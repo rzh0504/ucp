@@ -14,6 +14,7 @@ use std::sync::{Mutex, OnceLock};
 
 const APP_DIR: &str = "UCP Clipboard";
 const DATABASE_FILE: &str = "history.sqlite3";
+const SCHEMA_VERSION: i32 = 1;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -261,6 +262,13 @@ fn open_connection() -> Result<Connection, StorageError> {
 }
 
 fn migrate(connection: &Connection) -> Result<(), StorageError> {
+    let user_version = schema_version(connection)?;
+    if user_version > SCHEMA_VERSION {
+        return Err(StorageError::Database(format!(
+            "数据库版本 {user_version} 高于当前程序支持的版本 {SCHEMA_VERSION}"
+        )));
+    }
+
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS clipboard_entries (\
              id INTEGER PRIMARY KEY NOT NULL, \
@@ -289,12 +297,19 @@ fn migrate(connection: &Connection) -> Result<(), StorageError> {
           CREATE INDEX IF NOT EXISTS idx_clipboard_files_entry \
               ON clipboard_files (entry_id, position);
 
-          CREATE TABLE IF NOT EXISTS app_settings (\
-              key TEXT PRIMARY KEY NOT NULL, \
-              value TEXT NOT NULL\
-          );",
+           CREATE TABLE IF NOT EXISTS app_settings (\
+               key TEXT PRIMARY KEY NOT NULL, \
+               value TEXT NOT NULL\
+           );",
     )?;
+    connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
+}
+
+fn schema_version(connection: &Connection) -> Result<i32, StorageError> {
+    connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(StorageError::from)
 }
 
 fn parse_bool(value: &str) -> bool {
@@ -407,8 +422,10 @@ mod tests {
 
         let loaded_settings = load_settings().unwrap();
         let loaded_history = load_history(10).unwrap();
+        let connection = Connection::open(database_path().unwrap()).unwrap();
 
         assert_eq!(loaded_settings, settings);
+        assert_eq!(schema_version(&connection).unwrap(), SCHEMA_VERSION);
         assert_eq!(loaded_history.counts().text, 1);
         assert_eq!(loaded_history.counts().image, 1);
         assert_eq!(loaded_history.counts().file, 1);

@@ -31,12 +31,36 @@ fn enable() -> Result<(), String> {
 fn disable() -> Result<(), String> {
     use std::process::Command;
 
-    let _ = Command::new("reg")
+    let output = Command::new("reg")
         .args(["delete", RUN_KEY, "/v", APP_RUN_VALUE, "/f"])
         .output()
         .map_err(|error| error.to_string())?;
 
-    Ok(())
+    if output.status.success() || registry_value_was_missing(&output) {
+        Ok(())
+    } else {
+        Err(command_error(&output))
+    }
+}
+
+#[cfg(windows)]
+fn registry_value_was_missing(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    stderr.contains("unable to find")
+        || stderr.contains("cannot find")
+        || stdout.contains("unable to find")
+        || stdout.contains("cannot find")
+}
+
+#[cfg(windows)]
+fn command_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    } else {
+        stderr
+    }
 }
 
 #[cfg(not(windows))]
