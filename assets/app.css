@@ -79,42 +79,6 @@ button {
     font-weight: 600;
 }
 
-.floating-settings {
-    position: absolute;
-    right: 22px;
-    bottom: 22px;
-    z-index: 20;
-}
-
-.floating-settings-action {
-    display: grid;
-    width: 48px;
-    height: 48px;
-    place-items: center;
-    border: 1px solid rgba(60, 60, 67, 0.16);
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
-    color: #3a3a3c;
-    cursor: pointer;
-    backdrop-filter: saturate(180%) blur(18px);
-    transition: background 120ms ease, box-shadow 120ms ease, color 120ms ease, transform 120ms ease;
-}
-
-.floating-settings-action:hover,
-.floating-settings-action.is-active {
-    background: #007aff;
-    box-shadow: 0 14px 34px rgba(0, 122, 255, 0.28), 0 2px 8px rgba(0, 0, 0, 0.1);
-    color: #ffffff;
-    transform: translateY(-1px);
-}
-
-.floating-settings-icon {
-    font-size: 20px;
-    font-weight: 800;
-    line-height: 1;
-}
-
 .window-controls {
     display: flex;
     align-items: center;
@@ -236,23 +200,47 @@ button {
     line-height: 1.4;
 }
 
-.status-bar span {
+.status-message {
     flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.status-clear-action {
+.status-icon-action {
+    display: grid;
     flex: 0 0 auto;
-    min-height: 24px;
-    padding: 0 9px;
-    border-radius: 7px;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 8px;
     background: transparent;
-    color: #ff3b30;
     cursor: pointer;
-    font-size: 12px;
-    font-weight: 700;
+    transition: background 120ms ease, color 120ms ease;
+}
+
+.status-settings-action {
+    color: #6e6e73;
+}
+
+.status-settings-action:hover,
+.status-settings-action.is-active {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+}
+
+.status-settings-action .app-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.status-clear-action {
+    color: #ff3b30;
+}
+
+.status-clear-action .app-icon {
+    width: 16px;
+    height: 16px;
 }
 
 .status-clear-action:hover:not(:disabled) {
@@ -443,14 +431,42 @@ button {
 }
 
 .settings-header {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-title-copy {
+    min-width: 0;
 }
 
 .list-count,
-.settings-header > span {
+.settings-title-copy span {
     color: #8e8e93;
     font-size: 12px;
     font-weight: 600;
+}
+
+.settings-back-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: rgba(118, 118, 128, 0.12);
+    color: #3a3a3c;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settings-back-action:hover {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+}
+
+.settings-back-action span {
+    font-size: 14px;
+    line-height: 1;
 }
 
 .selection-actions {

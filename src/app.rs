@@ -1,4 +1,4 @@
-use crate::components::{AppPage, FloatingSettingsButton, HistoryList, SettingsPage, TopBar};
+use crate::components::{AppIcon, AppPage, HistoryList, Icon, SettingsPage, TopBar};
 use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::storage;
@@ -176,6 +176,7 @@ pub fn App() -> Element {
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {
                     SettingsPage {
+                        active_page,
                         settings,
                         history,
                         status,
@@ -201,14 +202,35 @@ pub fn App() -> Element {
                 class: "status-bar",
                 "aria-live": "polite",
                 role: "status",
-                span { "{status}" }
+                span { class: "status-message", "{status}" }
+                StatusSettingsButton { active_page }
                 ClearHistoryButton {
                     history,
                     history_count: counts_snapshot.total,
                     status,
                 }
             }
-            FloatingSettingsButton { active_page }
+        }
+    }
+}
+
+#[component]
+fn StatusSettingsButton(mut active_page: Signal<AppPage>) -> Element {
+    let is_settings = active_page() == AppPage::Settings;
+    let button_class = if is_settings {
+        "status-icon-action status-settings-action is-active"
+    } else {
+        "status-icon-action status-settings-action"
+    };
+
+    rsx! {
+        button {
+            class: button_class,
+            type: "button",
+            title: if is_settings { "已在设置页" } else { "设置" },
+            aria_label: if is_settings { "已在设置页" } else { "打开设置" },
+            onclick: move |_| active_page.set(AppPage::Settings),
+            Icon { icon: AppIcon::Settings }
         }
     }
 }
@@ -224,12 +246,13 @@ fn ClearHistoryButton(
 
     rsx! {
         button {
-            class: "status-clear-action",
+            class: "status-icon-action status-clear-action",
             type: "button",
             disabled,
             title: if disabled { "暂无历史可清空" } else { "清空全部历史" },
+            aria_label: if disabled { "暂无历史可清空" } else { "清空全部历史" },
             onclick: move |_| open.set(true),
-            "清空历史"
+            Icon { icon: AppIcon::Clear }
         }
         AlertDialogRoot {
             open: open(),

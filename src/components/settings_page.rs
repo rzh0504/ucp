@@ -1,3 +1,4 @@
+use super::AppPage;
 use crate::model::{
     AUTO_CLEANUP_DAY_OPTIONS, AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS,
 };
@@ -14,6 +15,7 @@ use dioxus_primitives::switch::{Switch, SwitchThumb};
 
 #[component]
 pub fn SettingsPage(
+    mut active_page: Signal<AppPage>,
     settings: Signal<AppSettings>,
     history: Signal<ClipboardHistory>,
     status: Signal<String>,
@@ -22,8 +24,18 @@ pub fn SettingsPage(
 
     rsx! {
         div { class: "list-header settings-header",
-            h2 { "设置" }
-            span { "应用偏好" }
+            div { class: "settings-title-copy",
+                h2 { "设置" }
+                span { "应用偏好" }
+            }
+            button {
+                class: "settings-back-action",
+                type: "button",
+                title: "返回内容页",
+                onclick: move |_| active_page.set(AppPage::History),
+                span { aria_hidden: "true", "←" }
+                "返回"
+            }
         }
         Separator { class: "list-separator", decorative: true }
         ScrollArea { class: "settings-scroll", direction: ScrollDirection::Vertical, tabindex: "0",
