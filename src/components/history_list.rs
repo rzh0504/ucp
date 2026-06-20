@@ -266,6 +266,7 @@ fn HistoryRow(
 ) -> Element {
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
+    let mut files_expanded = use_signal(|| false);
     let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
     let row_class = match (is_selected, focused_id() == Some(id)) {
@@ -366,19 +367,44 @@ fn HistoryRow(
                         }
                     }
                     if let Some(file_display) = &file_display {
-                        div { class: "entry-title-row",
-                            if let Some(icon_url) = &file_display.icon_url {
-                                img {
-                                    class: "entry-file-app-icon",
-                                    src: "{icon_url}",
-                                    alt: "",
-                                }
-                            } else {
-                                span { class: "entry-file-app-icon is-fallback",
-                                    Icon { icon: AppIcon::File }
+                        div { class: "entry-file-list",
+                            for file in file_display.visible_files(files_expanded()).iter() {
+                                div { class: if file.exists { "entry-file-row" } else { "entry-file-row is-missing" },
+                                    if let Some(icon_url) = &file.icon_url {
+                                        img {
+                                            class: "entry-file-app-icon",
+                                            src: "{icon_url}",
+                                            alt: "",
+                                        }
+                                    } else {
+                                        span { class: "entry-file-app-icon is-fallback",
+                                            Icon { icon: AppIcon::File }
+                                        }
+                                    }
+                                    p { class: if file.exists { "entry-title" } else { "entry-title is-muted" }, "{file.name}" }
                                 }
                             }
-                            p { class: if file_display.missing_count > 0 { "entry-title is-muted" } else { "entry-title" }, "{file_display.title}" }
+                            if file_display.hidden_count(files_expanded()) > 0 {
+                                span {
+                                    class: "entry-file-expand",
+                                    role: "button",
+                                    onclick: move |event| {
+                                        event.stop_propagation();
+                                        files_expanded.set(true);
+                                    },
+                                    "展开另外 {file_display.hidden_count(files_expanded())} 项"
+                                }
+                            } else if file_display.can_collapse(files_expanded()) {
+                                span {
+                                    class: "entry-file-expand",
+                                    role: "button",
+                                    onclick: move |event| {
+                                        event.stop_propagation();
+                                        files_expanded.set(false);
+                                    },
+                                    "收起文件列表"
+                                }
+                            }
                         }
                         p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
                     } else if !is_image {
@@ -467,11 +493,12 @@ fn HistoryRow(
     }
 }
 
+const COLLAPSED_FILE_LIMIT: usize = 3;
+
 #[derive(Clone, Debug)]
 struct FileListDisplay {
-    title: String,
+    files: Vec<FileDisplay>,
     stats: String,
-    icon_url: Option<String>,
     missing_count: usize,
 }
 
@@ -483,25 +510,6 @@ impl FileListDisplay {
             .collect::<Vec<_>>();
         let total_count = files.len();
         let missing_count = files.iter().filter(|file| !file.exists).count();
-        let icon_url = files.iter().find_map(|file| file.icon_url.clone());
-        let title = match files.as_slice() {
-            [] => "文件列表为空".to_string(),
-            [file] => file.name.clone(),
-            files => {
-                let names = files
-                    .iter()
-                    .take(3)
-                    .map(|file| file.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join("、");
-
-                if files.len() > 3 {
-                    format!("{names} 等 {} 项", files.len())
-                } else {
-                    names
-                }
-            }
-        };
         let stats = match files.as_slice() {
             [] => "0 个文件".to_string(),
             [file] => format!("{} · {}", file.kind_label, file.directory),
@@ -510,11 +518,30 @@ impl FileListDisplay {
         };
 
         Self {
-            title,
+            files,
             stats,
-            icon_url,
             missing_count,
         }
+    }
+
+    fn visible_files(&self, expanded: bool) -> &[FileDisplay] {
+        if expanded {
+            &self.files
+        } else {
+            &self.files[..self.files.len().min(COLLAPSED_FILE_LIMIT)]
+        }
+    }
+
+    fn hidden_count(&self, expanded: bool) -> usize {
+        if expanded {
+            0
+        } else {
+            self.files.len().saturating_sub(COLLAPSED_FILE_LIMIT)
+        }
+    }
+
+    fn can_collapse(&self, expanded: bool) -> bool {
+        expanded && self.files.len() > COLLAPSED_FILE_LIMIT
     }
 }
 

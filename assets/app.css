@@ -849,15 +849,26 @@ button {
     color: #2c2c2e;
 }
 
-.entry-title-row {
+.entry-file-list {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.entry-file-row {
     display: flex;
     align-items: center;
     gap: 7px;
     min-width: 0;
 }
 
-.entry-title-row .entry-title {
+.entry-file-row.is-missing {
+    opacity: 0.72;
+}
+
+.entry-file-row .entry-title {
     min-width: 0;
+    -webkit-line-clamp: 1;
 }
 
 .entry-file-app-icon {
@@ -875,6 +886,19 @@ button {
 .entry-file-app-icon .app-icon {
     width: 18px;
     height: 18px;
+}
+
+.entry-file-expand {
+    justify-self: start;
+    margin-top: 1px;
+    color: #007aff;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.entry-file-expand:hover {
+    text-decoration: underline;
 }
 
 .entry-size {
