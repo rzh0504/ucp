@@ -1,13 +1,15 @@
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Duration as ChronoDuration, Local};
-use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
+use image::{
+    ColorType, ImageBuffer, ImageEncoder, Rgba, codecs::png::PngEncoder, imageops::FilterType,
+};
 use std::sync::Arc;
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
-const IMAGE_PREVIEW_MAX_WIDTH: usize = 720;
-const IMAGE_PREVIEW_MAX_HEIGHT: usize = 220;
+const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
+const IMAGE_PREVIEW_MAX_HEIGHT: usize = 440;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
@@ -533,7 +535,7 @@ fn encode_image_preview(bytes: &[u8], width: usize, height: usize) -> Option<Vec
         return encode_png(bytes, width, height);
     }
 
-    let preview = resize_rgba_nearest(bytes, width, height, preview_width, preview_height)?;
+    let preview = resize_rgba_high_quality(bytes, width, height, preview_width, preview_height)?;
     encode_png(&preview, preview_width, preview_height)
 }
 
@@ -552,7 +554,7 @@ fn image_preview_dimensions(width: usize, height: usize) -> Option<(usize, usize
     ))
 }
 
-fn resize_rgba_nearest(
+fn resize_rgba_high_quality(
     bytes: &[u8],
     width: usize,
     height: usize,
@@ -563,17 +565,16 @@ fn resize_rgba_nearest(
         return None;
     }
 
-    let mut resized = Vec::with_capacity(target_width.checked_mul(target_height)?.checked_mul(4)?);
-    for y in 0..target_height {
-        let source_y = (y * height / target_height).min(height - 1);
-        for x in 0..target_width {
-            let source_x = (x * width / target_width).min(width - 1);
-            let source = (source_y * width + source_x) * 4;
-            resized.extend_from_slice(&bytes[source..source + 4]);
-        }
-    }
+    let source =
+        ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(width as u32, height as u32, bytes.to_vec())?;
+    let resized = image::imageops::resize(
+        &source,
+        target_width as u32,
+        target_height as u32,
+        FilterType::Lanczos3,
+    );
 
-    Some(resized)
+    Some(resized.into_raw())
 }
 
 #[cfg(test)]
@@ -673,8 +674,8 @@ mod tests {
 
     #[test]
     fn image_preview_dimensions_preserve_aspect_ratio_without_upscaling() {
-        assert_eq!(image_preview_dimensions(1920, 1080), Some((391, 220)));
-        assert_eq!(image_preview_dimensions(2000, 100), Some((720, 36)));
+        assert_eq!(image_preview_dimensions(1920, 1080), Some((782, 440)));
+        assert_eq!(image_preview_dimensions(2000, 100), Some((1440, 72)));
         assert_eq!(image_preview_dimensions(32, 16), Some((32, 16)));
         assert_eq!(image_preview_dimensions(0, 16), None);
     }
