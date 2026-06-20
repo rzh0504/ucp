@@ -54,11 +54,9 @@ pub fn App() -> Element {
 
     let global_shortcut = use_global_shortcut(GLOBAL_SHOW_SHORTCUT, {
         let desktop = desktop.clone();
-        let mut status = status;
         move |state| {
             if state == HotKeyState::Pressed {
                 show_desktop_window(&desktop);
-                status.set("已通过全局快捷键打开窗口".to_string());
             }
         }
     });
@@ -243,7 +241,7 @@ fn load_initial_storage() -> InitialStorageState {
             Ok(history) => InitialStorageState {
                 settings,
                 history,
-                status: "启动剪贴板监听...".to_string(),
+                status: String::new(),
             },
             Err(error) => InitialStorageState {
                 settings,
@@ -350,7 +348,6 @@ fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>) {
     desktop::use_tray_menu_event_handler(move |event| match event.id().0.as_str() {
         TRAY_SHOW_WINDOW_ID => {
             show_desktop_window(&desktop);
-            status.set("已从系统托盘打开窗口".to_string());
         }
         TRAY_QUIT_ID => {
             status.set("正在退出 UCP Clipboard".to_string());
@@ -449,7 +446,6 @@ fn capture_clipboard(
 ) {
     match platform::clipboard::read_content() {
         Ok(Some(content)) => {
-            let label = content.kind().label();
             let result = history.write().push(content);
             let mut storage_error = None;
 
@@ -463,29 +459,18 @@ fn capture_clipboard(
                 storage_error = Some(format!("历史清理失败：{error}"));
             }
 
-            let mut expired_count = 0;
             if let Some(days) = settings.peek().auto_cleanup_days {
                 match prune_history_by_age(history, days) {
-                    Ok(removed) => expired_count = removed,
+                    Ok(_) => {}
                     Err(error) => storage_error = Some(format!("自动清理历史失败：{error}")),
                 }
             }
 
             if let Some(message) = storage_error {
                 status.set(message);
-            } else if result.changed {
-                if expired_count > 0 {
-                    status.set(format!(
-                        "已捕获新的{label}剪贴板内容，并清理 {expired_count} 项过期历史"
-                    ));
-                } else {
-                    status.set(format!("已捕获新的{label}剪贴板内容"));
-                }
-            } else {
-                status.set("正在监听剪贴板".to_string());
             }
         }
-        Ok(None) => status.set("正在监听剪贴板，当前无支持内容".to_string()),
+        Ok(None) => {}
         Err(error) => status.set(format!("剪贴板暂不可用：{error}")),
     }
 }

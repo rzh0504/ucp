@@ -159,16 +159,6 @@ impl ClipboardContent {
     }
 }
 
-impl ClipboardKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Text => "文本",
-            Self::Image => "图像",
-            Self::File => "文件",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardFilter {
     All,
