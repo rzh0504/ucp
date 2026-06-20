@@ -16,13 +16,28 @@ pub enum ClipboardKind {
     File,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ClipboardImage {
     pub width: usize,
     pub height: usize,
-    pub bytes: Arc<Vec<u8>>,
+    pub bytes: Option<Arc<Vec<u8>>>,
     pub preview_url: Option<String>,
 }
+
+impl PartialEq for ClipboardImage {
+    fn eq(&self, other: &Self) -> bool {
+        if self.width != other.width || self.height != other.height {
+            return false;
+        }
+
+        match (&self.bytes, &other.bytes) {
+            (Some(left), Some(right)) => left == right,
+            _ => self.preview_url.is_some() && self.preview_url == other.preview_url,
+        }
+    }
+}
+
+impl Eq for ClipboardImage {}
 
 impl ClipboardImage {
     pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
@@ -36,13 +51,21 @@ impl ClipboardImage {
         Self {
             width,
             height,
-            bytes: Arc::new(bytes),
+            bytes: Some(Arc::new(bytes)),
             preview_url,
         }
     }
 
+    pub fn has_bytes(&self) -> bool {
+        self.bytes.is_some()
+    }
+
+    pub fn rgba_bytes(&self) -> Option<&[u8]> {
+        self.bytes.as_deref().map(Vec::as_slice)
+    }
+
     pub fn to_png_bytes(&self) -> Option<Vec<u8>> {
-        encode_png(self.bytes.as_slice(), self.width, self.height)
+        encode_png(self.rgba_bytes()?, self.width, self.height)
     }
 }
 
@@ -106,7 +129,7 @@ impl ClipboardContent {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Text(text) => text.trim().is_empty(),
-            Self::Image(image) => image.width == 0 || image.height == 0 || image.bytes.is_empty(),
+            Self::Image(image) => image.width == 0 || image.height == 0,
             Self::Files(files) => files.is_empty(),
         }
     }
@@ -150,7 +173,11 @@ impl ClipboardContent {
     pub fn size_label(&self) -> String {
         match self {
             Self::Text(text) => format!("{} 字符", text.chars().count()),
-            Self::Image(image) => format_bytes(image.bytes.len()),
+            Self::Image(image) => image
+                .bytes
+                .as_ref()
+                .map(|bytes| format_bytes(bytes.len()))
+                .unwrap_or_else(|| format!("{} x {}", image.width, image.height)),
             Self::Files(files) => format!("{} 个文件", files.len()),
         }
     }
@@ -627,7 +654,7 @@ mod tests {
         history.push(ClipboardContent::Image(ClipboardImage {
             width: 5,
             height: 10,
-            bytes: Arc::new(vec![0, 0, 0, 0]),
+            bytes: Some(Arc::new(vec![0, 0, 0, 0])),
             preview_url: None,
         }));
         history.push(ClipboardContent::Text("5".to_string()));
@@ -650,5 +677,23 @@ mod tests {
         assert_eq!(image_preview_dimensions(2000, 100), Some((720, 36)));
         assert_eq!(image_preview_dimensions(32, 16), Some((32, 16)));
         assert_eq!(image_preview_dimensions(0, 16), None);
+    }
+
+    #[test]
+    fn metadata_only_image_matches_full_image_by_preview() {
+        let full = ClipboardImage {
+            width: 2,
+            height: 1,
+            bytes: Some(Arc::new(vec![255, 0, 0, 255, 0, 255, 0, 255])),
+            preview_url: Some("preview".to_string()),
+        };
+        let metadata_only = ClipboardImage {
+            width: 2,
+            height: 1,
+            bytes: None,
+            preview_url: Some("preview".to_string()),
+        };
+
+        assert_eq!(metadata_only, full);
     }
 }

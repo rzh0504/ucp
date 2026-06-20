@@ -116,12 +116,18 @@ pub fn read_image() -> Result<Option<ClipboardImage>, ClipboardError> {
 }
 
 pub fn write_image(image: &ClipboardImage) -> Result<(), ClipboardError> {
+    let Some(bytes) = image.rgba_bytes() else {
+        return Err(ClipboardError::Unavailable(
+            "剪贴板图像原始数据尚未加载".to_string(),
+        ));
+    };
+
     Clipboard::new()
         .map_err(map_error)?
         .set_image(ImageData {
             width: image.width,
             height: image.height,
-            bytes: Cow::Borrowed(image.bytes.as_slice()),
+            bytes: Cow::Borrowed(bytes),
         })
         .map_err(map_error)
 }

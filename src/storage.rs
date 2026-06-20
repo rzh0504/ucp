@@ -2,7 +2,7 @@ use crate::model::{
     AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
 };
 use chrono::{DateTime, Local, TimeZone};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -50,7 +50,7 @@ impl From<rusqlite::Error> for StorageError {
 pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
     with_connection(|connection| {
         let mut statement = connection.prepare(
-            "SELECT id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
+            "SELECT id, kind, text_content, image_width, image_height, image_preview_url, \
                     captured_at_millis, pinned, favorite \
              FROM clipboard_entries \
              ORDER BY pinned DESC, captured_at_millis DESC, id DESC",
@@ -60,7 +60,7 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
             .query_map([], |row| {
                 let id = row.get::<_, i64>(0)? as u64;
                 let kind = row.get::<_, String>(1)?;
-                let captured_at_millis = row.get::<_, i64>(7)?;
+                let captured_at_millis = row.get::<_, i64>(6)?;
                 let captured_at = Local
                     .timestamp_millis_opt(captured_at_millis)
                     .single()
@@ -73,8 +73,8 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
                     "image" => ClipboardContent::Image(ClipboardImage {
                         width: row.get::<_, Option<i64>>(3)?.unwrap_or_default().max(0) as usize,
                         height: row.get::<_, Option<i64>>(4)?.unwrap_or_default().max(0) as usize,
-                        bytes: Arc::new(row.get::<_, Option<Vec<u8>>>(5)?.unwrap_or_default()),
-                        preview_url: row.get(6)?,
+                        bytes: None,
+                        preview_url: row.get(5)?,
                     }),
                     "file" => ClipboardContent::Files(load_files(connection, id)?),
                     _ => ClipboardContent::Text(String::new()),
@@ -84,13 +84,36 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
                     id,
                     content,
                     captured_at,
-                    pinned: row.get::<_, i64>(8)? != 0,
-                    favorite: row.get::<_, i64>(9)? != 0,
+                    pinned: row.get::<_, i64>(7)? != 0,
+                    favorite: row.get::<_, i64>(8)? != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(ClipboardHistory::from_entries(capacity, entries))
+    })
+}
+
+pub fn load_image(entry_id: u64) -> Result<Option<ClipboardImage>, StorageError> {
+    with_connection(|connection| {
+        connection
+            .query_row(
+                "SELECT image_width, image_height, image_rgba, image_preview_url \
+                 FROM clipboard_entries \
+                 WHERE id = ?1 AND kind = 'image'",
+                params![entry_id as i64],
+                |row| {
+                    let bytes = row.get::<_, Option<Vec<u8>>>(2)?.map(Arc::new);
+                    Ok(ClipboardImage {
+                        width: row.get::<_, Option<i64>>(0)?.unwrap_or_default().max(0) as usize,
+                        height: row.get::<_, Option<i64>>(1)?.unwrap_or_default().max(0) as usize,
+                        bytes,
+                        preview_url: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(StorageError::from)
     })
 }
 
@@ -110,7 +133,7 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
             ClipboardContent::Image(image) => {
                 image_width = Some(image.width as i64);
                 image_height = Some(image.height as i64);
-                image_rgba = Some(image.bytes.as_slice());
+                image_rgba = image.rgba_bytes();
                 image_preview_url = image.preview_url.as_deref();
             }
             ClipboardContent::Files(_) => {}
@@ -123,11 +146,11 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO UPDATE SET \
                  kind = excluded.kind, \
-                 text_content = excluded.text_content, \
-                 image_width = excluded.image_width, \
-                 image_height = excluded.image_height, \
-                 image_rgba = excluded.image_rgba, \
-                 image_preview_url = excluded.image_preview_url, \
+                  text_content = excluded.text_content, \
+                  image_width = excluded.image_width, \
+                  image_height = excluded.image_height, \
+                  image_rgba = COALESCE(excluded.image_rgba, clipboard_entries.image_rgba), \
+                  image_preview_url = excluded.image_preview_url, \
                  captured_at_millis = excluded.captured_at_millis, \
                  pinned = excluded.pinned, \
                  favorite = excluded.favorite",
@@ -578,11 +601,23 @@ mod tests {
         ));
         assert!(matches!(
             &loaded_history.entry(11).unwrap().content,
-            ClipboardContent::Image(image) if image.bytes.as_slice() == [10, 20, 30, 255]
+            ClipboardContent::Image(image) if !image.has_bytes()
+        ));
+        assert!(matches!(
+            load_image(11).unwrap(),
+            Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
         ));
         assert!(matches!(
             &loaded_history.entry(12).unwrap().content,
             ClipboardContent::Files(files) if files == &["C:\\tmp\\a.txt", "D:\\b.png"]
+        ));
+
+        let mut metadata_only_image = loaded_history.entry(11).unwrap().clone();
+        metadata_only_image.favorite = true;
+        save_entry(&metadata_only_image).unwrap();
+        assert!(matches!(
+            load_image(11).unwrap(),
+            Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
         ));
 
         delete_entry(10).unwrap();

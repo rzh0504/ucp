@@ -285,7 +285,7 @@ fn HistoryRow(
         _ => None,
     };
     let image_to_save = match &entry.content {
-        ClipboardContent::Image(image) => Some(image.clone()),
+        ClipboardContent::Image(image) => Some((id, image.clone())),
         _ => None,
     };
     let image_preview_url = match &entry.content {
@@ -473,13 +473,14 @@ fn HistoryRow(
                         kbd { "Ctrl+V" }
                     }
                 }
-                if let Some(image) = image_to_save.clone() {
+                if let Some((image_id, image)) = image_to_save.clone() {
                     ContextMenuItem {
                         class: "entry-context-menu-item",
                         value: "save-image".to_string(),
                         index: 1usize,
                         on_select: move |_| {
                             save_image_file(
+                                image_id,
                                 image.clone(),
                                 entry.captured_at.format("ucp-image-%Y%m%d-%H%M%S.png").to_string(),
                                 status,
@@ -685,9 +686,18 @@ fn copy_entry(
     promote_on_copy: bool,
     mut status: Signal<String>,
 ) -> bool {
-    let Some(content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
+    let Some(mut content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
         return false;
     };
+
+    if let ClipboardContent::Image(image) = &content
+        && !image.has_bytes()
+    {
+        let Some(image) = load_image_for_action(id, status) else {
+            return false;
+        };
+        content = ClipboardContent::Image(image);
+    }
 
     if let ClipboardContent::Files(files) = &content
         && let Err(error) = validate_files_for_copy(files)
@@ -754,7 +764,12 @@ fn delete_entry_with_status(id: u64, mut status: Signal<String>) {
     }
 }
 
-fn save_image_file(image: ClipboardImage, default_file_name: String, mut status: Signal<String>) {
+fn save_image_file(
+    id: u64,
+    mut image: ClipboardImage,
+    default_file_name: String,
+    mut status: Signal<String>,
+) {
     let Some(path) = rfd::FileDialog::new()
         .add_filter("PNG 图像", &["png"])
         .set_file_name(default_file_name)
@@ -762,6 +777,13 @@ fn save_image_file(image: ClipboardImage, default_file_name: String, mut status:
     else {
         return;
     };
+
+    if !image.has_bytes() {
+        let Some(loaded_image) = load_image_for_action(id, status) else {
+            return;
+        };
+        image = loaded_image;
+    }
 
     let Some(png) = image.to_png_bytes() else {
         status.set("保存图片失败：图像数据无效".to_string());
@@ -772,6 +794,20 @@ fn save_image_file(image: ClipboardImage, default_file_name: String, mut status:
     match std::fs::write(&path, png) {
         Ok(()) => status.set(format!("已保存图片：{}", path.display())),
         Err(error) => status.set(format!("保存图片失败：{error}")),
+    }
+}
+
+fn load_image_for_action(id: u64, mut status: Signal<String>) -> Option<ClipboardImage> {
+    match storage::load_image(id) {
+        Ok(Some(image)) if image.has_bytes() => Some(image),
+        Ok(Some(_)) | Ok(None) => {
+            status.set("图片原始数据不存在，无法操作".to_string());
+            None
+        }
+        Err(error) => {
+            status.set(format!("图片读取失败：{error}"));
+            None
+        }
     }
 }
 
