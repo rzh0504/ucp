@@ -366,29 +366,21 @@ fn HistoryRow(
                         }
                     }
                     if let Some(file_display) = &file_display {
-                        div { class: "entry-files",
-                            div { class: "entry-files-summary",
-                                span { "{file_display.summary}" }
-                                if file_display.missing_count > 0 {
-                                    span { class: "entry-file-warning", "{file_display.missing_count} 项不存在" }
+                        div { class: "entry-title-row",
+                            if let Some(icon_url) = &file_display.icon_url {
+                                img {
+                                    class: "entry-file-app-icon",
+                                    src: "{icon_url}",
+                                    alt: "",
+                                }
+                            } else {
+                                span { class: "entry-file-app-icon is-fallback",
+                                    Icon { icon: AppIcon::File }
                                 }
                             }
-                            for file in file_display.visible_files.iter() {
-                                div { class: if file.exists { "entry-file" } else { "entry-file is-missing" },
-                                    div { class: "entry-file-icon",
-                                        Icon { icon: AppIcon::File }
-                                    }
-                                    div { class: "entry-file-text",
-                                        p { class: "entry-file-name", "{file.name}" }
-                                        p { class: "entry-file-path", title: "{file.path}", "{file.directory}" }
-                                    }
-                                    span { class: "entry-file-kind", "{file.kind_label}" }
-                                }
-                            }
-                            if file_display.hidden_count > 0 {
-                                p { class: "entry-file-more", "另外 {file_display.hidden_count} 项未展开" }
-                            }
+                            p { class: if file_display.missing_count > 0 { "entry-title is-muted" } else { "entry-title" }, "{file_display.title}" }
                         }
+                        p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
                     } else if !is_image {
                         p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
                         if show_size {
@@ -475,13 +467,11 @@ fn HistoryRow(
     }
 }
 
-const MAX_VISIBLE_FILES: usize = 4;
-
 #[derive(Clone, Debug)]
 struct FileListDisplay {
-    summary: String,
-    visible_files: Vec<FileDisplay>,
-    hidden_count: usize,
+    title: String,
+    stats: String,
+    icon_url: Option<String>,
     missing_count: usize,
 }
 
@@ -493,21 +483,36 @@ impl FileListDisplay {
             .collect::<Vec<_>>();
         let total_count = files.len();
         let missing_count = files.iter().filter(|file| !file.exists).count();
-        let visible_files = files
-            .into_iter()
-            .take(MAX_VISIBLE_FILES)
-            .collect::<Vec<_>>();
-        let hidden_count = total_count.saturating_sub(visible_files.len());
-        let summary = match (total_count, missing_count) {
-            (0, _) => "文件列表为空".to_string(),
-            (total, 0) => format!("{total} 个项目"),
-            (total, missing) => format!("{total} 个项目 · {missing} 项不可用"),
+        let icon_url = files.iter().find_map(|file| file.icon_url.clone());
+        let title = match files.as_slice() {
+            [] => "文件列表为空".to_string(),
+            [file] => file.name.clone(),
+            files => {
+                let names = files
+                    .iter()
+                    .take(3)
+                    .map(|file| file.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("、");
+
+                if files.len() > 3 {
+                    format!("{names} 等 {} 项", files.len())
+                } else {
+                    names
+                }
+            }
+        };
+        let stats = match files.as_slice() {
+            [] => "0 个文件".to_string(),
+            [file] => format!("{} · {}", file.kind_label, file.directory),
+            _ if missing_count > 0 => format!("{total_count} 个项目 · {missing_count} 项不存在"),
+            _ => format!("{total_count} 个项目"),
         };
 
         Self {
-            summary,
-            visible_files,
-            hidden_count,
+            title,
+            stats,
+            icon_url,
             missing_count,
         }
     }
@@ -515,10 +520,10 @@ impl FileListDisplay {
 
 #[derive(Clone, Debug)]
 struct FileDisplay {
-    path: String,
     name: String,
     directory: String,
     kind_label: String,
+    icon_url: Option<String>,
     exists: bool,
 }
 
@@ -564,10 +569,10 @@ impl FileDisplay {
         };
 
         Self {
-            path: path.to_string(),
             name,
             directory,
             kind_label,
+            icon_url: platform::file_icon::data_url(path),
             exists,
         }
     }
