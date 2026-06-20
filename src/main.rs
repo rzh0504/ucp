@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod clipboard_watcher;
 mod components;
 mod model;
 mod platform;
