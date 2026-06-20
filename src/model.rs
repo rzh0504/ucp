@@ -6,7 +6,8 @@ use std::sync::Arc;
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
-const MAX_INLINE_IMAGE_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
+const IMAGE_PREVIEW_MAX_WIDTH: usize = 720;
+const IMAGE_PREVIEW_MAX_HEIGHT: usize = 220;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
@@ -25,16 +26,12 @@ pub struct ClipboardImage {
 
 impl ClipboardImage {
     pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
-        let preview_url = if bytes.len() <= MAX_INLINE_IMAGE_PREVIEW_BYTES {
-            encode_png(&bytes, width, height).map(|png| {
-                format!(
-                    "data:image/png;base64,{}",
-                    general_purpose::STANDARD.encode(png)
-                )
-            })
-        } else {
-            None
-        };
+        let preview_url = encode_image_preview(&bytes, width, height).map(|png| {
+            format!(
+                "data:image/png;base64,{}",
+                general_purpose::STANDARD.encode(png)
+            )
+        });
 
         Self {
             width,
@@ -503,6 +500,55 @@ fn encode_png(bytes: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
     Some(png)
 }
 
+fn encode_image_preview(bytes: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
+    let (preview_width, preview_height) = image_preview_dimensions(width, height)?;
+    if preview_width == width && preview_height == height {
+        return encode_png(bytes, width, height);
+    }
+
+    let preview = resize_rgba_nearest(bytes, width, height, preview_width, preview_height)?;
+    encode_png(&preview, preview_width, preview_height)
+}
+
+fn image_preview_dimensions(width: usize, height: usize) -> Option<(usize, usize)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    let width_scale = IMAGE_PREVIEW_MAX_WIDTH as f64 / width as f64;
+    let height_scale = IMAGE_PREVIEW_MAX_HEIGHT as f64 / height as f64;
+    let scale = width_scale.min(height_scale).min(1.0);
+
+    Some((
+        ((width as f64 * scale).round() as usize).max(1),
+        ((height as f64 * scale).round() as usize).max(1),
+    ))
+}
+
+fn resize_rgba_nearest(
+    bytes: &[u8],
+    width: usize,
+    height: usize,
+    target_width: usize,
+    target_height: usize,
+) -> Option<Vec<u8>> {
+    if bytes.len() != width.checked_mul(height)?.checked_mul(4)? {
+        return None;
+    }
+
+    let mut resized = Vec::with_capacity(target_width.checked_mul(target_height)?.checked_mul(4)?);
+    for y in 0..target_height {
+        let source_y = (y * height / target_height).min(height - 1);
+        for x in 0..target_width {
+            let source_x = (x * width / target_width).min(width - 1);
+            let source = (source_y * width + source_x) * 4;
+            resized.extend_from_slice(&bytes[source..source + 4]);
+        }
+    }
+
+    Some(resized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,5 +642,13 @@ mod tests {
         let search_results = history.filtered("5", ClipboardFilter::All);
         assert_eq!(search_results.len(), 1);
         assert_eq!(search_results[0].kind(), ClipboardKind::Text);
+    }
+
+    #[test]
+    fn image_preview_dimensions_preserve_aspect_ratio_without_upscaling() {
+        assert_eq!(image_preview_dimensions(1920, 1080), Some((391, 220)));
+        assert_eq!(image_preview_dimensions(2000, 100), Some((720, 36)));
+        assert_eq!(image_preview_dimensions(32, 16), Some((32, 16)));
+        assert_eq!(image_preview_dimensions(0, 16), None);
     }
 }
