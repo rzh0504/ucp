@@ -108,6 +108,7 @@ pub fn App() -> Element {
     let counts_snapshot = counts();
     let entry_count = snapshot_entries.len();
     let settings_snapshot = settings();
+    let query_snapshot = query();
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
@@ -202,6 +203,7 @@ pub fn App() -> Element {
                         entries: snapshot_entries,
                         history,
                         entry_count,
+                        query: query_snapshot,
                         active_filter,
                         counts: counts_snapshot,
                         keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,

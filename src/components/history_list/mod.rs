@@ -22,6 +22,7 @@ pub fn HistoryList(
     entries: Vec<ClipboardEntry>,
     history: Signal<ClipboardHistory>,
     entry_count: usize,
+    query: String,
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
     keyboard_shortcuts: bool,
@@ -86,7 +87,11 @@ pub fn HistoryList(
         }
         Separator { class: "list-separator", decorative: true }
         if entries.is_empty() {
-            EmptyState {}
+            EmptyState {
+                filter: active_filter(),
+                total_count: counts.total,
+                query,
+            }
         } else {
             div {
                 class: "history-list-click-target",
@@ -244,12 +249,66 @@ pub fn HistoryList(
 }
 
 #[component]
-fn EmptyState() -> Element {
+fn EmptyState(filter: ClipboardFilter, total_count: usize, query: String) -> Element {
+    let state = empty_state_copy(filter, total_count, query.trim());
+
     rsx! {
         div { class: "empty-state",
-            div { class: "empty-glyph", "⌘C" }
-            h2 { "复制任意文本开始" }
-            p { "UCP 会在后台监听剪贴板，并把新的文本内容整理成可搜索历史。" }
+            div { class: "empty-glyph", "{state.glyph}" }
+            h2 { "{state.title}" }
+            p { "{state.description}" }
         }
+    }
+}
+
+struct EmptyStateCopy {
+    glyph: &'static str,
+    title: &'static str,
+    description: &'static str,
+}
+
+fn empty_state_copy(filter: ClipboardFilter, total_count: usize, query: &str) -> EmptyStateCopy {
+    if !query.is_empty() {
+        return EmptyStateCopy {
+            glyph: "⌕",
+            title: "没有匹配的历史",
+            description: "当前筛选范围内没有找到相关内容。试试缩短关键词，或切换到全部标签。",
+        };
+    }
+
+    if total_count == 0 {
+        return EmptyStateCopy {
+            glyph: "⌘C",
+            title: "复制任意内容开始",
+            description: "UCP 会在后台监听剪贴板，并把新的文本、图像和文件整理成可搜索历史。",
+        };
+    }
+
+    match filter {
+        ClipboardFilter::All => EmptyStateCopy {
+            glyph: "⌘C",
+            title: "暂无历史记录",
+            description: "复制文本、图像或文件后，新的剪贴板内容会出现在这里。",
+        },
+        ClipboardFilter::Text => EmptyStateCopy {
+            glyph: "TXT",
+            title: "还没有文本记录",
+            description: "复制一段文字后，文本历史会自动归入这个标签。",
+        },
+        ClipboardFilter::Image => EmptyStateCopy {
+            glyph: "IMG",
+            title: "还没有图像记录",
+            description: "截图或复制图片后，图像预览会按原比例显示在这里。",
+        },
+        ClipboardFilter::File => EmptyStateCopy {
+            glyph: "FILE",
+            title: "还没有文件记录",
+            description: "复制文件或文件夹后，文件路径和应用图标会整理到这个标签。",
+        },
+        ClipboardFilter::Favorite => EmptyStateCopy {
+            glyph: "★",
+            title: "还没有收藏记录",
+            description: "点击历史项右侧的星标，常用内容会集中显示在这里。",
+        },
     }
 }
