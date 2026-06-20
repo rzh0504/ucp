@@ -303,13 +303,16 @@ impl ClipboardHistory {
             .iter()
             .position(|entry| entry.content == content)
         {
+            if position == 0 {
+                return PushResult::default();
+            }
+
             let mut entry = self.entries.remove(position);
-            let changed_top = position != 0;
             entry.captured_at = Local::now();
             let updated_entry = entry.clone();
             self.entries.insert(0, entry);
             return PushResult {
-                changed: changed_top,
+                changed: true,
                 entry: Some(updated_entry),
                 removed_ids: Vec::new(),
             };
@@ -514,6 +517,7 @@ mod tests {
 
         assert!(first.changed);
         assert!(!duplicate.changed);
+        assert!(duplicate.entry.is_none());
         assert_eq!(history.counts().total, 1);
         assert_eq!(history.counts().text, 1);
     }

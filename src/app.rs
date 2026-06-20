@@ -1,8 +1,11 @@
 use crate::components::{AppIcon, AppPage, HistoryList, Icon, SettingsPage, TopBar};
-use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
+use crate::model::{
+    AppSettings, ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory,
+};
 use crate::platform;
+use crate::platform::clipboard::ClipboardError;
 use crate::storage;
-use chrono::{Duration as ChronoDuration, Local};
+use chrono::{DateTime, Duration as ChronoDuration, Local};
 use dioxus::desktop::{
     self, DesktopContext, HotKeyState, ShortcutRegistryError, WindowCloseBehaviour,
     use_global_shortcut, use_window,
@@ -14,9 +17,11 @@ use dioxus_primitives::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use futures_channel::mpsc::UnboundedReceiver;
+use futures_channel::{mpsc::UnboundedReceiver, oneshot};
 use futures_timer::Delay;
 use std::rc::Rc;
+use std::sync::{OnceLock, mpsc as std_mpsc};
+use std::thread;
 use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
@@ -24,12 +29,20 @@ const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(650);
 const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
+type ClipboardReadReply = oneshot::Sender<Result<Option<ClipboardContent>, ClipboardError>>;
 
 #[derive(Clone)]
 struct InitialStorageState {
     settings: AppSettings,
     history: ClipboardHistory,
     status: String,
+}
+
+struct PersistCaptureJob {
+    entry: Option<ClipboardEntry>,
+    removed_ids: Vec<u64>,
+    auto_cleanup_cutoff: Option<DateTime<Local>>,
+    reply: oneshot::Sender<Result<(), String>>,
 }
 
 #[component]
@@ -400,9 +413,9 @@ async fn watch_clipboard(
         }
     };
 
-    capture_clipboard(history, settings, status);
+    capture_clipboard(history, settings, status).await;
     while updates_rx.next().await.is_some() {
-        capture_clipboard(history, settings, status);
+        capture_clipboard(history, settings, status).await;
     }
 }
 
@@ -429,7 +442,7 @@ async fn poll_clipboard(
             continue;
         }
 
-        capture_clipboard(history, settings, status);
+        capture_clipboard(history, settings, status).await;
 
         if sequence.is_some() {
             last_sequence = sequence;
@@ -439,40 +452,131 @@ async fn poll_clipboard(
     }
 }
 
-fn capture_clipboard(
+async fn capture_clipboard(
     mut history: Signal<ClipboardHistory>,
     settings: Signal<AppSettings>,
     mut status: Signal<String>,
 ) {
-    match platform::clipboard::read_content() {
+    match read_clipboard_content().await {
         Ok(Some(content)) => {
             let result = history.write().push(content);
-            let mut storage_error = None;
+            let mut auto_cleanup_cutoff = None;
 
-            if let Some(entry) = &result.entry
-                && let Err(error) = storage::save_entry(entry)
+            if result.changed
+                && let Some(days) = settings.peek().auto_cleanup_days
             {
-                storage_error = Some(format!("历史保存失败：{error}"));
+                auto_cleanup_cutoff = Some(Local::now() - ChronoDuration::days(i64::from(days)));
+                history.write().remove_older_than_days(days);
             }
 
-            if let Err(error) = storage::delete_entries(&result.removed_ids) {
-                storage_error = Some(format!("历史清理失败：{error}"));
+            if result.entry.is_none()
+                && result.removed_ids.is_empty()
+                && auto_cleanup_cutoff.is_none()
+            {
+                return;
             }
 
-            if let Some(days) = settings.peek().auto_cleanup_days {
-                match prune_history_by_age(history, days) {
-                    Ok(_) => {}
-                    Err(error) => storage_error = Some(format!("自动清理历史失败：{error}")),
-                }
-            }
-
-            if let Some(message) = storage_error {
+            if let Err(message) =
+                persist_capture_result(result.entry, result.removed_ids, auto_cleanup_cutoff).await
+            {
                 status.set(message);
             }
         }
         Ok(None) => {}
         Err(error) => status.set(format!("剪贴板暂不可用：{error}")),
     }
+}
+
+async fn read_clipboard_content() -> Result<Option<ClipboardContent>, ClipboardError> {
+    let (reply, receiver) = oneshot::channel();
+    if clipboard_read_worker().send(reply).is_err() {
+        return Err(ClipboardError::Unavailable(
+            "剪贴板读取任务已中断".to_string(),
+        ));
+    }
+
+    receiver.await.unwrap_or_else(|_| {
+        Err(ClipboardError::Unavailable(
+            "剪贴板读取任务已中断".to_string(),
+        ))
+    })
+}
+
+async fn persist_capture_result(
+    entry: Option<ClipboardEntry>,
+    removed_ids: Vec<u64>,
+    auto_cleanup_cutoff: Option<DateTime<Local>>,
+) -> Result<(), String> {
+    let (reply, receiver) = oneshot::channel();
+    let job = PersistCaptureJob {
+        entry,
+        removed_ids,
+        auto_cleanup_cutoff,
+        reply,
+    };
+
+    if storage_persist_worker().send(job).is_err() {
+        return Err("历史保存任务已中断".to_string());
+    }
+
+    receiver
+        .await
+        .unwrap_or_else(|_| Err("历史保存任务已中断".to_string()))
+}
+
+fn clipboard_read_worker() -> &'static std_mpsc::Sender<ClipboardReadReply> {
+    static CLIPBOARD_READ_WORKER: OnceLock<std_mpsc::Sender<ClipboardReadReply>> = OnceLock::new();
+    CLIPBOARD_READ_WORKER.get_or_init(|| {
+        let (sender, receiver) = std_mpsc::channel::<ClipboardReadReply>();
+        thread::spawn(move || {
+            while let Ok(reply) = receiver.recv() {
+                let _ = reply.send(platform::clipboard::read_content());
+            }
+        });
+        sender
+    })
+}
+
+fn storage_persist_worker() -> &'static std_mpsc::Sender<PersistCaptureJob> {
+    static STORAGE_PERSIST_WORKER: OnceLock<std_mpsc::Sender<PersistCaptureJob>> = OnceLock::new();
+    STORAGE_PERSIST_WORKER.get_or_init(|| {
+        let (sender, receiver) = std_mpsc::channel::<PersistCaptureJob>();
+        thread::spawn(move || {
+            while let Ok(job) = receiver.recv() {
+                let result = persist_capture_result_blocking(
+                    job.entry,
+                    job.removed_ids,
+                    job.auto_cleanup_cutoff,
+                );
+                let _ = job.reply.send(result);
+            }
+        });
+        sender
+    })
+}
+
+fn persist_capture_result_blocking(
+    entry: Option<ClipboardEntry>,
+    removed_ids: Vec<u64>,
+    auto_cleanup_cutoff: Option<DateTime<Local>>,
+) -> Result<(), String> {
+    if let Some(entry) = &entry
+        && let Err(error) = storage::save_entry(entry)
+    {
+        return Err(format!("历史保存失败：{error}"));
+    }
+
+    if let Err(error) = storage::delete_entries(&removed_ids) {
+        return Err(format!("历史清理失败：{error}"));
+    }
+
+    if let Some(cutoff) = auto_cleanup_cutoff
+        && let Err(error) = storage::delete_entries_older_than(cutoff)
+    {
+        return Err(format!("自动清理历史失败：{error}"));
+    }
+
+    Ok(())
 }
 
 fn prune_history_by_age(
