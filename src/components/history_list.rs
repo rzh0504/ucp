@@ -17,7 +17,7 @@ use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
 use futures_timer::Delay;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -279,6 +279,10 @@ fn HistoryRow(
     let entry_size = entry.size_label();
     let entry_age = entry.age_label();
     let show_size = !entry.is_text() || show_text_length;
+    let file_display = match &entry.content {
+        ClipboardContent::Files(files) => Some(FileListDisplay::new(files)),
+        _ => None,
+    };
     let image_to_save = match &entry.content {
         ClipboardContent::Image(image) => Some(image.clone()),
         _ => None,
@@ -361,7 +365,31 @@ fn HistoryRow(
                             span { "{entry_age}" }
                         }
                     }
-                    if !is_image {
+                    if let Some(file_display) = &file_display {
+                        div { class: "entry-files",
+                            div { class: "entry-files-summary",
+                                span { "{file_display.summary}" }
+                                if file_display.missing_count > 0 {
+                                    span { class: "entry-file-warning", "{file_display.missing_count} 项不存在" }
+                                }
+                            }
+                            for file in file_display.visible_files.iter() {
+                                div { class: if file.exists { "entry-file" } else { "entry-file is-missing" },
+                                    div { class: "entry-file-icon",
+                                        Icon { icon: AppIcon::File }
+                                    }
+                                    div { class: "entry-file-text",
+                                        p { class: "entry-file-name", "{file.name}" }
+                                        p { class: "entry-file-path", title: "{file.path}", "{file.directory}" }
+                                    }
+                                    span { class: "entry-file-kind", "{file.kind_label}" }
+                                }
+                            }
+                            if file_display.hidden_count > 0 {
+                                p { class: "entry-file-more", "另外 {file_display.hidden_count} 项未展开" }
+                            }
+                        }
+                    } else if !is_image {
                         p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
                         if show_size {
                             p { class: "entry-size", "{entry_size}" }
@@ -443,6 +471,104 @@ fn HistoryRow(
                     }
                 }
             }
+        }
+    }
+}
+
+const MAX_VISIBLE_FILES: usize = 4;
+
+#[derive(Clone, Debug)]
+struct FileListDisplay {
+    summary: String,
+    visible_files: Vec<FileDisplay>,
+    hidden_count: usize,
+    missing_count: usize,
+}
+
+impl FileListDisplay {
+    fn new(files: &[String]) -> Self {
+        let files = files
+            .iter()
+            .map(|file| FileDisplay::new(file))
+            .collect::<Vec<_>>();
+        let total_count = files.len();
+        let missing_count = files.iter().filter(|file| !file.exists).count();
+        let visible_files = files
+            .into_iter()
+            .take(MAX_VISIBLE_FILES)
+            .collect::<Vec<_>>();
+        let hidden_count = total_count.saturating_sub(visible_files.len());
+        let summary = match (total_count, missing_count) {
+            (0, _) => "文件列表为空".to_string(),
+            (total, 0) => format!("{total} 个项目"),
+            (total, missing) => format!("{total} 个项目 · {missing} 项不可用"),
+        };
+
+        Self {
+            summary,
+            visible_files,
+            hidden_count,
+            missing_count,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FileDisplay {
+    path: String,
+    name: String,
+    directory: String,
+    kind_label: String,
+    exists: bool,
+}
+
+impl FileDisplay {
+    fn new(path: &str) -> Self {
+        let path = path.trim();
+        let path_ref = Path::new(path);
+        let metadata = if path.is_empty() {
+            None
+        } else {
+            std::fs::metadata(path_ref).ok()
+        };
+        let exists = metadata.is_some();
+        let is_dir = metadata.as_ref().is_some_and(|metadata| metadata.is_dir());
+        let name = path_ref
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or(if path.is_empty() { "空路径" } else { path })
+            .to_string();
+        let directory = if path.is_empty() {
+            "路径为空".to_string()
+        } else {
+            path_ref
+                .parent()
+                .map(|parent| parent.display().to_string())
+                .filter(|parent| !parent.is_empty())
+                .unwrap_or_else(|| "当前目录".to_string())
+        };
+        let kind_label = if path.is_empty() {
+            "无效路径".to_string()
+        } else if !exists {
+            "不存在".to_string()
+        } else if is_dir {
+            "文件夹".to_string()
+        } else {
+            path_ref
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .filter(|extension| !extension.is_empty())
+                .map(|extension| extension.to_ascii_uppercase())
+                .unwrap_or_else(|| "文件".to_string())
+        };
+
+        Self {
+            path: path.to_string(),
+            name,
+            directory,
+            kind_label,
+            exists,
         }
     }
 }
@@ -531,6 +657,13 @@ fn copy_entry(
         return false;
     };
 
+    if let ClipboardContent::Files(files) = &content
+        && let Err(error) = validate_files_for_copy(files)
+    {
+        status.set(format!("复制失败：{error}"));
+        return false;
+    }
+
     if let Err(error) = platform::clipboard::write_content(&content) {
         status.set(format!("复制失败：{error}"));
         return false;
@@ -547,6 +680,32 @@ fn copy_entry(
     }
 
     true
+}
+
+fn validate_files_for_copy(files: &[String]) -> Result<(), String> {
+    if files.is_empty() {
+        return Err("文件列表为空".to_string());
+    }
+
+    let mut missing_files = Vec::new();
+    for file in files {
+        let file = file.trim();
+        if file.is_empty() {
+            return Err("文件路径为空".to_string());
+        }
+
+        match Path::new(file).try_exists() {
+            Ok(true) => {}
+            Ok(false) => missing_files.push(file.to_string()),
+            Err(error) => return Err(format!("无法访问文件：{file}（{error}）")),
+        }
+    }
+
+    match missing_files.as_slice() {
+        [] => Ok(()),
+        [file] => Err(format!("文件已不存在：{file}")),
+        files => Err(format!("{} 个文件已不存在", files.len())),
+    }
 }
 
 fn save_entry_with_status(entry: &ClipboardEntry, mut status: Signal<String>, success: &str) {
