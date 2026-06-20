@@ -1,0 +1,41 @@
+.list-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    min-height: 58px;
+    padding: 0 16px;
+    background: #fbfbfd;
+}
+
+.list-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: max-content;
+}
+
+.list-header h2 {
+    margin: 0;
+    color: #1d1d1f;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.list-count,
+.settings-title-copy span {
+    color: #8e8e93;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.selection-actions {
+    display: flex;
+    align-items: center;
+}
+
+.selection-delete-action .app-icon {
+    width: 15px;
+    height: 15px;
+}

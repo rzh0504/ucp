@@ -16,6 +16,16 @@ use futures_channel::mpsc::UnboundedReceiver;
 use std::rc::Rc;
 
 const STYLES: Asset = asset!("/assets/app.css");
+const BASE_STYLES: Asset = asset!("/assets/styles/base.css");
+const LAYOUT_STYLES: Asset = asset!("/assets/styles/layout.css");
+const TOP_BAR_STYLES: Asset = asset!("/assets/styles/top_bar.css");
+const STATUS_STYLES: Asset = asset!("/assets/styles/status.css");
+const DIALOG_STYLES: Asset = asset!("/assets/styles/dialog.css");
+const FILTER_TABS_STYLES: Asset = asset!("/assets/styles/filter_tabs.css");
+const LIST_HEADER_STYLES: Asset = asset!("/assets/styles/list_header.css");
+const HISTORY_LIST_STYLES: Asset = asset!("/assets/styles/history_list.css");
+const SETTINGS_STYLES: Asset = asset!("/assets/styles/settings.css");
+const RESPONSIVE_STYLES: Asset = asset!("/assets/styles/responsive.css");
 const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
@@ -101,6 +111,16 @@ pub fn App() -> Element {
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
+        document::Link { rel: "stylesheet", href: BASE_STYLES }
+        document::Link { rel: "stylesheet", href: LAYOUT_STYLES }
+        document::Link { rel: "stylesheet", href: TOP_BAR_STYLES }
+        document::Link { rel: "stylesheet", href: STATUS_STYLES }
+        document::Link { rel: "stylesheet", href: DIALOG_STYLES }
+        document::Link { rel: "stylesheet", href: FILTER_TABS_STYLES }
+        document::Link { rel: "stylesheet", href: LIST_HEADER_STYLES }
+        document::Link { rel: "stylesheet", href: HISTORY_LIST_STYLES }
+        document::Link { rel: "stylesheet", href: SETTINGS_STYLES }
+        document::Link { rel: "stylesheet", href: RESPONSIVE_STYLES }
         main {
             class: "shell",
             tabindex: "-1",

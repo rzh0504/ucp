@@ -1,0 +1,27 @@
+.shell {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: 100vw;
+    height: 100vh;
+    background: #f5f5f7;
+    border: 1px solid rgba(60, 60, 67, 0.22);
+}
+
+.shell:focus {
+    outline: none;
+}
+
+.content-panel {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+    border-top: 1px solid rgba(60, 60, 67, 0.16);
+    background: #ffffff;
+}
+
+.list-separator {
+    height: 1px;
+    background: rgba(60, 60, 67, 0.14);
+}

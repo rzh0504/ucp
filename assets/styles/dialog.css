@@ -1,0 +1,69 @@
+.alert-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(2px);
+}
+
+.alert-dialog-content {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    z-index: 100;
+    display: grid;
+    width: min(360px, calc(100vw - 32px));
+    gap: 12px;
+    padding: 18px;
+    border: 1px solid rgba(60, 60, 67, 0.16);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.22), 0 8px 18px rgba(0, 0, 0, 0.12);
+    transform: translate(-50%, -50%);
+}
+
+.alert-dialog-title {
+    margin: 0;
+    color: #1d1d1f;
+    font-size: 17px;
+    font-weight: 800;
+}
+
+.alert-dialog-description {
+    margin: 0;
+    color: #6e6e73;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.alert-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.alert-dialog-button {
+    min-width: 76px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 9px;
+    background: rgba(118, 118, 128, 0.12);
+    color: #1d1d1f;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.alert-dialog-button:hover {
+    background: rgba(118, 118, 128, 0.2);
+}
+
+.alert-dialog-button.is-danger {
+    background: #ff3b30;
+    color: #ffffff;
+}
+
+.alert-dialog-button.is-danger:hover {
+    background: #e03128;
+}

@@ -1,0 +1,224 @@
+.settings-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-title-copy {
+    min-width: 0;
+}
+
+.settings-back-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: rgba(118, 118, 128, 0.12);
+    color: #3a3a3c;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settings-back-action:hover {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+}
+
+.settings-back-action span {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.settings-scroll {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+
+.settings-page {
+    display: grid;
+    gap: 18px;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 24px 20px 34px;
+}
+
+.settings-group {
+    overflow: visible;
+    border: 1px solid rgba(60, 60, 67, 0.14);
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.settings-group h3 {
+    margin: 0;
+    padding: 13px 16px;
+    border-bottom: 1px solid rgba(60, 60, 67, 0.12);
+    background: #fbfbfd;
+    color: #1d1d1f;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.setting-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+    gap: 18px;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(60, 60, 67, 0.1);
+}
+
+.setting-row-control {
+    overflow: visible;
+}
+
+.setting-row:last-child {
+    border-bottom: 0;
+}
+
+.setting-row-copy {
+    min-width: 0;
+}
+
+.setting-label {
+    display: block;
+    color: #1d1d1f;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.setting-row p {
+    margin: 4px 0 0;
+    color: #8e8e93;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.setting-row strong {
+    overflow: hidden;
+    color: #3a3a3c;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-switch {
+    position: relative;
+    justify-self: end;
+    width: 44px;
+    height: 26px;
+    border: 1px solid rgba(60, 60, 67, 0.16);
+    border-radius: 999px;
+    background: rgba(118, 118, 128, 0.22);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.settings-switch[data-state="checked"] {
+    border-color: rgba(0, 122, 255, 0.36);
+    background: #007aff;
+}
+
+.settings-switch-thumb {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+    transition: transform 120ms ease;
+}
+
+.settings-switch[data-state="checked"] .settings-switch-thumb {
+    transform: translateX(18px);
+}
+
+.settings-combobox {
+    position: relative;
+    justify-self: end;
+    width: 250px;
+}
+
+.settings-combobox[data-state="open"] {
+    z-index: 40;
+}
+
+.settings-combobox-input {
+    width: 100%;
+    height: 44px;
+    padding: 0 42px 0 14px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    border-radius: 9px;
+    outline: none;
+    background: #ffffff;
+    color: #111827;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.settings-combobox::after {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    color: #8a8f98;
+    content: "⌃\A⌄";
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 8px;
+    pointer-events: none;
+    text-align: center;
+    transform: translateY(-50%);
+    white-space: pre;
+}
+
+.settings-combobox-input:focus {
+    border-color: rgba(17, 24, 39, 0.18);
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06);
+}
+
+.settings-combobox-list {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 30;
+    overflow: hidden;
+    width: 250px;
+    padding: 5px;
+    border: 1px solid rgba(17, 24, 39, 0.1);
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.settings-combobox-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 40px;
+    padding: 0 10px;
+    border-radius: 7px;
+    color: #111827;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.settings-combobox-option[data-highlighted="true"] {
+    background: #f4f4f5;
+    color: #111827;
+}
+
+.settings-combobox-option[data-selected="true"] {
+    color: #111827;
+}

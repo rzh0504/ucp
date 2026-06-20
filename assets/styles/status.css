@@ -1,0 +1,64 @@
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 30px;
+    padding: 6px 16px;
+    border-top: 1px solid rgba(60, 60, 67, 0.14);
+    background: rgba(246, 246, 248, 0.9);
+    color: #6e6e73;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.status-message {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-icon-action {
+    display: grid;
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+}
+
+.status-settings-action {
+    color: #6e6e73;
+}
+
+.status-settings-action:hover,
+.status-settings-action.is-active {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+}
+
+.status-settings-action .app-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.status-clear-action {
+    color: #ff3b30;
+}
+
+.status-clear-action .app-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.status-clear-action:hover:not(:disabled) {
+    background: rgba(255, 59, 48, 0.12);
+}
+
+.status-clear-action:disabled {
+    color: #c7c7cc;
+    cursor: default;
+}
