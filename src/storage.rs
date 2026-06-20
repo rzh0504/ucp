@@ -229,7 +229,6 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                 "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
                 "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
                 "quick_paste" => settings.quick_paste = parse_bool(&value),
-                "image_hover_preview" => settings.image_hover_preview = parse_bool(&value),
                 "show_copy_time" => settings.show_copy_time = parse_bool(&value),
                 "show_text_length" => settings.show_text_length = parse_bool(&value),
                 _ => {}
@@ -266,10 +265,6 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
                 settings.promote_copied_entries.to_string(),
             ),
             ("quick_paste", settings.quick_paste.to_string()),
-            (
-                "image_hover_preview",
-                settings.image_hover_preview.to_string(),
-            ),
             ("show_copy_time", settings.show_copy_time.to_string()),
             ("show_text_length", settings.show_text_length.to_string()),
         ];
@@ -541,7 +536,6 @@ mod tests {
             auto_focus_history: false,
             promote_copied_entries: false,
             quick_paste: true,
-            image_hover_preview: true,
             show_copy_time: false,
             show_text_length: false,
         };

@@ -147,14 +147,6 @@ pub fn SettingsPage(
                 section { class: "settings-group",
                     h3 { "显示" }
                     SettingSwitchRow {
-                        label: "图片悬浮预览",
-                        hint: "鼠标悬浮在图片缩略图上时显示放大预览。",
-                        checked: settings_snapshot.image_hover_preview,
-                        on_change: move |checked| {
-                            update_settings(settings, status, |next| next.image_hover_preview = checked);
-                        },
-                    }
-                    SettingSwitchRow {
                         label: "显示复制时间",
                         hint: "在历史记录中显示每项的复制时间。",
                         checked: settings_snapshot.show_copy_time,

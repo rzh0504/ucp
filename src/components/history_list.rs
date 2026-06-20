@@ -22,7 +22,6 @@ use std::rc::Rc;
 use std::time::Duration;
 
 const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
-const IMAGE_HOVER_PREVIEW_DELAY: Duration = Duration::from_millis(140);
 
 #[component]
 pub fn HistoryList(
@@ -35,7 +34,6 @@ pub fn HistoryList(
     auto_focus: bool,
     promote_on_copy: bool,
     quick_paste: bool,
-    image_hover_preview: bool,
     show_copy_time: bool,
     show_text_length: bool,
     mut status: Signal<String>,
@@ -239,7 +237,6 @@ pub fn HistoryList(
                             focused_id,
                             promote_on_copy,
                             quick_paste,
-                            image_hover_preview,
                             show_copy_time,
                             show_text_length,
                             status,
@@ -263,15 +260,12 @@ fn HistoryRow(
     mut focused_id: Signal<Option<u64>>,
     promote_on_copy: bool,
     quick_paste: bool,
-    image_hover_preview: bool,
     show_copy_time: bool,
     show_text_length: bool,
     mut status: Signal<String>,
 ) -> Element {
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
-    let mut hover_preview_open = use_signal(|| false);
-    let mut hover_preview_request = use_signal(|| 0u64);
     let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
     let row_class = match (is_selected, focused_id() == Some(id)) {
@@ -293,12 +287,15 @@ fn HistoryRow(
         ClipboardContent::Image(image) => image.preview_url.clone(),
         _ => None,
     };
+    let image_dimensions = match &entry.content {
+        ClipboardContent::Image(image) => Some(format!("{} x {}", image.width, image.height)),
+        _ => None,
+    };
     let row_main_class = if is_image {
         "history-row-main has-preview"
     } else {
         "history-row-main"
     };
-
     use_effect(move || {
         if focused_id() == Some(id)
             && let Some(element) = button_ref()
@@ -344,56 +341,10 @@ fn HistoryRow(
                 div { class: "entry-index", "{index}" }
                 if is_image {
                     if let Some(preview_url) = &image_preview_url {
-                        if image_hover_preview {
-                            div {
-                                class: "entry-image-hover-card",
-                                onmouseenter: move |_| {
-                                    if hover_preview_open() {
-                                        return;
-                                    }
-
-                                    let request = hover_preview_request().wrapping_add(1);
-                                    hover_preview_request.set(request);
-                                    spawn(async move {
-                                        Delay::new(IMAGE_HOVER_PREVIEW_DELAY).await;
-                                        if hover_preview_request() == request && !hover_preview_open() {
-                                            hover_preview_open.set(true);
-                                        }
-                                    });
-                                },
-                                onmouseleave: move |_| {
-                                    hover_preview_request.set(hover_preview_request().wrapping_add(1));
-                                    if hover_preview_open() {
-                                        hover_preview_open.set(false);
-                                    }
-                                },
-                                div { class: "entry-image-hover-trigger", role: "presentation",
-                                    img {
-                                        class: "entry-image-preview",
-                                        src: "{preview_url}",
-                                        alt: "剪贴板图像预览",
-                                    }
-                                }
-                                if hover_preview_open() {
-                                    div { class: "entry-image-hover-content", "data-state": "open",
-                                        img {
-                                            class: "entry-image-large-preview",
-                                            src: "{preview_url}",
-                                            alt: "放大的剪贴板图像预览",
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            div { class: "entry-image-hover-card",
-                                div { class: "entry-image-hover-trigger", role: "presentation",
-                                    img {
-                                        class: "entry-image-preview",
-                                        src: "{preview_url}",
-                                        alt: "剪贴板图像预览",
-                                    }
-                                }
-                            }
+                        img {
+                            class: "entry-image-preview",
+                            src: "{preview_url}",
+                            alt: "剪贴板图像预览",
                         }
                     } else {
                         div { class: "entry-image-preview is-empty", "IMG" }
@@ -402,7 +353,9 @@ fn HistoryRow(
                 div { class: "entry-content",
                     div { class: "entry-kicker",
                         if is_image {
-                            span { "{entry_size}" }
+                            if let Some(dimensions) = &image_dimensions {
+                                span { "{dimensions}" }
+                            }
                         }
                         if show_copy_time {
                             span { "{entry_age}" }
