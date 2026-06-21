@@ -135,7 +135,7 @@ pub fn SettingsPage(
                         },
                     }
                     SettingSwitchRow {
-                        label: "默认快捷粘贴",
+                        label: "快捷粘贴",
                         hint: "双击或按 Enter 使用文本记录时，复制后自动粘贴到当前光标位置。",
                         checked: settings_snapshot.quick_paste,
                         on_change: move |checked| {
