@@ -34,7 +34,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
     min-height: 68px;
     border-bottom: 1px solid rgba(60, 60, 67, 0.12);
-    background: #ffffff;
+    background: rgba(255, 255, 255, var(--app-bg-alpha, 1));
 }
 
 .history-row-menu,
@@ -43,7 +43,7 @@
 }
 
 .history-row-menu[data-state="open"] .history-row {
-    background: #eef6ff;
+    background: rgba(238, 246, 255, calc(var(--app-bg-alpha, 1) * 0.94));
 }
 
 .history-list > .history-row:last-child {
@@ -51,11 +51,11 @@
 }
 
 .history-row:hover {
-    background: #f5f9ff;
+    background: rgba(245, 249, 255, calc(var(--app-bg-alpha, 1) * 0.94));
 }
 
 .history-row.is-selected {
-    background: #eef6ff;
+    background: rgba(238, 246, 255, calc(var(--app-bg-alpha, 1) * 0.94));
 }
 
 .history-row.is-focused {

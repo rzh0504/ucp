@@ -15,12 +15,12 @@ pub fn TopBar(
     keyboard_shortcuts: bool,
     widget_mode: bool,
     language: AppLanguage,
+    on_close: EventHandler<()>,
 ) -> Element {
     let window = use_window();
     let drag_window = window.clone();
     let minimize_window = window.clone();
     let maximize_window = window.clone();
-    let close_window = window;
     let copy = i18n::tr(language);
 
     rsx! {
@@ -38,9 +38,15 @@ pub fn TopBar(
             WindowControls {
                 language,
                 widget_mode,
-                on_minimize: move |_| minimize_window.set_minimized(true),
+                on_minimize: move |_| {
+                    if widget_mode {
+                        minimize_window.set_visible(false);
+                    } else {
+                        minimize_window.set_minimized(true);
+                    }
+                },
                 on_maximize: move |_| maximize_window.toggle_maximized(),
-                on_close: move |_| close_window.close(),
+                on_close: move |_| on_close.call(()),
             }
         }
     }

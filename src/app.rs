@@ -166,6 +166,13 @@ pub fn App() -> Element {
     let settings_snapshot = settings();
     let language = settings_snapshot.language;
     let query_snapshot = query();
+    let background_opacity = if settings_snapshot.desktop_widget {
+        settings_snapshot.background_opacity
+    } else {
+        100
+    };
+    let shell_style = format!("--app-bg-alpha: {:.2};", background_opacity as f32 / 100.0);
+    let close_desktop = desktop.clone();
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
@@ -181,6 +188,7 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: RESPONSIVE_STYLES }
         main {
             class: "shell",
+            style: "{shell_style}",
             tabindex: "-1",
             onmounted: move |event| {
                 let element = event.data();
@@ -248,6 +256,7 @@ pub fn App() -> Element {
                 keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
                 widget_mode: settings_snapshot.desktop_widget,
                 language,
+                on_close: move |_| handle_window_close(&close_desktop, settings, status),
             }
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {
@@ -475,8 +484,55 @@ fn use_app_tray(_desktop: DesktopContext, _status: Signal<String>, _language: Ap
 
 fn show_desktop_window(desktop: &DesktopContext) {
     desktop.set_visible(true);
-    desktop.set_minimized(false);
+    restore_desktop_window(desktop);
     desktop.set_focus();
+}
+
+fn handle_window_close(
+    desktop: &DesktopContext,
+    mut settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+) {
+    let mut next = settings();
+    if !next.desktop_widget {
+        desktop.close();
+        return;
+    }
+
+    next.desktop_widget = false;
+    next = next.normalized();
+    match storage::save_settings(&next) {
+        Ok(()) => {
+            settings.set(next);
+            apply_window_mode(desktop, false);
+            show_desktop_window(desktop);
+            status.set(i18n::tr(next.language).settings_saved.to_string());
+        }
+        Err(error) => status.set(match next.language {
+            AppLanguage::Chinese => format!("设置保存失败：{error}"),
+            AppLanguage::English => format!("Failed to save settings: {error}"),
+        }),
+    }
+}
+
+#[cfg(windows)]
+fn restore_desktop_window(desktop: &DesktopContext) {
+    use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow,
+    };
+
+    let hwnd = desktop.window.hwnd() as _;
+    unsafe {
+        ShowWindow(hwnd, SW_SHOW);
+        ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
+    }
+}
+
+#[cfg(not(windows))]
+fn restore_desktop_window(desktop: &DesktopContext) {
+    desktop.set_minimized(false);
 }
 
 fn apply_window_mode(desktop: &DesktopContext, widget_mode: bool) {

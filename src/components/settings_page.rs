@@ -2,6 +2,7 @@ use super::AppPage;
 use crate::i18n;
 use crate::model::{
     AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS,
+    MIN_BACKGROUND_OPACITY,
 };
 use crate::platform;
 use crate::storage;
@@ -70,6 +71,14 @@ pub fn SettingsPage(
                         checked: settings_snapshot.desktop_widget,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.desktop_widget = checked);
+                        },
+                    }
+                    OpacitySliderRow {
+                        label: copy.background_opacity,
+                        hint: copy.background_opacity_hint,
+                        value: settings_snapshot.background_opacity,
+                        on_change: move |opacity| {
+                            update_settings(settings, status, |next| next.background_opacity = opacity);
                         },
                     }
                 }
@@ -334,6 +343,40 @@ fn LanguageCombobox(value: AppLanguage, on_change: EventHandler<AppLanguage>) ->
                         ComboboxItemIndicator { span { "✓" } }
                     }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn OpacitySliderRow(
+    label: &'static str,
+    hint: &'static str,
+    value: u8,
+    on_change: EventHandler<u8>,
+) -> Element {
+    rsx! {
+        div { class: "setting-row setting-row-control",
+            div { class: "setting-row-copy",
+                span { class: "setting-label", "{label}" }
+                p { "{hint}" }
+            }
+            div { class: "settings-range-control",
+                input {
+                    class: "settings-range",
+                    r#type: "range",
+                    min: "{MIN_BACKGROUND_OPACITY}",
+                    max: "100",
+                    step: "5",
+                    value: "{value}",
+                    aria_label: label,
+                    oninput: move |event| {
+                        if let Ok(value) = event.value().parse::<u8>() {
+                            on_change.call(value);
+                        }
+                    },
+                }
+                strong { "{value}%" }
             }
         }
     }

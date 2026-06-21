@@ -19,13 +19,14 @@ fn main() {
                     WindowBuilder::new()
                         .with_title("UCP Clipboard")
                         .with_decorations(false)
+                        .with_transparent(true)
                         .with_inner_size(LogicalSize::new(1006.0, 754.0))
                         .with_min_inner_size(LogicalSize::new(860.0, 620.0)),
                 )
                 .with_menu(None)
                 .with_close_behaviour(WindowCloseBehaviour::WindowHides)
                 .with_disable_context_menu(true)
-                .with_background_color((246, 247, 251, 255)),
+                .with_background_color((0, 0, 0, 0)),
         )
         .launch(App);
 }

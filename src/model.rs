@@ -6,6 +6,8 @@ use image::{
 use std::sync::Arc;
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
+pub const DEFAULT_BACKGROUND_OPACITY: u8 = 100;
+pub const MIN_BACKGROUND_OPACITY: u8 = 45;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
 const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
@@ -122,6 +124,7 @@ pub struct AppSettings {
     pub quick_paste: bool,
     pub show_copy_time: bool,
     pub show_text_length: bool,
+    pub background_opacity: u8,
 }
 
 impl Default for AppSettings {
@@ -138,6 +141,7 @@ impl Default for AppSettings {
             quick_paste: true,
             show_copy_time: true,
             show_text_length: true,
+            background_opacity: DEFAULT_BACKGROUND_OPACITY,
         }
     }
 }
@@ -150,6 +154,9 @@ impl AppSettings {
         if !AUTO_CLEANUP_DAY_OPTIONS.contains(&self.auto_cleanup_days) {
             self.auto_cleanup_days = None;
         }
+        self.background_opacity = self
+            .background_opacity
+            .clamp(MIN_BACKGROUND_OPACITY, DEFAULT_BACKGROUND_OPACITY);
         self
     }
 }

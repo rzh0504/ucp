@@ -5,7 +5,7 @@
     min-height: 30px;
     padding: 6px 16px;
     border-top: 1px solid rgba(60, 60, 67, 0.14);
-    background: rgba(246, 246, 248, 0.9);
+    background: rgba(246, 246, 248, calc(var(--app-bg-alpha, 1) * 0.9));
     color: #6e6e73;
     font-size: 12px;
     line-height: 1.4;

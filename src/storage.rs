@@ -256,6 +256,11 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                 "quick_paste" => settings.quick_paste = parse_bool(&value),
                 "show_copy_time" => settings.show_copy_time = parse_bool(&value),
                 "show_text_length" => settings.show_text_length = parse_bool(&value),
+                "background_opacity" => {
+                    settings.background_opacity = value
+                        .parse::<u8>()
+                        .unwrap_or(AppSettings::default().background_opacity)
+                }
                 _ => {}
             }
         }
@@ -294,6 +299,10 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
             ("quick_paste", settings.quick_paste.to_string()),
             ("show_copy_time", settings.show_copy_time.to_string()),
             ("show_text_length", settings.show_text_length.to_string()),
+            (
+                "background_opacity",
+                settings.background_opacity.to_string(),
+            ),
         ];
 
         for (key, value) in values {

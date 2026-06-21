@@ -24,7 +24,7 @@
     }
 
     .filter-tabs {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         width: 100%;
         max-width: none;
     }
@@ -47,7 +47,24 @@
 
 @media (max-width: 560px) {
     .filter-tabs {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .filter-tab {
+        gap: 3px;
+        height: 32px;
+        padding: 0 4px;
+        font-size: 12px;
+    }
+
+    .filter-tab .app-icon {
+        width: 13px;
+        height: 13px;
+    }
+
+    .filter-tab-count {
+        min-width: 18px;
+        padding: 0 4px;
     }
 
     .history-row {
@@ -73,8 +90,14 @@
     }
 
     .settings-switch,
-    .settings-combobox {
+    .settings-combobox,
+    .settings-range-control {
         justify-self: start;
+    }
+
+    .settings-range-control {
+        width: 100%;
+        grid-template-columns: minmax(0, 1fr) 48px;
     }
 
     .floating-settings {

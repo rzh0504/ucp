@@ -5,7 +5,7 @@
     gap: 14px;
     min-height: 58px;
     padding: 0 16px;
-    background: #fbfbfd;
+    background: rgba(251, 251, 253, var(--app-bg-alpha, 1));
 }
 
 .list-header-actions {
