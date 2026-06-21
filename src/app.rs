@@ -14,7 +14,9 @@ use dioxus_primitives::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use futures_channel::mpsc::UnboundedReceiver;
+use futures_timer::Delay;
 use std::rc::Rc;
+use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
 const BASE_STYLES: Asset = asset!("/assets/styles/base.css");
@@ -30,6 +32,7 @@ const RESPONSIVE_STYLES: Asset = asset!("/assets/styles/responsive.css");
 const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
+const STATUS_AUTO_CLEAR_DELAY: Duration = Duration::from_secs(4);
 
 #[derive(Clone)]
 struct InitialStorageState {
@@ -52,6 +55,7 @@ pub fn App() -> Element {
     let search_input = use_signal(|| None::<Rc<MountedData>>);
     let mut shell = use_signal(|| None::<Rc<MountedData>>);
     let status = use_signal(move || initial_status);
+    let mut status_clear_generation = use_signal(|| 0_u64);
     let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
@@ -79,6 +83,25 @@ pub fn App() -> Element {
             let mut status = status;
             status.set(error.clone());
         }
+    });
+
+    use_effect(move || {
+        let message = status();
+        if message.is_empty() {
+            return;
+        }
+
+        let generation = *status_clear_generation.peek() + 1;
+        status_clear_generation.set(generation);
+        spawn(async move {
+            Delay::new(STATUS_AUTO_CLEAR_DELAY).await;
+            if *status_clear_generation.peek() == generation
+                && status.peek().as_str() == message.as_str()
+            {
+                let mut status = status;
+                status.set(String::new());
+            }
+        });
     });
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
