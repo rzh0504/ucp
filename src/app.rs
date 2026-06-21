@@ -65,20 +65,22 @@ pub fn App() -> Element {
     let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
-    let mut applied_widget_mode = use_signal(|| None::<bool>);
+    let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
 
     use_app_tray(desktop.clone(), status, settings.peek().language);
 
     use_effect({
         let desktop = desktop.clone();
         move || {
-            let widget_mode = settings().desktop_widget;
-            if *applied_widget_mode.peek() == Some(widget_mode) {
+            let settings_snapshot = settings();
+            let widget_mode = settings_snapshot.desktop_widget;
+            let topmost = settings_snapshot.desktop_widget_topmost;
+            if *applied_widget_mode.peek() == Some((widget_mode, topmost)) {
                 return;
             }
 
-            applied_widget_mode.set(Some(widget_mode));
-            apply_window_mode(&desktop, widget_mode);
+            applied_widget_mode.set(Some((widget_mode, topmost)));
+            apply_window_mode(&desktop, widget_mode, topmost);
         }
     });
 
@@ -173,6 +175,7 @@ pub fn App() -> Element {
     };
     let shell_style = format!("--app-bg-alpha: {:.2};", background_opacity as f32 / 100.0);
     let close_desktop = desktop.clone();
+    let topmost_desktop = desktop.clone();
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLES }
@@ -255,13 +258,18 @@ pub fn App() -> Element {
                 search_input,
                 keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
                 widget_mode: settings_snapshot.desktop_widget,
+                widget_topmost: settings_snapshot.desktop_widget_topmost,
                 language,
+                on_topmost_change: move |topmost| {
+                    handle_widget_topmost_change(&topmost_desktop, settings, status, topmost);
+                },
                 on_close: move |_| handle_window_close(&close_desktop, settings, status),
             }
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {
                     SettingsPage {
                         active_page,
+                        active_filter,
                         settings,
                         history,
                         status,
@@ -504,9 +512,31 @@ fn handle_window_close(
     match storage::save_settings(&next) {
         Ok(()) => {
             settings.set(next);
-            apply_window_mode(desktop, false);
+            apply_window_mode(desktop, false, next.desktop_widget_topmost);
             show_desktop_window(desktop);
             status.set(i18n::tr(next.language).settings_saved.to_string());
+        }
+        Err(error) => status.set(match next.language {
+            AppLanguage::Chinese => format!("设置保存失败：{error}"),
+            AppLanguage::English => format!("Failed to save settings: {error}"),
+        }),
+    }
+}
+
+fn handle_widget_topmost_change(
+    desktop: &DesktopContext,
+    mut settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+    topmost: bool,
+) {
+    let mut next = settings();
+    next.desktop_widget_topmost = topmost;
+    next = next.normalized();
+
+    match storage::save_settings(&next) {
+        Ok(()) => {
+            settings.set(next);
+            apply_window_mode(desktop, next.desktop_widget, next.desktop_widget_topmost);
         }
         Err(error) => status.set(match next.language {
             AppLanguage::Chinese => format!("设置保存失败：{error}"),
@@ -535,9 +565,9 @@ fn restore_desktop_window(desktop: &DesktopContext) {
     desktop.set_minimized(false);
 }
 
-fn apply_window_mode(desktop: &DesktopContext, widget_mode: bool) {
+fn apply_window_mode(desktop: &DesktopContext, widget_mode: bool, widget_topmost: bool) {
     desktop.set_maximized(false);
-    desktop.set_always_on_top(widget_mode);
+    desktop.set_always_on_top(widget_mode && widget_topmost);
     desktop.set_resizable(!widget_mode);
     desktop.set_maximizable(!widget_mode);
     set_skip_taskbar(desktop, widget_mode);

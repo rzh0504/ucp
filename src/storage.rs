@@ -250,6 +250,7 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                 "language" => settings.language = AppLanguage::from_key(&value),
                 "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
                 "desktop_widget" => settings.desktop_widget = parse_bool(&value),
+                "desktop_widget_topmost" => settings.desktop_widget_topmost = parse_bool(&value),
                 "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
                 "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
                 "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
@@ -284,6 +285,10 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
             ("language", settings.language.key().to_string()),
             ("launch_at_startup", settings.launch_at_startup.to_string()),
             ("desktop_widget", settings.desktop_widget.to_string()),
+            (
+                "desktop_widget_topmost",
+                settings.desktop_widget_topmost.to_string(),
+            ),
             (
                 "keyboard_shortcuts",
                 settings.keyboard_shortcuts.to_string(),

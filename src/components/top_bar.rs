@@ -1,4 +1,5 @@
 use super::AppPage;
+use super::icons::{AppIcon, Icon};
 use crate::i18n;
 use crate::model::AppLanguage;
 use dioxus::desktop::use_window;
@@ -14,7 +15,9 @@ pub fn TopBar(
     search_input: Signal<Option<Rc<MountedData>>>,
     keyboard_shortcuts: bool,
     widget_mode: bool,
+    widget_topmost: bool,
     language: AppLanguage,
+    on_topmost_change: EventHandler<bool>,
     on_close: EventHandler<()>,
 ) -> Element {
     let window = use_window();
@@ -38,6 +41,7 @@ pub fn TopBar(
             WindowControls {
                 language,
                 widget_mode,
+                widget_topmost,
                 on_minimize: move |_| {
                     if widget_mode {
                         minimize_window.set_visible(false);
@@ -45,6 +49,7 @@ pub fn TopBar(
                         minimize_window.set_minimized(true);
                     }
                 },
+                on_topmost_change: move |topmost| on_topmost_change.call(topmost),
                 on_maximize: move |_| maximize_window.toggle_maximized(),
                 on_close: move |_| on_close.call(()),
             }
@@ -56,7 +61,9 @@ pub fn TopBar(
 fn WindowControls(
     language: AppLanguage,
     widget_mode: bool,
+    widget_topmost: bool,
     on_minimize: EventHandler<()>,
+    on_topmost_change: EventHandler<bool>,
     on_maximize: EventHandler<()>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -66,9 +73,28 @@ fn WindowControls(
     } else {
         "window-controls"
     };
+    let topmost_class = if widget_topmost {
+        "window-icon-control is-topmost is-active"
+    } else {
+        "window-icon-control is-topmost"
+    };
+    let topmost_title = if widget_topmost {
+        copy.cancel_keep_on_top
+    } else {
+        copy.keep_on_top
+    };
 
     rsx! {
         div { class: controls_class, aria_label: copy.window_controls,
+            if widget_mode {
+                button {
+                    class: topmost_class,
+                    title: topmost_title,
+                    aria_label: topmost_title,
+                    onclick: move |_| on_topmost_change.call(!widget_topmost),
+                    Icon { icon: AppIcon::Topmost }
+                }
+            }
             button {
                 class: "window-dot is-minimize",
                 title: copy.minimize,

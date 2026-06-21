@@ -47,9 +47,10 @@
 }
 
 .window-controls.is-widget {
-    min-width: 58px;
+    min-width: 92px;
 }
 
+.window-icon-control,
 .window-dot {
     position: relative;
     display: grid;
@@ -59,6 +60,25 @@
     border-radius: 50%;
     background: transparent;
     cursor: pointer;
+}
+
+.window-icon-control {
+    color: #6e6e73;
+    transition: background 120ms ease, color 120ms ease;
+}
+
+.window-icon-control:hover {
+    background: rgba(60, 60, 67, 0.08);
+}
+
+.window-icon-control.is-active {
+    background: transparent;
+    color: #007aff;
+}
+
+.window-icon-control .app-icon {
+    width: 14px;
+    height: 14px;
 }
 
 .window-dot::before {

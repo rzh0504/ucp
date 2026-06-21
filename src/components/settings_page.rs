@@ -1,8 +1,8 @@
 use super::AppPage;
 use crate::i18n;
 use crate::model::{
-    AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS,
-    MIN_BACKGROUND_OPACITY,
+    AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory,
+    HISTORY_LIMIT_OPTIONS, MIN_BACKGROUND_OPACITY,
 };
 use crate::platform;
 use crate::storage;
@@ -18,6 +18,7 @@ use dioxus_primitives::switch::{Switch, SwitchThumb};
 #[component]
 pub fn SettingsPage(
     mut active_page: Signal<AppPage>,
+    mut active_filter: Signal<ClipboardFilter>,
     settings: Signal<AppSettings>,
     history: Signal<ClipboardHistory>,
     status: Signal<String>,
@@ -70,7 +71,10 @@ pub fn SettingsPage(
                         hint: copy.desktop_widget_hint,
                         checked: settings_snapshot.desktop_widget,
                         on_change: move |checked| {
-                            update_settings(settings, status, |next| next.desktop_widget = checked);
+                            if update_settings(settings, status, |next| next.desktop_widget = checked) && checked {
+                                active_filter.set(ClipboardFilter::All);
+                                active_page.set(AppPage::History);
+                            }
                         },
                     }
                     OpacitySliderRow {
