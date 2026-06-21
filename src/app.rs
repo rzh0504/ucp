@@ -174,6 +174,12 @@ pub fn App() -> Element {
         100
     };
     let shell_style = format!("--app-bg-alpha: {:.2};", background_opacity as f32 / 100.0);
+    let status_snapshot = status();
+    let status_message = if status_snapshot.is_empty() {
+        i18n::item_count(language, entry_count)
+    } else {
+        status_snapshot
+    };
     let close_desktop = desktop.clone();
     let topmost_desktop = desktop.clone();
 
@@ -270,6 +276,7 @@ pub fn App() -> Element {
                     SettingsPage {
                         active_page,
                         active_filter,
+                        widget_mode: settings_snapshot.desktop_widget,
                         settings,
                         history,
                         status,
@@ -278,7 +285,6 @@ pub fn App() -> Element {
                     HistoryList {
                         entries: snapshot_entries,
                         history,
-                        entry_count,
                         query: query_snapshot,
                         active_filter,
                         counts: counts_snapshot,
@@ -297,7 +303,7 @@ pub fn App() -> Element {
                 class: "status-bar",
                 "aria-live": "polite",
                 role: "status",
-                span { class: "status-message", "{status}" }
+                span { class: "status-message", "{status_message}" }
                 StatusSettingsButton { active_page, language }
                 ClearHistoryButton {
                     history,

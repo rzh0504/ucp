@@ -299,13 +299,6 @@ pub fn item_count(language: AppLanguage, count: usize) -> String {
     }
 }
 
-pub fn selected_item_count(language: AppLanguage, selected: usize, total: usize) -> String {
-    match language {
-        AppLanguage::Chinese => format!("已选 {selected} / {total} 项"),
-        AppLanguage::English => format!("Selected {selected} / {total}"),
-    }
-}
-
 pub fn file_count(language: AppLanguage, count: usize) -> String {
     match language {
         AppLanguage::Chinese => format!("{count} 个文件"),

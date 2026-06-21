@@ -24,7 +24,6 @@ use dioxus_primitives::toolbar::{Toolbar, ToolbarButton};
 pub fn HistoryList(
     entries: Vec<ClipboardEntry>,
     history: Signal<ClipboardHistory>,
-    entry_count: usize,
     query: String,
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
@@ -60,15 +59,8 @@ pub fn HistoryList(
                 selection_anchor_id.set(None);
             },
             FilterTabs { active_filter, counts, language }
-            div { class: "list-header-actions",
-                span { class: "list-count",
-                    if visible_selected_count == 0 {
-                        "{i18n::item_count(language, entry_count)}"
-                    } else {
-                        "{i18n::selected_item_count(language, visible_selected_count, entry_count)}"
-                    }
-                }
-                if visible_selected_count > 0 {
+            if visible_selected_count > 0 {
+                div { class: "list-header-actions",
                     Toolbar { class: "selection-actions", aria_label: i18n::tr(language).batch_actions,
                         ToolbarButton {
                             class: "ghost-action selection-delete-action is-danger",

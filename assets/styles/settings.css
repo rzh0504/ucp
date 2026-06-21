@@ -2,6 +2,16 @@
     grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.settings-header.is-widget {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 44px;
+    padding: 7px 16px;
+}
+
+.settings-header.is-widget .settings-back-action {
+    justify-self: end;
+}
+
 .settings-title-copy {
     min-width: 0;
 }

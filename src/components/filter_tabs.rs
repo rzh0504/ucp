@@ -49,10 +49,11 @@ fn FilterTab(
     language: AppLanguage,
 ) -> Element {
     let icon = match filter {
+        ClipboardFilter::Text => Some(AppIcon::Text),
         ClipboardFilter::Image => Some(AppIcon::Image),
         ClipboardFilter::File => Some(AppIcon::File),
         ClipboardFilter::Favorite => Some(AppIcon::Favorite),
-        ClipboardFilter::All | ClipboardFilter::Text => None,
+        ClipboardFilter::All => None,
     };
     let label = i18n::filter_label(language, filter);
 

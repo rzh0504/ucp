@@ -35,7 +35,7 @@ pub fn TopBar(
             }
             if active_page() == AppPage::History {
                 SearchField { query, search_input, keyboard_shortcuts, language }
-            } else {
+            } else if !widget_mode {
                 div { class: "top-bar-context", "{copy.settings}" }
             }
             WindowControls {

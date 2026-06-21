@@ -43,6 +43,12 @@
         justify-content: space-between;
         min-width: 0;
     }
+
+    .settings-header.is-widget {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        padding: 7px 14px;
+    }
 }
 
 @media (max-width: 560px) {

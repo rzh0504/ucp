@@ -19,6 +19,7 @@ use dioxus_primitives::switch::{Switch, SwitchThumb};
 pub fn SettingsPage(
     mut active_page: Signal<AppPage>,
     mut active_filter: Signal<ClipboardFilter>,
+    widget_mode: bool,
     settings: Signal<AppSettings>,
     history: Signal<ClipboardHistory>,
     status: Signal<String>,
@@ -26,12 +27,19 @@ pub fn SettingsPage(
     let settings_snapshot = settings();
     let language = settings_snapshot.language;
     let copy = i18n::tr(language);
+    let header_class = if widget_mode {
+        "list-header settings-header is-widget"
+    } else {
+        "list-header settings-header"
+    };
 
     rsx! {
-        div { class: "list-header settings-header",
-            div { class: "settings-title-copy",
-                h2 { "{copy.settings}" }
-                span { "{copy.app_preferences}" }
+        div { class: header_class,
+            if !widget_mode {
+                div { class: "settings-title-copy",
+                    h2 { "{copy.settings}" }
+                    span { "{copy.app_preferences}" }
+                }
             }
             button {
                 class: "settings-back-action",
