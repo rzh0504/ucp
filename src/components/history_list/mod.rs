@@ -4,13 +4,15 @@ mod row;
 mod selection;
 
 use self::actions::{
-    copy_entry, delete_entry_with_status, delete_focused_or_selected, save_entry_with_status,
+    copy_entry, delete_entry_with_status, delete_focused_or_selected, run_quick_paste_shortcut,
+    save_entry_with_status,
 };
 use self::row::HistoryRow;
 use self::selection::{focus_index, focused_entry_id, move_focus};
 use super::filter_tabs::FilterTabs;
 use super::icons::{AppIcon, Icon};
 use crate::model::{ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts};
+use dioxus::desktop::use_window;
 use dioxus::html::Key;
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
@@ -38,6 +40,8 @@ pub fn HistoryList(
     let mut focused_id = use_signal(|| None::<u64>);
     let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
     let keyboard_entry_ids = entry_ids.clone();
+    let keyboard_entries = entries.clone();
+    let paste_window = use_window();
     let visible_selected_ids = selected_ids
         .read()
         .iter()
@@ -172,7 +176,19 @@ pub fn HistoryList(
                         Key::Enter => {
                             event.prevent_default();
                             if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
-                                copy_entry(id, history, promote_on_copy, status);
+                                let should_quick_paste = quick_paste
+                                    && keyboard_entries
+                                        .iter()
+                                        .any(|entry| entry.id == id && entry.is_text());
+
+                                if should_quick_paste {
+                                    if copy_entry(id, history, promote_on_copy, status) {
+                                        paste_window.set_minimized(true);
+                                        run_quick_paste_shortcut(status);
+                                    }
+                                } else {
+                                    copy_entry(id, history, promote_on_copy, status);
+                                }
                             }
                         }
                         Key::Delete | Key::Backspace => {

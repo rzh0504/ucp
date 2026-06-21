@@ -135,8 +135,8 @@ pub fn SettingsPage(
                         },
                     }
                     SettingSwitchRow {
-                        label: "快捷粘贴",
-                        hint: "右键历史项选择快捷粘贴后，将该内容粘贴到当前光标位置。",
+                        label: "默认快捷粘贴",
+                        hint: "双击或按 Enter 使用文本记录时，复制后自动粘贴到当前光标位置。",
                         checked: settings_snapshot.quick_paste,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.quick_paste = checked);

@@ -1,11 +1,11 @@
 use super::actions::{
-    copy_entry, delete_entry_with_status, save_entry_with_status, save_image_file,
+    copy_entry, delete_entry_with_status, open_file_location, run_quick_paste_shortcut,
+    save_entry_with_status, save_image_file,
 };
 use super::file_display::FileListDisplay;
 use super::selection::update_selection;
 use crate::components::icons::{AppIcon, Icon};
 use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory};
-use crate::platform;
 use dioxus::desktop::use_window;
 use dioxus::events::MountedData;
 use dioxus::prelude::*;
@@ -13,11 +13,7 @@ use dioxus_primitives::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
-use futures_timer::Delay;
 use std::rc::Rc;
-use std::time::Duration;
-
-const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
 
 #[component]
 pub(super) fn HistoryRow(
@@ -45,7 +41,16 @@ pub(super) fn HistoryRow(
         (false, true) => "history-row is-focused",
         (false, false) => "history-row",
     };
+    let is_text = entry.is_text();
     let is_image = matches!(&entry.content, ClipboardContent::Image(_));
+    let file_paths = match &entry.content {
+        ClipboardContent::Files(files) => Some(files.clone()),
+        _ => None,
+    };
+    let has_context_menu = is_image
+        || file_paths
+            .as_ref()
+            .is_some_and(|files| files.iter().any(|file| !file.trim().is_empty()));
     let entry_title = entry.title();
     let entry_size = entry.size_label();
     let entry_age = entry.age_label();
@@ -82,7 +87,7 @@ pub(super) fn HistoryRow(
     });
 
     rsx! {
-        ContextMenu { tabindex: "-1", disabled: !quick_paste && !is_image,
+        ContextMenu { tabindex: "-1", disabled: !has_context_menu,
             ContextMenuTrigger {
                 article {
                     class: "{row_class}",
@@ -111,7 +116,14 @@ pub(super) fn HistoryRow(
                     focused_id.set(Some(id));
                 },
                 ondoubleclick: move |_| {
-                    copy_entry(id, history, promote_on_copy, status);
+                    if quick_paste && is_text {
+                        if copy_entry(id, history, promote_on_copy, status) {
+                            paste_window.set_minimized(true);
+                            run_quick_paste_shortcut(status);
+                        }
+                    } else {
+                        copy_entry(id, history, promote_on_copy, status);
+                    }
                 },
                 div { class: "entry-index", "{index}" }
                 if is_image {
@@ -221,26 +233,15 @@ pub(super) fn HistoryRow(
                 }
             }
             ContextMenuContent { class: "entry-context-menu",
-                if quick_paste {
+                if let Some(files) = file_paths.clone() {
                     ContextMenuItem {
                         class: "entry-context-menu-item",
-                        value: "quick-paste".to_string(),
+                        value: "open-file-location".to_string(),
                         index: 0usize,
                         on_select: move |_| {
-                            if copy_entry(id, history, promote_on_copy, status) {
-                                paste_window.set_minimized(true);
-                                status.set("正在切换窗口并粘贴...".to_string());
-                                spawn(async move {
-                                    Delay::new(QUICK_PASTE_DELAY).await;
-                                    match platform::clipboard::paste_shortcut() {
-                                        Ok(()) => status.set("已快捷粘贴".to_string()),
-                                        Err(error) => status.set(format!("快捷粘贴失败：{error}")),
-                                    }
-                                });
-                            }
+                            open_file_location(&files, status);
                         },
-                        span { "快捷粘贴" }
-                        kbd { "Ctrl+V" }
+                        span { "打开文件位置" }
                     }
                 }
                 if let Some((image_id, image)) = image_to_save.clone() {

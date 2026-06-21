@@ -100,7 +100,7 @@ impl Default for AppSettings {
             keyboard_shortcuts: true,
             auto_focus_history: true,
             promote_copied_entries: true,
-            quick_paste: false,
+            quick_paste: true,
             show_copy_time: true,
             show_text_length: true,
         }

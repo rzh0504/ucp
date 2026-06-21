@@ -3,7 +3,11 @@ use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, Clipboard
 use crate::platform;
 use crate::storage;
 use dioxus::prelude::*;
+use futures_timer::Delay;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
 
 pub(super) fn copy_entry(
     id: u64,
@@ -47,6 +51,63 @@ pub(super) fn copy_entry(
     }
 
     true
+}
+
+pub(super) fn run_quick_paste_shortcut(mut status: Signal<String>) {
+    status.set("正在切换窗口并粘贴...".to_string());
+    spawn(async move {
+        Delay::new(QUICK_PASTE_DELAY).await;
+        match platform::clipboard::paste_shortcut() {
+            Ok(()) => status.set("已快捷粘贴".to_string()),
+            Err(error) => status.set(format!("快捷粘贴失败：{error}")),
+        }
+    });
+}
+
+pub(super) fn open_file_location(files: &[String], mut status: Signal<String>) {
+    let mut missing_count = 0usize;
+
+    for file in files
+        .iter()
+        .map(|file| file.trim())
+        .filter(|file| !file.is_empty())
+    {
+        let path = Path::new(file);
+        match path.try_exists() {
+            Ok(true) => match open_path_location(path) {
+                Ok(()) => status.set(format!("已打开文件位置：{file}")),
+                Err(error) => status.set(format!("打开文件位置失败：{error}")),
+            },
+            Ok(false) => {
+                missing_count += 1;
+                continue;
+            }
+            Err(error) => status.set(format!("无法访问文件：{file}（{error}）")),
+        }
+        return;
+    }
+
+    if missing_count == 0 {
+        status.set("文件路径为空".to_string());
+    } else if missing_count == 1 {
+        status.set("文件已不存在".to_string());
+    } else {
+        status.set(format!("{missing_count} 个文件已不存在"));
+    }
+}
+
+#[cfg(windows)]
+fn open_path_location(path: &Path) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("无法打开资源管理器：{error}"))
+}
+
+#[cfg(not(windows))]
+fn open_path_location(_path: &Path) -> Result<(), String> {
+    Err("当前平台暂不支持打开文件位置".to_string())
 }
 
 fn validate_files_for_copy(files: &[String]) -> Result<(), String> {
