@@ -1,5 +1,5 @@
 use crate::model::{
-    AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
+    AppLanguage, AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
 };
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -247,6 +247,7 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                         .unwrap_or(AppSettings::default().history_limit)
                 }
                 "auto_cleanup_days" => settings.auto_cleanup_days = parse_auto_cleanup_days(&value),
+                "language" => settings.language = AppLanguage::from_key(&value),
                 "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
                 "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
                 "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
@@ -274,6 +275,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
                     .map(|days| days.to_string())
                     .unwrap_or_else(|| "none".to_string()),
             ),
+            ("language", settings.language.key().to_string()),
             ("launch_at_startup", settings.launch_at_startup.to_string()),
             (
                 "keyboard_shortcuts",
@@ -554,6 +556,7 @@ mod tests {
         let settings = AppSettings {
             history_limit: 50,
             auto_cleanup_days: Some(30),
+            language: AppLanguage::English,
             launch_at_startup: true,
             keyboard_shortcuts: false,
             auto_focus_history: false,

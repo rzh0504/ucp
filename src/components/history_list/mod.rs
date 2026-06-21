@@ -11,7 +11,8 @@ use self::row::HistoryRow;
 use self::selection::{focus_index, focused_entry_id, move_focus};
 use super::filter_tabs::FilterTabs;
 use super::icons::{AppIcon, Icon};
-use crate::model::{ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts};
+use crate::i18n;
+use crate::model::{AppLanguage, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts};
 use dioxus::desktop::use_window;
 use dioxus::html::Key;
 use dioxus::prelude::*;
@@ -33,6 +34,7 @@ pub fn HistoryList(
     quick_paste: bool,
     show_copy_time: bool,
     show_text_length: bool,
+    language: AppLanguage,
     mut status: Signal<String>,
 ) -> Element {
     let mut selected_ids = use_signal(Vec::<u64>::new);
@@ -57,31 +59,31 @@ pub fn HistoryList(
                 selected_ids.set(Vec::new());
                 selection_anchor_id.set(None);
             },
-            FilterTabs { active_filter, counts }
+            FilterTabs { active_filter, counts, language }
             div { class: "list-header-actions",
                 span { class: "list-count",
                     if visible_selected_count == 0 {
-                        "{entry_count} 项"
+                        "{i18n::item_count(language, entry_count)}"
                     } else {
-                        "已选 {visible_selected_count} / {entry_count} 项"
+                        "{i18n::selected_item_count(language, visible_selected_count, entry_count)}"
                     }
                 }
                 if visible_selected_count > 0 {
-                    Toolbar { class: "selection-actions", aria_label: "批量操作",
+                    Toolbar { class: "selection-actions", aria_label: i18n::tr(language).batch_actions,
                         ToolbarButton {
                             class: "ghost-action selection-delete-action is-danger",
                             index: 0usize,
-                            title: "删除已选",
+                            title: i18n::tr(language).delete_selected,
                             on_click: move |_| {
                                 for id in visible_selected_ids.clone() {
                                     if history.write().remove(id) {
-                                        delete_entry_with_status(id, status);
+                                        delete_entry_with_status(id, status, language);
                                     }
                                 }
 
                                 selected_ids.set(Vec::new());
                                 selection_anchor_id.set(None);
-                                status.set("已删除所选历史".to_string());
+                                status.set(i18n::tr(language).selected_history_deleted.to_string());
                             },
                             Icon { icon: AppIcon::Delete }
                         }
@@ -95,6 +97,7 @@ pub fn HistoryList(
                 filter: active_filter(),
                 total_count: counts.total,
                 query,
+                language,
             }
         } else {
             div {
@@ -182,12 +185,12 @@ pub fn HistoryList(
                                         .any(|entry| entry.id == id && entry.is_text());
 
                                 if should_quick_paste {
-                                    if copy_entry(id, history, promote_on_copy, status) {
+                                    if copy_entry(id, history, promote_on_copy, status, language) {
                                         paste_window.set_minimized(true);
-                                        run_quick_paste_shortcut(status);
+                                        run_quick_paste_shortcut(status, language);
                                     }
                                 } else {
-                                    copy_entry(id, history, promote_on_copy, status);
+                                    copy_entry(id, history, promote_on_copy, status, language);
                                 }
                             }
                         }
@@ -200,6 +203,7 @@ pub fn HistoryList(
                                 &mut selection_anchor_id,
                                 history,
                                 status,
+                                language,
                             );
                         }
                         Key::Escape => {
@@ -221,7 +225,7 @@ pub fn HistoryList(
                             if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id())
                                 && let Some(entry) = history.write().toggle_favorite(id)
                             {
-                                save_entry_with_status(&entry, status, "收藏状态已更新");
+                                save_entry_with_status(&entry, status, i18n::tr(language).favorite_status_updated, language);
                             }
                         }
                         Key::Character(key) if !primary && key.eq_ignore_ascii_case("p") => {
@@ -229,7 +233,7 @@ pub fn HistoryList(
                             if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id())
                                 && let Some(entry) = history.write().toggle_pin(id)
                             {
-                                save_entry_with_status(&entry, status, "置顶状态已更新");
+                                save_entry_with_status(&entry, status, i18n::tr(language).pin_status_updated, language);
                             }
                         }
                         _ => {}
@@ -239,7 +243,7 @@ pub fn HistoryList(
                     class: "history-list",
                     direction: ScrollDirection::Vertical,
                     tabindex: "0",
-                    aria_label: "剪贴板历史列表",
+                    aria_label: i18n::tr(language).clipboard_history_list,
                     for (index, entry) in entries.iter().enumerate() {
                         HistoryRow {
                             key: "{entry.id}",
@@ -254,6 +258,7 @@ pub fn HistoryList(
                             quick_paste,
                             show_copy_time,
                             show_text_length,
+                            language,
                             status,
                         }
                     }
@@ -265,8 +270,13 @@ pub fn HistoryList(
 }
 
 #[component]
-fn EmptyState(filter: ClipboardFilter, total_count: usize, query: String) -> Element {
-    let state = empty_state_copy(filter, total_count, query.trim());
+fn EmptyState(
+    filter: ClipboardFilter,
+    total_count: usize,
+    query: String,
+    language: AppLanguage,
+) -> Element {
+    let state = i18n::empty_state_copy(language, filter, total_count, query.trim());
 
     rsx! {
         div { class: "empty-state",
@@ -274,57 +284,5 @@ fn EmptyState(filter: ClipboardFilter, total_count: usize, query: String) -> Ele
             h2 { "{state.title}" }
             p { "{state.description}" }
         }
-    }
-}
-
-struct EmptyStateCopy {
-    glyph: &'static str,
-    title: &'static str,
-    description: &'static str,
-}
-
-fn empty_state_copy(filter: ClipboardFilter, total_count: usize, query: &str) -> EmptyStateCopy {
-    if !query.is_empty() {
-        return EmptyStateCopy {
-            glyph: "⌕",
-            title: "没有匹配的历史",
-            description: "当前筛选范围内没有找到相关内容。试试缩短关键词，或切换到全部标签。",
-        };
-    }
-
-    if total_count == 0 {
-        return EmptyStateCopy {
-            glyph: "⌘C",
-            title: "复制任意内容开始",
-            description: "UCP 会在后台监听剪贴板，并把新的文本、图像和文件整理成可搜索历史。",
-        };
-    }
-
-    match filter {
-        ClipboardFilter::All => EmptyStateCopy {
-            glyph: "⌘C",
-            title: "暂无历史记录",
-            description: "复制文本、图像或文件后，新的剪贴板内容会出现在这里。",
-        },
-        ClipboardFilter::Text => EmptyStateCopy {
-            glyph: "TXT",
-            title: "还没有文本记录",
-            description: "复制一段文字后，文本历史会自动归入这个标签。",
-        },
-        ClipboardFilter::Image => EmptyStateCopy {
-            glyph: "IMG",
-            title: "还没有图像记录",
-            description: "截图或复制图片后，图像预览会按原比例显示在这里。",
-        },
-        ClipboardFilter::File => EmptyStateCopy {
-            glyph: "FILE",
-            title: "还没有文件记录",
-            description: "复制文件或文件夹后，文件路径和应用图标会整理到这个标签。",
-        },
-        ClipboardFilter::Favorite => EmptyStateCopy {
-            glyph: "★",
-            title: "还没有收藏记录",
-            description: "点击历史项右侧的星标，常用内容会集中显示在这里。",
-        },
     }
 }

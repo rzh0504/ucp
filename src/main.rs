@@ -3,6 +3,7 @@
 mod app;
 mod clipboard_watcher;
 mod components;
+mod i18n;
 mod model;
 mod platform;
 mod storage;

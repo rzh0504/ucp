@@ -1,3 +1,5 @@
+use crate::i18n;
+use crate::model::AppLanguage;
 use crate::platform;
 use std::path::Path;
 
@@ -11,18 +13,24 @@ pub(super) struct FileListDisplay {
 }
 
 impl FileListDisplay {
-    pub(super) fn new(files: &[String]) -> Self {
+    pub(super) fn new(files: &[String], language: AppLanguage) -> Self {
         let files = files
             .iter()
-            .map(|file| FileDisplay::new(file))
+            .map(|file| FileDisplay::new(file, language))
             .collect::<Vec<_>>();
         let total_count = files.len();
         let missing_count = files.iter().filter(|file| !file.exists).count();
         let stats = match files.as_slice() {
-            [] => "0 个文件".to_string(),
+            [] => i18n::file_count(language, 0),
             [file] => format!("{} · {}", file.kind_label, file.directory),
-            _ if missing_count > 0 => format!("{total_count} 个项目 · {missing_count} 项不存在"),
-            _ => format!("{total_count} 个项目"),
+            _ if missing_count > 0 => match language {
+                AppLanguage::Chinese => format!("{total_count} 个项目 · {missing_count} 项不存在"),
+                AppLanguage::English => format!("{total_count} items · {missing_count} missing"),
+            },
+            _ => match language {
+                AppLanguage::Chinese => format!("{total_count} 个项目"),
+                AppLanguage::English => format!("{total_count} items"),
+            },
         };
 
         Self {
@@ -63,7 +71,8 @@ pub(super) struct FileDisplay {
 }
 
 impl FileDisplay {
-    fn new(path: &str) -> Self {
+    fn new(path: &str, language: AppLanguage) -> Self {
+        let copy = i18n::tr(language);
         let path = path.trim();
         let path_ref = Path::new(path);
         let metadata = if path.is_empty() {
@@ -77,30 +86,34 @@ impl FileDisplay {
             .file_name()
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
-            .unwrap_or(if path.is_empty() { "空路径" } else { path })
+            .unwrap_or(if path.is_empty() {
+                copy.empty_path
+            } else {
+                path
+            })
             .to_string();
         let directory = if path.is_empty() {
-            "路径为空".to_string()
+            copy.path_empty.to_string()
         } else {
             path_ref
                 .parent()
                 .map(|parent| parent.display().to_string())
                 .filter(|parent| !parent.is_empty())
-                .unwrap_or_else(|| "当前目录".to_string())
+                .unwrap_or_else(|| copy.current_directory.to_string())
         };
         let kind_label = if path.is_empty() {
-            "无效路径".to_string()
+            copy.invalid_path.to_string()
         } else if !exists {
-            "不存在".to_string()
+            copy.missing.to_string()
         } else if is_dir {
-            "文件夹".to_string()
+            copy.folder.to_string()
         } else {
             path_ref
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .filter(|extension| !extension.is_empty())
                 .map(|extension| extension.to_ascii_uppercase())
-                .unwrap_or_else(|| "文件".to_string())
+                .unwrap_or_else(|| copy.file.to_string())
         };
 
         Self {

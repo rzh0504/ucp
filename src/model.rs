@@ -12,6 +12,37 @@ const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
 const IMAGE_PREVIEW_MAX_HEIGHT: usize = 440;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppLanguage {
+    Chinese,
+    English,
+}
+
+impl AppLanguage {
+    pub const OPTIONS: [Self; 2] = [Self::Chinese, Self::English];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Chinese => "zh-CN",
+            Self::English => "en-US",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chinese => "简体中文",
+            Self::English => "English",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "en" | "en-US" => Self::English,
+            _ => Self::Chinese,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
     Text,
     Image,
@@ -82,6 +113,7 @@ pub enum ClipboardContent {
 pub struct AppSettings {
     pub history_limit: usize,
     pub auto_cleanup_days: Option<u16>,
+    pub language: AppLanguage,
     pub launch_at_startup: bool,
     pub keyboard_shortcuts: bool,
     pub auto_focus_history: bool,
@@ -96,6 +128,7 @@ impl Default for AppSettings {
         Self {
             history_limit: DEFAULT_HISTORY_LIMIT,
             auto_cleanup_days: None,
+            language: AppLanguage::Chinese,
             launch_at_startup: false,
             keyboard_shortcuts: true,
             auto_focus_history: true,
@@ -158,29 +191,29 @@ impl ClipboardContent {
         }
     }
 
-    pub fn title(&self) -> String {
+    pub fn title_with_language(&self, language: AppLanguage) -> String {
         match self {
             Self::Text(text) => text.clone(),
-            Self::Image(_) => "图像".to_string(),
+            Self::Image(_) => crate::i18n::tr(language).image.to_string(),
             Self::Files(files) => {
                 if files.len() == 1 {
                     files[0].clone()
                 } else {
-                    format!("{} 个文件", files.len())
+                    crate::i18n::file_count(language, files.len())
                 }
             }
         }
     }
 
-    pub fn size_label(&self) -> String {
+    pub fn size_label_with_language(&self, language: AppLanguage) -> String {
         match self {
-            Self::Text(text) => format!("{} 字符", text.chars().count()),
+            Self::Text(text) => crate::i18n::character_count(language, text.chars().count()),
             Self::Image(image) => image
                 .bytes
                 .as_ref()
                 .map(|bytes| format_bytes(bytes.len()))
                 .unwrap_or_else(|| format!("{} x {}", image.width, image.height)),
-            Self::Files(files) => format!("{} 个文件", files.len()),
+            Self::Files(files) => crate::i18n::file_count(language, files.len()),
         }
     }
 }
@@ -244,26 +277,26 @@ impl ClipboardEntry {
         self.kind() == ClipboardKind::Text
     }
 
-    pub fn title(&self) -> String {
-        self.content.title()
+    pub fn title_with_language(&self, language: AppLanguage) -> String {
+        self.content.title_with_language(language)
     }
 
-    pub fn size_label(&self) -> String {
-        self.content.size_label()
+    pub fn size_label_with_language(&self, language: AppLanguage) -> String {
+        self.content.size_label_with_language(language)
     }
 
-    pub fn age_label(&self) -> String {
+    pub fn age_label_with_language(&self, language: AppLanguage) -> String {
         let elapsed = Local::now().signed_duration_since(self.captured_at);
         let seconds = elapsed.num_seconds().max(0);
 
         if seconds < 60 {
-            "刚刚".to_string()
+            crate::i18n::tr(language).just_now.to_string()
         } else if seconds < 3_600 {
-            format!("{} 分钟前", seconds / 60)
+            crate::i18n::age_minutes(language, seconds / 60)
         } else if seconds < 86_400 {
-            format!("{} 小时前", seconds / 3_600)
+            crate::i18n::age_hours(language, seconds / 3_600)
         } else {
-            format!("{} 天前", seconds / 86_400)
+            crate::i18n::age_days(language, seconds / 86_400)
         }
     }
 }

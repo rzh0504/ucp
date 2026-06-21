@@ -5,7 +5,8 @@ use super::actions::{
 use super::file_display::FileListDisplay;
 use super::selection::update_selection;
 use crate::components::icons::{AppIcon, Icon};
-use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory};
+use crate::i18n;
+use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardHistory};
 use dioxus::desktop::use_window;
 use dioxus::events::MountedData;
 use dioxus::prelude::*;
@@ -28,6 +29,7 @@ pub(super) fn HistoryRow(
     quick_paste: bool,
     show_copy_time: bool,
     show_text_length: bool,
+    language: AppLanguage,
     mut status: Signal<String>,
 ) -> Element {
     let id = entry.id;
@@ -51,12 +53,12 @@ pub(super) fn HistoryRow(
         || file_paths
             .as_ref()
             .is_some_and(|files| files.iter().any(|file| !file.trim().is_empty()));
-    let entry_title = entry.title();
-    let entry_size = entry.size_label();
-    let entry_age = entry.age_label();
+    let entry_title = entry.title_with_language(language);
+    let entry_size = entry.size_label_with_language(language);
+    let entry_age = entry.age_label_with_language(language);
     let show_size = !entry.is_text() || show_text_length;
     let file_display = match &entry.content {
-        ClipboardContent::Files(files) => Some(FileListDisplay::new(files)),
+        ClipboardContent::Files(files) => Some(FileListDisplay::new(files, language)),
         _ => None,
     };
     let image_to_save = match &entry.content {
@@ -117,12 +119,12 @@ pub(super) fn HistoryRow(
                 },
                 ondoubleclick: move |_| {
                     if quick_paste && is_text {
-                        if copy_entry(id, history, promote_on_copy, status) {
+                        if copy_entry(id, history, promote_on_copy, status, language) {
                             paste_window.set_minimized(true);
-                            run_quick_paste_shortcut(status);
+                            run_quick_paste_shortcut(status, language);
                         }
                     } else {
-                        copy_entry(id, history, promote_on_copy, status);
+                        copy_entry(id, history, promote_on_copy, status, language);
                     }
                 },
                 div { class: "entry-index", "{index}" }
@@ -131,7 +133,7 @@ pub(super) fn HistoryRow(
                         img {
                             class: "entry-image-preview",
                             src: "{preview_url}",
-                            alt: "剪贴板图像预览",
+                            alt: i18n::tr(language).image_preview_alt,
                         }
                     } else {
                         div { class: "entry-image-preview is-empty", "IMG" }
@@ -174,7 +176,7 @@ pub(super) fn HistoryRow(
                                         event.stop_propagation();
                                         files_expanded.set(true);
                                     },
-                                    "展开另外 {file_display.hidden_count(files_expanded())} 项"
+                                    "{expand_more_label(language, file_display.hidden_count(files_expanded()))}"
                                 }
                             } else if file_display.can_collapse(files_expanded()) {
                                 span {
@@ -184,7 +186,7 @@ pub(super) fn HistoryRow(
                                         event.stop_propagation();
                                         files_expanded.set(false);
                                     },
-                                    "收起文件列表"
+                                    "{i18n::tr(language).collapse_file_list}"
                                 }
                             }
                         }
@@ -197,13 +199,13 @@ pub(super) fn HistoryRow(
                     }
                 }
             }
-            Toolbar { class: "entry-actions", aria_label: "条目操作",
+            Toolbar { class: "entry-actions", aria_label: i18n::tr(language).entry_actions,
                 ToolbarButton {
                     class: if entry.favorite { "ghost-action is-favorite is-on is-favorite-visible" } else { "ghost-action is-favorite" },
                     index: 0usize,
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_favorite(id) {
-                            save_entry_with_status(&entry, status, "收藏状态已更新");
+                            save_entry_with_status(&entry, status, i18n::tr(language).favorite_status_updated, language);
                         }
                     },
                     Icon { icon: if entry.favorite { AppIcon::FavoriteFilled } else { AppIcon::Favorite } }
@@ -213,7 +215,7 @@ pub(super) fn HistoryRow(
                     index: 1usize,
                     on_click: move |_| {
                         if let Some(entry) = history.write().toggle_pin(id) {
-                            save_entry_with_status(&entry, status, "置顶状态已更新");
+                            save_entry_with_status(&entry, status, i18n::tr(language).pin_status_updated, language);
                         }
                     },
                     Icon { icon: if entry.pinned { AppIcon::PinFilled } else { AppIcon::Pin } }
@@ -224,7 +226,7 @@ pub(super) fn HistoryRow(
                     index: 2usize,
                     on_click: move |_| {
                         if history.write().remove(id) {
-                            delete_entry_with_status(id, status);
+                            delete_entry_with_status(id, status, language);
                         }
                     },
                     Icon { icon: AppIcon::Delete }
@@ -239,9 +241,9 @@ pub(super) fn HistoryRow(
                         value: "open-file-location".to_string(),
                         index: 0usize,
                         on_select: move |_| {
-                            open_file_location(&files, status);
+                            open_file_location(&files, status, language);
                         },
-                        span { "打开文件位置" }
+                        span { "{i18n::tr(language).open_file_location}" }
                     }
                 }
                 if let Some((image_id, image)) = image_to_save.clone() {
@@ -255,12 +257,20 @@ pub(super) fn HistoryRow(
                                 image.clone(),
                                 entry.captured_at.format("ucp-image-%Y%m%d-%H%M%S.png").to_string(),
                                 status,
+                                language,
                             );
                         },
-                        span { "保存为图片文件" }
+                        span { "{i18n::tr(language).save_as_image_file}" }
                     }
                 }
             }
         }
+    }
+}
+
+fn expand_more_label(language: AppLanguage, count: usize) -> String {
+    match language {
+        AppLanguage::Chinese => format!("展开另外 {count} 项"),
+        AppLanguage::English => format!("Show {count} more"),
     }
 }

@@ -1,5 +1,6 @@
 use crate::components::{AppIcon, AppPage, HistoryList, Icon, SettingsPage, TopBar};
-use crate::model::{AppSettings, ClipboardFilter, ClipboardHistory};
+use crate::i18n;
+use crate::model::{AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::storage;
 use dioxus::desktop::{
     self, DesktopContext, HotKeyState, ShortcutRegistryError, WindowCloseBehaviour,
@@ -55,7 +56,7 @@ pub fn App() -> Element {
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
 
-    use_app_tray(desktop.clone(), status);
+    use_app_tray(desktop.clone(), status, settings.peek().language);
 
     let global_shortcut = use_global_shortcut(GLOBAL_SHOW_SHORTCUT, {
         let desktop = desktop.clone();
@@ -66,7 +67,10 @@ pub fn App() -> Element {
         }
     });
 
-    let shortcut_error = global_shortcut.as_ref().err().map(shortcut_error_message);
+    let shortcut_error = global_shortcut
+        .as_ref()
+        .err()
+        .map(|error| shortcut_error_message(error, settings.peek().language));
     use_effect(move || {
         if let Some(error) = shortcut_error.as_ref()
             && !shortcut_error_reported()
@@ -88,14 +92,23 @@ pub fn App() -> Element {
 
         startup_cleanup_done.set(true);
         if let Some(days) = settings.peek().auto_cleanup_days {
+            let language = settings.peek().language;
             match crate::clipboard_watcher::prune_history_by_age(history, days) {
                 Ok(removed) if removed > 0 => {
                     let mut status = status;
-                    status.set(format!("已自动清理 {removed} 项过期历史"));
+                    status.set(match language {
+                        AppLanguage::Chinese => format!("已自动清理 {removed} 项过期历史"),
+                        AppLanguage::English => {
+                            format!("Automatically cleaned up {removed} expired history items")
+                        }
+                    });
                 }
                 Err(error) => {
                     let mut status = status;
-                    status.set(format!("自动清理历史失败：{error}"));
+                    status.set(match language {
+                        AppLanguage::Chinese => format!("自动清理历史失败：{error}"),
+                        AppLanguage::English => format!("Failed to auto-clean history: {error}"),
+                    });
                 }
                 _ => {}
             }
@@ -108,6 +121,7 @@ pub fn App() -> Element {
     let counts_snapshot = counts();
     let entry_count = snapshot_entries.len();
     let settings_snapshot = settings();
+    let language = settings_snapshot.language;
     let query_snapshot = query();
 
     rsx! {
@@ -189,6 +203,7 @@ pub fn App() -> Element {
                 active_page,
                 search_input,
                 keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
+                language,
             }
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {
@@ -212,6 +227,7 @@ pub fn App() -> Element {
                         quick_paste: settings_snapshot.quick_paste,
                         show_copy_time: settings_snapshot.show_copy_time,
                         show_text_length: settings_snapshot.show_text_length,
+                        language,
                         status,
                     }
                 }
@@ -221,10 +237,11 @@ pub fn App() -> Element {
                 "aria-live": "polite",
                 role: "status",
                 span { class: "status-message", "{status}" }
-                StatusSettingsButton { active_page }
+                StatusSettingsButton { active_page, language }
                 ClearHistoryButton {
                     history,
                     history_count: counts_snapshot.total,
+                    language,
                     status,
                 }
             }
@@ -232,23 +249,43 @@ pub fn App() -> Element {
     }
 }
 
-fn shortcut_error_message(error: &ShortcutRegistryError) -> String {
+fn shortcut_error_message(error: &ShortcutRegistryError, language: AppLanguage) -> String {
     match error {
-        ShortcutRegistryError::InvalidShortcut(shortcut) => {
-            format!("全局快捷键配置无效：{shortcut}")
-        }
+        ShortcutRegistryError::InvalidShortcut(shortcut) => match language {
+            AppLanguage::Chinese => format!("全局快捷键配置无效：{shortcut}"),
+            AppLanguage::English => format!("Invalid global shortcut configuration: {shortcut}"),
+        },
         ShortcutRegistryError::Other(error) => {
             let message = error.to_string();
             let debug_message = format!("{error:?}");
             if message.to_ascii_lowercase().contains("already registered")
                 || debug_message.contains("AlreadyRegistered")
             {
-                format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 已被占用，仍可通过托盘打开窗口")
+                match language {
+                    AppLanguage::Chinese => {
+                        format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 已被占用，仍可通过托盘打开窗口")
+                    }
+                    AppLanguage::English => format!(
+                        "Global shortcut {GLOBAL_SHOW_SHORTCUT} is already in use. You can still open the window from the tray"
+                    ),
+                }
             } else {
-                format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败：{message}")
+                match language {
+                    AppLanguage::Chinese => {
+                        format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败：{message}")
+                    }
+                    AppLanguage::English => format!(
+                        "Failed to register global shortcut {GLOBAL_SHOW_SHORTCUT}: {message}"
+                    ),
+                }
             }
         }
-        _ => format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败"),
+        _ => match language {
+            AppLanguage::Chinese => format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败"),
+            AppLanguage::English => {
+                format!("Failed to register global shortcut {GLOBAL_SHOW_SHORTCUT}")
+            }
+        },
     }
 }
 
@@ -263,7 +300,7 @@ fn load_initial_storage() -> InitialStorageState {
             Err(error) => InitialStorageState {
                 settings,
                 history: ClipboardHistory::new(settings.history_limit),
-                status: format!("存储初始化失败：{error}"),
+                status: storage_initialization_failed(settings.language, &error.to_string()),
             },
         },
         Err(error) => {
@@ -271,15 +308,23 @@ fn load_initial_storage() -> InitialStorageState {
             InitialStorageState {
                 settings,
                 history: ClipboardHistory::new(settings.history_limit),
-                status: format!("存储初始化失败：{error}"),
+                status: storage_initialization_failed(settings.language, &error.to_string()),
             }
         }
     }
 }
 
+fn storage_initialization_failed(language: AppLanguage, error: &str) -> String {
+    match language {
+        AppLanguage::Chinese => format!("存储初始化失败：{error}"),
+        AppLanguage::English => format!("Failed to initialize storage: {error}"),
+    }
+}
+
 #[component]
-fn StatusSettingsButton(mut active_page: Signal<AppPage>) -> Element {
+fn StatusSettingsButton(mut active_page: Signal<AppPage>, language: AppLanguage) -> Element {
     let is_settings = active_page() == AppPage::Settings;
+    let copy = i18n::tr(language);
     let button_class = if is_settings {
         "status-icon-action status-settings-action is-active"
     } else {
@@ -290,8 +335,8 @@ fn StatusSettingsButton(mut active_page: Signal<AppPage>) -> Element {
         button {
             class: button_class,
             type: "button",
-            title: if is_settings { "已在设置页" } else { "设置" },
-            aria_label: if is_settings { "已在设置页" } else { "打开设置" },
+            title: if is_settings { copy.on_settings_page } else { copy.settings },
+            aria_label: if is_settings { copy.on_settings_page } else { copy.open_settings },
             onclick: move |_| active_page.set(AppPage::Settings),
             Icon { icon: AppIcon::Settings }
         }
@@ -302,18 +347,20 @@ fn StatusSettingsButton(mut active_page: Signal<AppPage>) -> Element {
 fn ClearHistoryButton(
     history: Signal<ClipboardHistory>,
     history_count: usize,
+    language: AppLanguage,
     mut status: Signal<String>,
 ) -> Element {
     let mut open = use_signal(|| false);
     let disabled = history_count == 0;
+    let copy = i18n::tr(language);
 
     rsx! {
         button {
             class: "status-icon-action status-clear-action",
             type: "button",
             disabled,
-            title: if disabled { "暂无历史可清空" } else { "清空全部历史" },
-            aria_label: if disabled { "暂无历史可清空" } else { "清空全部历史" },
+            title: if disabled { copy.no_history_to_clear } else { copy.clear_all_history },
+            aria_label: if disabled { copy.no_history_to_clear } else { copy.clear_all_history },
             onclick: move |_| open.set(true),
             Icon { icon: AppIcon::Clear }
         }
@@ -322,24 +369,27 @@ fn ClearHistoryButton(
             on_open_change: move |value| open.set(value),
             div { class: "alert-dialog-backdrop" }
             AlertDialogContent { class: "alert-dialog-content",
-                AlertDialogTitle { class: "alert-dialog-title", "清空全部历史？" }
+                AlertDialogTitle { class: "alert-dialog-title", "{copy.clear_all_history_title}" }
                 AlertDialogDescription { class: "alert-dialog-description",
-                    "这会删除所有剪贴板历史记录，操作不可撤销。"
+                    "{copy.clear_all_history_description}"
                 }
                 AlertDialogActions { class: "alert-dialog-actions",
-                    AlertDialogCancel { class: "alert-dialog-button", "取消" }
+                    AlertDialogCancel { class: "alert-dialog-button", "{copy.cancel}" }
                     AlertDialogAction {
                         class: "alert-dialog-button is-danger",
                         on_click: move |_| {
                             match storage::clear_history() {
                                 Ok(()) => {
                                     history.write().clear();
-                                    status.set("历史已清空".to_string());
+                                    status.set(i18n::tr(language).history_cleared.to_string());
                                 }
-                                Err(error) => status.set(format!("历史清空失败：{error}")),
+                                Err(error) => status.set(match language {
+                                    AppLanguage::Chinese => format!("历史清空失败：{error}"),
+                                    AppLanguage::English => format!("Failed to clear history: {error}"),
+                                }),
                             }
                         },
-                        "确认清空"
+                        "{copy.confirm_clear}"
                     }
                 }
             }
@@ -348,14 +398,15 @@ fn ClearHistoryButton(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>) {
+fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>, language: AppLanguage) {
     let _tray = use_hook(|| {
         use desktop::trayicon::menu::{Menu, MenuItem, PredefinedMenuItem};
 
+        let copy = i18n::tr(language);
         let menu = Menu::new();
-        let show_window = MenuItem::with_id(TRAY_SHOW_WINDOW_ID, "显示窗口", true, None);
+        let show_window = MenuItem::with_id(TRAY_SHOW_WINDOW_ID, copy.show_window, true, None);
         let separator = PredefinedMenuItem::separator();
-        let quit = MenuItem::with_id(TRAY_QUIT_ID, "退出", true, None);
+        let quit = MenuItem::with_id(TRAY_QUIT_ID, copy.quit, true, None);
         menu.append_items(&[&show_window, &separator, &quit])
             .expect("tray menu creation failed");
 
@@ -367,7 +418,7 @@ fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>) {
             show_desktop_window(&desktop);
         }
         TRAY_QUIT_ID => {
-            status.set("正在退出 UCP Clipboard".to_string());
+            status.set(i18n::tr(language).exiting_app.to_string());
             desktop.set_close_behavior(WindowCloseBehaviour::WindowCloses);
             desktop.close();
         }
@@ -376,7 +427,7 @@ fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>) {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-fn use_app_tray(_desktop: DesktopContext, _status: Signal<String>) {}
+fn use_app_tray(_desktop: DesktopContext, _status: Signal<String>, _language: AppLanguage) {}
 
 fn show_desktop_window(desktop: &DesktopContext) {
     desktop.set_visible(true);

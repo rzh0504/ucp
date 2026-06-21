@@ -1,6 +1,7 @@
 use super::AppPage;
+use crate::i18n;
 use crate::model::{
-    AUTO_CLEANUP_DAY_OPTIONS, AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS,
+    AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, ClipboardHistory, HISTORY_LIMIT_OPTIONS,
 };
 use crate::platform;
 use crate::storage;
@@ -21,30 +22,32 @@ pub fn SettingsPage(
     status: Signal<String>,
 ) -> Element {
     let settings_snapshot = settings();
+    let language = settings_snapshot.language;
+    let copy = i18n::tr(language);
 
     rsx! {
         div { class: "list-header settings-header",
             div { class: "settings-title-copy",
-                h2 { "设置" }
-                span { "应用偏好" }
+                h2 { "{copy.settings}" }
+                span { "{copy.app_preferences}" }
             }
             button {
                 class: "settings-back-action",
                 type: "button",
-                title: "返回内容页",
+                title: copy.back_to_content_title,
                 onclick: move |_| active_page.set(AppPage::History),
                 span { aria_hidden: "true", "←" }
-                "返回"
+                "{copy.back}"
             }
         }
         Separator { class: "list-separator", decorative: true }
         ScrollArea { class: "settings-scroll", direction: ScrollDirection::Vertical, tabindex: "0",
             div { class: "settings-page",
                 section { class: "settings-group",
-                    h3 { "系统" }
+                    h3 { "{copy.system}" }
                     SettingSwitchRow {
-                        label: "开机启动",
-                        hint: "登录 Windows 后自动启动 UCP Clipboard。",
+                        label: copy.launch_at_startup,
+                        hint: copy.launch_at_startup_hint,
                         checked: settings_snapshot.launch_at_startup,
                         on_change: move |checked| {
                             match platform::startup::set_enabled(checked) {
@@ -53,7 +56,10 @@ pub fn SettingsPage(
                                 }
                                 Err(error) => {
                                     let mut status = status;
-                                    status.set(format!("开机启动设置失败：{error}"));
+                                    status.set(match language {
+                                        AppLanguage::Chinese => format!("开机启动设置失败：{error}"),
+                                        AppLanguage::English => format!("Failed to update startup setting: {error}"),
+                                    });
                                 }
                             }
                         },
@@ -61,20 +67,24 @@ pub fn SettingsPage(
                 }
 
                 section { class: "settings-group",
-                    h3 { "历史策略" }
+                    h3 { "{copy.history_policy}" }
                     div { class: "setting-row setting-row-control",
                         div { class: "setting-row-copy",
-                            span { class: "setting-label", "历史保留数量" }
-                            p { "超过上限时会自动清理较旧且未固定、未收藏的记录。" }
+                            span { class: "setting-label", "{copy.history_limit}" }
+                            p { "{copy.history_limit_hint}" }
                         }
                         HistoryLimitCombobox {
                             value: settings_snapshot.history_limit,
+                            language,
                             on_change: move |limit| {
                                 if update_settings(settings, status, |next| next.history_limit = limit) {
                                     let removed_ids = history.write().set_capacity(limit);
                                     if let Err(error) = storage::delete_entries(&removed_ids) {
                                         let mut status = status;
-                                        status.set(format!("历史清理失败：{error}"));
+                                        status.set(match language {
+                                            AppLanguage::Chinese => format!("历史清理失败：{error}"),
+                                            AppLanguage::English => format!("Failed to clean history: {error}"),
+                                        });
                                     }
                                 }
                             },
@@ -82,11 +92,12 @@ pub fn SettingsPage(
                     }
                     div { class: "setting-row setting-row-control",
                         div { class: "setting-row-copy",
-                            span { class: "setting-label", "按时间自动清理" }
-                            p { "只保留所选天数内的复制项；选择不自动清理则不会按时间删除。" }
+                            span { class: "setting-label", "{copy.auto_cleanup}" }
+                            p { "{copy.auto_cleanup_hint}" }
                         }
                         AutoCleanupCombobox {
                             value: settings_snapshot.auto_cleanup_days,
+                            language,
                             on_change: move |days| {
                                 if update_settings(settings, status, |next| next.auto_cleanup_days = days)
                                     && let Some(days) = days
@@ -94,11 +105,17 @@ pub fn SettingsPage(
                                     match apply_auto_cleanup(history, days) {
                                         Ok(removed) if removed > 0 => {
                                             let mut status = status;
-                                            status.set(format!("已清理 {removed} 项过期历史"));
+                                            status.set(match language {
+                                                AppLanguage::Chinese => format!("已清理 {removed} 项过期历史"),
+                                                AppLanguage::English => format!("Cleaned up {removed} expired history items"),
+                                            });
                                         }
                                         Err(error) => {
                                             let mut status = status;
-                                            status.set(format!("自动清理历史失败：{error}"));
+                                            status.set(match language {
+                                                AppLanguage::Chinese => format!("自动清理历史失败：{error}"),
+                                                AppLanguage::English => format!("Failed to auto-clean history: {error}"),
+                                            });
                                         }
                                         _ => {}
                                     }
@@ -109,34 +126,34 @@ pub fn SettingsPage(
                 }
 
                 section { class: "settings-group",
-                    h3 { "快捷与交互" }
+                    h3 { "{copy.shortcuts_interaction}" }
                     SettingSwitchRow {
-                        label: "键盘快捷键",
-                        hint: "启用 Ctrl+F 搜索、Ctrl+, 切换设置、数字过滤和列表快捷操作。",
+                        label: copy.keyboard_shortcuts,
+                        hint: copy.keyboard_shortcuts_hint,
                         checked: settings_snapshot.keyboard_shortcuts,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.keyboard_shortcuts = checked);
                         },
                     }
                     SettingSwitchRow {
-                        label: "自动聚焦历史列表",
-                        hint: "打开历史页后自动聚焦列表，方便直接使用方向键浏览。",
+                        label: copy.auto_focus_history,
+                        hint: copy.auto_focus_history_hint,
                         checked: settings_snapshot.auto_focus_history,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.auto_focus_history = checked);
                         },
                     }
                     SettingSwitchRow {
-                        label: "复制后置顶",
-                        hint: "从历史中复制记录后，将该记录更新时间并移动到列表顶部。",
+                        label: copy.promote_copied_entries,
+                        hint: copy.promote_copied_entries_hint,
                         checked: settings_snapshot.promote_copied_entries,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.promote_copied_entries = checked);
                         },
                     }
                     SettingSwitchRow {
-                        label: "快捷粘贴",
-                        hint: "双击或按 Enter 使用文本记录时，复制后自动粘贴到当前光标位置。",
+                        label: copy.quick_paste,
+                        hint: copy.quick_paste_hint,
                         checked: settings_snapshot.quick_paste,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.quick_paste = checked);
@@ -145,18 +162,30 @@ pub fn SettingsPage(
                 }
 
                 section { class: "settings-group",
-                    h3 { "显示" }
+                    h3 { "{copy.display}" }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "{copy.language}" }
+                            p { "{copy.language_hint}" }
+                        }
+                        LanguageCombobox {
+                            value: settings_snapshot.language,
+                            on_change: move |language| {
+                                update_settings(settings, status, |next| next.language = language);
+                            },
+                        }
+                    }
                     SettingSwitchRow {
-                        label: "显示复制时间",
-                        hint: "在历史记录中显示每项的复制时间。",
+                        label: copy.show_copy_time,
+                        hint: copy.show_copy_time_hint,
                         checked: settings_snapshot.show_copy_time,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.show_copy_time = checked);
                         },
                     }
                     SettingSwitchRow {
-                        label: "显示文本字符长度",
-                        hint: "在文本记录中显示字符数量。",
+                        label: copy.show_text_length,
+                        hint: copy.show_text_length_hint,
                         checked: settings_snapshot.show_text_length,
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.show_text_length = checked);
@@ -169,8 +198,18 @@ pub fn SettingsPage(
 }
 
 #[component]
-fn AutoCleanupCombobox(value: Option<u16>, on_change: EventHandler<Option<u16>>) -> Element {
+fn AutoCleanupCombobox(
+    value: Option<u16>,
+    language: AppLanguage,
+    on_change: EventHandler<Option<u16>>,
+) -> Element {
     let selected_value = use_memo(move || Some(value));
+    let copy = i18n::tr(language);
+    let options = AUTO_CLEANUP_DAY_OPTIONS
+        .into_iter()
+        .enumerate()
+        .map(|(index, days)| (index, days, i18n::auto_cleanup_label(language, days)))
+        .collect::<Vec<_>>();
 
     rsx! {
         Combobox::<Option<u16>> {
@@ -181,15 +220,15 @@ fn AutoCleanupCombobox(value: Option<u16>, on_change: EventHandler<Option<u16>>)
                     on_change.call(days);
                 }
             },
-            ComboboxInput { class: "settings-combobox-input", placeholder: "选择清理周期" }
+            ComboboxInput { class: "settings-combobox-input", placeholder: copy.select_cleanup_period }
             ComboboxList { class: "settings-combobox-list",
-                for (index, days) in AUTO_CLEANUP_DAY_OPTIONS.into_iter().enumerate() {
+                for (index, days, label) in options {
                     ComboboxOption::<Option<u16>> {
                         class: "settings-combobox-option",
                         index,
                         value: days,
-                        text_value: Some(auto_cleanup_label(days).to_string()),
-                        "{auto_cleanup_label(days)}"
+                        text_value: Some(label.clone()),
+                        "{label}"
                         ComboboxItemIndicator { span { "✓" } }
                     }
                 }
@@ -223,8 +262,18 @@ fn SettingSwitchRow(
 }
 
 #[component]
-fn HistoryLimitCombobox(value: usize, on_change: EventHandler<usize>) -> Element {
+fn HistoryLimitCombobox(
+    value: usize,
+    language: AppLanguage,
+    on_change: EventHandler<usize>,
+) -> Element {
     let selected_value = use_memo(move || Some(value));
+    let copy = i18n::tr(language);
+    let options = HISTORY_LIMIT_OPTIONS
+        .into_iter()
+        .enumerate()
+        .map(|(index, limit)| (index, limit, i18n::item_count(language, limit)))
+        .collect::<Vec<_>>();
 
     rsx! {
         Combobox::<usize> {
@@ -235,15 +284,45 @@ fn HistoryLimitCombobox(value: usize, on_change: EventHandler<usize>) -> Element
                     on_change.call(limit);
                 }
             },
-            ComboboxInput { class: "settings-combobox-input", placeholder: "选择保留数量" }
+            ComboboxInput { class: "settings-combobox-input", placeholder: copy.select_history_limit }
             ComboboxList { class: "settings-combobox-list",
-                for (index, limit) in HISTORY_LIMIT_OPTIONS.into_iter().enumerate() {
+                for (index, limit, label) in options {
                     ComboboxOption::<usize> {
                         class: "settings-combobox-option",
                         index,
                         value: limit,
-                        text_value: Some(format!("{limit} 项")),
-                        "{limit} 项"
+                        text_value: Some(label.clone()),
+                        "{label}"
+                        ComboboxItemIndicator { span { "✓" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn LanguageCombobox(value: AppLanguage, on_change: EventHandler<AppLanguage>) -> Element {
+    let selected_value = use_memo(move || Some(value));
+
+    rsx! {
+        Combobox::<AppLanguage> {
+            class: "settings-combobox",
+            value: Some(ReadSignal::from(selected_value)),
+            on_value_change: move |value: Option<AppLanguage>| {
+                if let Some(language) = value {
+                    on_change.call(language);
+                }
+            },
+            ComboboxInput { class: "settings-combobox-input", placeholder: "Language" }
+            ComboboxList { class: "settings-combobox-list",
+                for (index, language) in AppLanguage::OPTIONS.into_iter().enumerate() {
+                    ComboboxOption::<AppLanguage> {
+                        class: "settings-combobox-option",
+                        index,
+                        value: language,
+                        text_value: Some(language.label().to_string()),
+                        "{language.label()}"
                         ComboboxItemIndicator { span { "✓" } }
                     }
                 }
@@ -264,11 +343,14 @@ fn update_settings(
     match storage::save_settings(&next) {
         Ok(()) => {
             settings.set(next);
-            status.set("设置已保存".to_string());
+            status.set(i18n::tr(next.language).settings_saved.to_string());
             true
         }
         Err(error) => {
-            status.set(format!("设置保存失败：{error}"));
+            status.set(match next.language {
+                AppLanguage::Chinese => format!("设置保存失败：{error}"),
+                AppLanguage::English => format!("Failed to save settings: {error}"),
+            });
             false
         }
     }
@@ -281,13 +363,4 @@ fn apply_auto_cleanup(
     let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
     storage::delete_entries_older_than(cutoff)?;
     Ok(history.write().remove_older_than_days(days))
-}
-
-fn auto_cleanup_label(days: Option<u16>) -> &'static str {
-    match days {
-        Some(7) => "7 天",
-        Some(30) => "30 天",
-        Some(60) => "60 天",
-        _ => "不自动清理",
-    }
 }

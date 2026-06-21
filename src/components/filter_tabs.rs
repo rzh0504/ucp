@@ -1,17 +1,24 @@
 use super::icons::{AppIcon, Icon};
 use super::tabs::{TabList, TabTrigger, Tabs};
+use crate::i18n;
+use crate::model::AppLanguage;
 use crate::model::{ClipboardFilter, HistoryCounts};
 use dioxus::prelude::*;
 
 #[component]
-pub fn FilterTabs(active_filter: Signal<ClipboardFilter>, counts: HistoryCounts) -> Element {
+pub fn FilterTabs(
+    active_filter: Signal<ClipboardFilter>,
+    counts: HistoryCounts,
+    language: AppLanguage,
+) -> Element {
     let tabs = [
-        (ClipboardFilter::All, "全部", counts.total),
-        (ClipboardFilter::Text, "文本", counts.text),
-        (ClipboardFilter::Image, "图像", counts.image),
-        (ClipboardFilter::File, "文件", counts.file),
-        (ClipboardFilter::Favorite, "收藏", counts.favorite),
+        (ClipboardFilter::All, counts.total),
+        (ClipboardFilter::Text, counts.text),
+        (ClipboardFilter::Image, counts.image),
+        (ClipboardFilter::File, counts.file),
+        (ClipboardFilter::Favorite, counts.favorite),
     ];
+    let copy = i18n::tr(language);
 
     rsx! {
         Tabs {
@@ -19,14 +26,14 @@ pub fn FilterTabs(active_filter: Signal<ClipboardFilter>, counts: HistoryCounts)
             value: Some(active_filter().key().to_string()),
             on_value_change: move |key: String| active_filter.set(ClipboardFilter::from_key(&key)),
             horizontal: true,
-            TabList { class: "filter-tabs", aria_label: "剪贴板类型筛选",
-                for (index, (filter, label, count)) in tabs.into_iter().enumerate() {
+            TabList { class: "filter-tabs", aria_label: copy.clipboard_type_filter,
+                for (index, (filter, count)) in tabs.into_iter().enumerate() {
                     FilterTab {
                         key: "{filter.key()}",
                         filter,
                         index,
-                        label,
                         count,
+                        language,
                     }
                 }
             }
@@ -35,13 +42,19 @@ pub fn FilterTabs(active_filter: Signal<ClipboardFilter>, counts: HistoryCounts)
 }
 
 #[component]
-fn FilterTab(filter: ClipboardFilter, index: usize, label: &'static str, count: usize) -> Element {
+fn FilterTab(
+    filter: ClipboardFilter,
+    index: usize,
+    count: usize,
+    language: AppLanguage,
+) -> Element {
     let icon = match filter {
         ClipboardFilter::Image => Some(AppIcon::Image),
         ClipboardFilter::File => Some(AppIcon::File),
         ClipboardFilter::Favorite => Some(AppIcon::Favorite),
         ClipboardFilter::All | ClipboardFilter::Text => None,
     };
+    let label = i18n::filter_label(language, filter);
 
     rsx! {
         TabTrigger {

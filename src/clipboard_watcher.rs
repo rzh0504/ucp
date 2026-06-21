@@ -1,4 +1,4 @@
-use crate::model::{AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory};
+use crate::model::{AppLanguage, AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory};
 use crate::platform;
 use crate::platform::clipboard::ClipboardError;
 use crate::storage;
@@ -17,6 +17,7 @@ struct PersistCaptureJob {
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
+    language: AppLanguage,
     reply: oneshot::Sender<Result<(), String>>,
 }
 
@@ -36,7 +37,12 @@ pub(crate) async fn watch_clipboard(
     let _listener = match listener {
         Ok(listener) => listener,
         Err(error) => {
-            status.set(format!("剪贴板事件监听失败，已切换轮询：{error}"));
+            status.set(match settings.peek().language {
+                AppLanguage::Chinese => format!("剪贴板事件监听失败，已切换轮询：{error}"),
+                AppLanguage::English => {
+                    format!("Clipboard event listener failed; switched to polling: {error}")
+                }
+            });
             poll_clipboard(history, settings, status).await;
             return;
         }
@@ -86,7 +92,8 @@ async fn capture_clipboard(
     settings: Signal<AppSettings>,
     mut status: Signal<String>,
 ) {
-    match read_clipboard_content().await {
+    let language = settings.peek().language;
+    match read_clipboard_content(language).await {
         Ok(Some(content)) => {
             let result = history.write().push(content);
             let mut auto_cleanup_cutoff = None;
@@ -105,52 +112,60 @@ async fn capture_clipboard(
                 return;
             }
 
-            if let Err(message) =
-                persist_capture_result(result.entry, result.removed_ids, auto_cleanup_cutoff).await
+            if let Err(message) = persist_capture_result(
+                result.entry,
+                result.removed_ids,
+                auto_cleanup_cutoff,
+                language,
+            )
+            .await
             {
                 status.set(message);
             }
         }
         Ok(None) => {}
-        Err(error) => status.set(format!("剪贴板暂不可用：{error}")),
+        Err(error) => status.set(match language {
+            AppLanguage::Chinese => format!("剪贴板暂不可用：{error}"),
+            AppLanguage::English => format!("Clipboard is temporarily unavailable: {error}"),
+        }),
     }
 }
 
-async fn read_clipboard_content() -> Result<Option<ClipboardContent>, ClipboardError> {
+async fn read_clipboard_content(
+    language: AppLanguage,
+) -> Result<Option<ClipboardContent>, ClipboardError> {
     let (reply, receiver) = oneshot::channel();
     if clipboard_read_worker().send(reply).is_err() {
-        return Err(ClipboardError::Unavailable(
-            "剪贴板读取任务已中断".to_string(),
-        ));
+        return Err(ClipboardError::Unavailable(read_task_interrupted(language)));
     }
 
-    receiver.await.unwrap_or_else(|_| {
-        Err(ClipboardError::Unavailable(
-            "剪贴板读取任务已中断".to_string(),
-        ))
-    })
+    receiver
+        .await
+        .unwrap_or_else(|_| Err(ClipboardError::Unavailable(read_task_interrupted(language))))
 }
 
 async fn persist_capture_result(
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
+    language: AppLanguage,
 ) -> Result<(), String> {
     let (reply, receiver) = oneshot::channel();
     let job = PersistCaptureJob {
         entry,
         removed_ids,
         auto_cleanup_cutoff,
+        language,
         reply,
     };
 
     if storage_persist_worker().send(job).is_err() {
-        return Err("历史保存任务已中断".to_string());
+        return Err(save_task_interrupted(language));
     }
 
     receiver
         .await
-        .unwrap_or_else(|_| Err("历史保存任务已中断".to_string()))
+        .unwrap_or_else(|_| Err(save_task_interrupted(language)))
 }
 
 fn clipboard_read_worker() -> &'static std_mpsc::Sender<ClipboardReadReply> {
@@ -176,6 +191,7 @@ fn storage_persist_worker() -> &'static std_mpsc::Sender<PersistCaptureJob> {
                     job.entry,
                     job.removed_ids,
                     job.auto_cleanup_cutoff,
+                    job.language,
                 );
                 let _ = job.reply.send(result);
             }
@@ -188,24 +204,48 @@ fn persist_capture_result_blocking(
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
+    language: AppLanguage,
 ) -> Result<(), String> {
     if let Some(entry) = &entry
         && let Err(error) = storage::save_entry(entry)
     {
-        return Err(format!("历史保存失败：{error}"));
+        return Err(match language {
+            AppLanguage::Chinese => format!("历史保存失败：{error}"),
+            AppLanguage::English => format!("Failed to save history: {error}"),
+        });
     }
 
     if let Err(error) = storage::delete_entries(&removed_ids) {
-        return Err(format!("历史清理失败：{error}"));
+        return Err(match language {
+            AppLanguage::Chinese => format!("历史清理失败：{error}"),
+            AppLanguage::English => format!("Failed to clean history: {error}"),
+        });
     }
 
     if let Some(cutoff) = auto_cleanup_cutoff
         && let Err(error) = storage::delete_entries_older_than(cutoff)
     {
-        return Err(format!("自动清理历史失败：{error}"));
+        return Err(match language {
+            AppLanguage::Chinese => format!("自动清理历史失败：{error}"),
+            AppLanguage::English => format!("Failed to auto-clean history: {error}"),
+        });
     }
 
     Ok(())
+}
+
+fn read_task_interrupted(language: AppLanguage) -> String {
+    match language {
+        AppLanguage::Chinese => "剪贴板读取任务已中断".to_string(),
+        AppLanguage::English => "Clipboard read task was interrupted".to_string(),
+    }
+}
+
+fn save_task_interrupted(language: AppLanguage) -> String {
+    match language {
+        AppLanguage::Chinese => "历史保存任务已中断".to_string(),
+        AppLanguage::English => "History save task was interrupted".to_string(),
+    }
 }
 
 pub(crate) fn prune_history_by_age(
