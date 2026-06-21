@@ -47,16 +47,28 @@
 }
 
 .settings-group {
+    position: relative;
     overflow: visible;
-    border: 1px solid rgba(60, 60, 67, 0.14);
+    border: 1px solid transparent;
     border-radius: 14px;
     background: #ffffff;
+}
+
+.settings-group::after {
+    position: absolute;
+    z-index: 1;
+    inset: -1px;
+    border: 1px solid rgba(60, 60, 67, 0.14);
+    border-radius: inherit;
+    content: "";
+    pointer-events: none;
 }
 
 .settings-group h3 {
     margin: 0;
     padding: 13px 16px;
     border-bottom: 1px solid rgba(60, 60, 67, 0.12);
+    border-radius: 13px 13px 0 0;
     background: #fbfbfd;
     color: #1d1d1f;
     font-size: 13px;
