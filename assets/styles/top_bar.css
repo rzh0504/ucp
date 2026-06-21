@@ -46,6 +46,10 @@
     min-width: 104px;
 }
 
+.window-controls.is-widget {
+    min-width: 58px;
+}
+
 .window-dot {
     position: relative;
     display: grid;

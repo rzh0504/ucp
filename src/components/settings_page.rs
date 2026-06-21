@@ -64,6 +64,14 @@ pub fn SettingsPage(
                             }
                         },
                     }
+                    SettingSwitchRow {
+                        label: copy.desktop_widget,
+                        hint: copy.desktop_widget_hint,
+                        checked: settings_snapshot.desktop_widget,
+                        on_change: move |checked| {
+                            update_settings(settings, status, |next| next.desktop_widget = checked);
+                        },
+                    }
                 }
 
                 section { class: "settings-group",

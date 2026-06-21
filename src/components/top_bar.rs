@@ -13,6 +13,7 @@ pub fn TopBar(
     active_page: Signal<AppPage>,
     search_input: Signal<Option<Rc<MountedData>>>,
     keyboard_shortcuts: bool,
+    widget_mode: bool,
     language: AppLanguage,
 ) -> Element {
     let window = use_window();
@@ -36,6 +37,7 @@ pub fn TopBar(
             }
             WindowControls {
                 language,
+                widget_mode,
                 on_minimize: move |_| minimize_window.set_minimized(true),
                 on_maximize: move |_| maximize_window.toggle_maximized(),
                 on_close: move |_| close_window.close(),
@@ -47,25 +49,33 @@ pub fn TopBar(
 #[component]
 fn WindowControls(
     language: AppLanguage,
+    widget_mode: bool,
     on_minimize: EventHandler<()>,
     on_maximize: EventHandler<()>,
     on_close: EventHandler<()>,
 ) -> Element {
     let copy = i18n::tr(language);
+    let controls_class = if widget_mode {
+        "window-controls is-widget"
+    } else {
+        "window-controls"
+    };
 
     rsx! {
-        div { class: "window-controls", aria_label: copy.window_controls,
+        div { class: controls_class, aria_label: copy.window_controls,
             button {
                 class: "window-dot is-minimize",
                 title: copy.minimize,
                 onclick: move |_| on_minimize.call(()),
                 span { "−" }
             }
-            button {
-                class: "window-dot is-maximize",
-                title: copy.maximize_or_restore,
-                onclick: move |_| on_maximize.call(()),
-                span { "□" }
+            if !widget_mode {
+                button {
+                    class: "window-dot is-maximize",
+                    title: copy.maximize_or_restore,
+                    onclick: move |_| on_maximize.call(()),
+                    span { "□" }
+                }
             }
             button {
                 class: "window-dot is-close",

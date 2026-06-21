@@ -3,7 +3,7 @@ use crate::i18n;
 use crate::model::{AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory};
 use crate::storage;
 use dioxus::desktop::{
-    self, DesktopContext, HotKeyState, ShortcutRegistryError, WindowCloseBehaviour,
+    self, DesktopContext, HotKeyState, LogicalSize, ShortcutRegistryError, WindowCloseBehaviour,
     use_global_shortcut, use_window,
 };
 use dioxus::events::MountedData;
@@ -33,6 +33,12 @@ const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
 const STATUS_AUTO_CLEAR_DELAY: Duration = Duration::from_secs(4);
+const NORMAL_WINDOW_WIDTH: f64 = 1006.0;
+const NORMAL_WINDOW_HEIGHT: f64 = 754.0;
+const NORMAL_WINDOW_MIN_WIDTH: f64 = 860.0;
+const NORMAL_WINDOW_MIN_HEIGHT: f64 = 620.0;
+const WIDGET_WINDOW_WIDTH: f64 = 420.0;
+const WIDGET_WINDOW_HEIGHT: f64 = 620.0;
 
 #[derive(Clone)]
 struct InitialStorageState {
@@ -59,8 +65,22 @@ pub fn App() -> Element {
     let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
+    let mut applied_widget_mode = use_signal(|| None::<bool>);
 
     use_app_tray(desktop.clone(), status, settings.peek().language);
+
+    use_effect({
+        let desktop = desktop.clone();
+        move || {
+            let widget_mode = settings().desktop_widget;
+            if *applied_widget_mode.peek() == Some(widget_mode) {
+                return;
+            }
+
+            applied_widget_mode.set(Some(widget_mode));
+            apply_window_mode(&desktop, widget_mode);
+        }
+    });
 
     let global_shortcut = use_global_shortcut(GLOBAL_SHOW_SHORTCUT, {
         let desktop = desktop.clone();
@@ -226,6 +246,7 @@ pub fn App() -> Element {
                 active_page,
                 search_input,
                 keyboard_shortcuts: settings_snapshot.keyboard_shortcuts,
+                widget_mode: settings_snapshot.desktop_widget,
                 language,
             }
             section { class: "content-panel",
@@ -457,6 +478,37 @@ fn show_desktop_window(desktop: &DesktopContext) {
     desktop.set_minimized(false);
     desktop.set_focus();
 }
+
+fn apply_window_mode(desktop: &DesktopContext, widget_mode: bool) {
+    desktop.set_maximized(false);
+    desktop.set_always_on_top(widget_mode);
+    desktop.set_resizable(!widget_mode);
+    desktop.set_maximizable(!widget_mode);
+    set_skip_taskbar(desktop, widget_mode);
+
+    if widget_mode {
+        desktop.set_title("UCP Clipboard Widget");
+        desktop.set_min_inner_size(None::<LogicalSize<f64>>);
+        desktop.set_inner_size(LogicalSize::new(WIDGET_WINDOW_WIDTH, WIDGET_WINDOW_HEIGHT));
+    } else {
+        desktop.set_title("UCP Clipboard");
+        desktop.set_min_inner_size(Some(LogicalSize::new(
+            NORMAL_WINDOW_MIN_WIDTH,
+            NORMAL_WINDOW_MIN_HEIGHT,
+        )));
+        desktop.set_inner_size(LogicalSize::new(NORMAL_WINDOW_WIDTH, NORMAL_WINDOW_HEIGHT));
+    }
+}
+
+#[cfg(windows)]
+fn set_skip_taskbar(desktop: &DesktopContext, skip: bool) {
+    use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+
+    let _ = desktop.window.set_skip_taskbar(skip);
+}
+
+#[cfg(not(windows))]
+fn set_skip_taskbar(_desktop: &DesktopContext, _skip: bool) {}
 
 fn filter_shortcut(key: &Key) -> Option<ClipboardFilter> {
     match key {
