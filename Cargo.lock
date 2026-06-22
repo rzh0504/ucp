@@ -4801,6 +4801,7 @@ dependencies = [
  "image",
  "rfd",
  "rusqlite",
+ "sha2",
  "windows-sys 0.61.2",
 ]
 

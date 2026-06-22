@@ -16,6 +16,7 @@ futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = { version = "0.17", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5", features = ["monitor"] }

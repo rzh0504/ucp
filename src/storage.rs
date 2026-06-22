@@ -3,20 +3,21 @@ use crate::model::{
 };
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Mutex;
 
 #[cfg(test)]
 use std::sync::OnceLock;
 
 const APP_DIR: &str = "UCP Clipboard";
 const DATABASE_FILE: &str = "history.ucp";
-const LEGACY_DATABASE_FILE: &str = "history.sqlite3";
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 3;
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+const IMAGE_FORMAT_PNG: &str = "png";
 static DATABASE_CONNECTION: Mutex<Option<Connection>> = Mutex::new(None);
 
 #[derive(Debug)]
@@ -98,18 +99,26 @@ pub fn load_image(entry_id: u64) -> Result<Option<ClipboardImage>, StorageError>
     with_connection(|connection| {
         connection
             .query_row(
-                "SELECT image_width, image_height, image_rgba, image_preview_url \
+                "SELECT image_width, image_height, image_blob, image_preview_url \
                  FROM clipboard_entries \
                  WHERE id = ?1 AND kind = 'image'",
                 params![entry_id as i64],
                 |row| {
-                    let bytes = row.get::<_, Option<Vec<u8>>>(2)?.map(Arc::new);
-                    Ok(ClipboardImage {
-                        width: row.get::<_, Option<i64>>(0)?.unwrap_or_default().max(0) as usize,
-                        height: row.get::<_, Option<i64>>(1)?.unwrap_or_default().max(0) as usize,
-                        bytes,
-                        preview_url: row.get(3)?,
-                    })
+                    let width = row.get::<_, Option<i64>>(0)?.unwrap_or_default().max(0) as usize;
+                    let height = row.get::<_, Option<i64>>(1)?.unwrap_or_default().max(0) as usize;
+                    let preview_url = row.get(3)?;
+
+                    Ok(row
+                        .get::<_, Option<Vec<u8>>>(2)?
+                        .and_then(|bytes| {
+                            ClipboardImage::from_stored_bytes(width, height, bytes, preview_url)
+                        })
+                        .unwrap_or(ClipboardImage {
+                            width,
+                            height,
+                            bytes: None,
+                            preview_url: None,
+                        }))
                 },
             )
             .optional()
@@ -125,7 +134,8 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
         let mut text_content: Option<&str> = None;
         let mut image_width: Option<i64> = None;
         let mut image_height: Option<i64> = None;
-        let mut image_rgba: Option<&[u8]> = None;
+        let mut image_blob: Option<Vec<u8>> = None;
+        let mut image_format: Option<&str> = None;
         let mut image_preview_url: Option<&str> = None;
 
         match &entry.content {
@@ -133,53 +143,86 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
             ClipboardContent::Image(image) => {
                 image_width = Some(image.width as i64);
                 image_height = Some(image.height as i64);
-                image_rgba = image.rgba_bytes();
+                image_blob = image.stored_bytes();
+                image_format = image_blob.as_ref().map(|_| IMAGE_FORMAT_PNG);
                 image_preview_url = image.preview_url.as_deref();
             }
             ClipboardContent::Files(_) => {}
         }
+        let content_hash = content_hash_for_entry(entry, image_blob.as_deref());
+        let database_id = if let Some(hash) = content_hash.as_deref() {
+            transaction
+                .query_row(
+                    "SELECT id FROM clipboard_entries WHERE content_hash = ?1 AND id <> ?2",
+                    params![hash, entry.id as i64],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .unwrap_or(entry.id as i64)
+        } else {
+            entry.id as i64
+        };
+        let merge_duplicate_metadata = (database_id != entry.id as i64) as i64;
 
         transaction.execute(
             "INSERT INTO clipboard_entries (\
-                 id, kind, text_content, image_width, image_height, image_rgba, image_preview_url, \
-                 captured_at_millis, pinned, favorite\
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+                 id, kind, text_content, image_width, image_height, image_blob, image_format, \
+                 image_preview_url, captured_at_millis, pinned, favorite, content_hash\
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
              ON CONFLICT(id) DO UPDATE SET \
                  kind = excluded.kind, \
-                  text_content = excluded.text_content, \
-                  image_width = excluded.image_width, \
-                  image_height = excluded.image_height, \
-                  image_rgba = COALESCE(excluded.image_rgba, clipboard_entries.image_rgba), \
-                  image_preview_url = excluded.image_preview_url, \
-                 captured_at_millis = excluded.captured_at_millis, \
-                 pinned = excluded.pinned, \
-                 favorite = excluded.favorite",
+                   text_content = excluded.text_content, \
+                   image_width = excluded.image_width, \
+                   image_height = excluded.image_height, \
+                   image_blob = COALESCE(excluded.image_blob, clipboard_entries.image_blob), \
+                   image_format = COALESCE(excluded.image_format, clipboard_entries.image_format), \
+                   image_preview_url = excluded.image_preview_url, \
+                  captured_at_millis = excluded.captured_at_millis, \
+                  pinned = CASE \
+                      WHEN ?13 != 0 THEN clipboard_entries.pinned OR excluded.pinned \
+                      ELSE excluded.pinned \
+                  END, \
+                  favorite = CASE \
+                      WHEN ?13 != 0 THEN clipboard_entries.favorite OR excluded.favorite \
+                      ELSE excluded.favorite \
+                  END, \
+                  content_hash = COALESCE(excluded.content_hash, clipboard_entries.content_hash)",
             params![
-                entry.id as i64,
+                database_id,
                 kind,
                 text_content,
                 image_width,
                 image_height,
-                image_rgba,
+                image_blob.as_deref(),
+                image_format,
                 image_preview_url,
                 entry.captured_at.timestamp_millis(),
                 entry.pinned as i64,
                 entry.favorite as i64,
+                content_hash,
+                merge_duplicate_metadata,
             ],
         )?;
 
         transaction.execute(
             "DELETE FROM clipboard_files WHERE entry_id = ?1",
-            params![entry.id as i64],
+            params![database_id],
         )?;
 
         if let ClipboardContent::Files(files) = &entry.content {
             for (position, file) in files.iter().enumerate() {
                 transaction.execute(
                     "INSERT INTO clipboard_files (entry_id, position, path) VALUES (?1, ?2, ?3)",
-                    params![entry.id as i64, position as i64, file],
+                    params![database_id, position as i64, file],
                 )?;
             }
+        }
+
+        if database_id != entry.id as i64 {
+            transaction.execute(
+                "DELETE FROM clipboard_entries WHERE id = ?1",
+                params![entry.id as i64],
+            )?;
         }
 
         transaction.commit()?;
@@ -226,6 +269,18 @@ pub fn delete_entries_older_than(cutoff: DateTime<Local>) -> Result<usize, Stora
                 params![cutoff.timestamp_millis()],
             )
             .map_err(StorageError::from)
+    })
+}
+
+pub fn compact_database() -> Result<(), StorageError> {
+    with_connection(|connection| {
+        ensure_current_schema_columns(connection)?;
+        compress_stored_images(connection)?;
+        populate_content_hashes(connection)?;
+        deduplicate_entries(connection)?;
+        create_content_hash_index(connection)?;
+        connection.execute_batch("VACUUM;")?;
+        Ok(())
     })
 }
 
@@ -349,76 +404,10 @@ fn with_connection<T>(
 
 fn open_connection() -> Result<Connection, StorageError> {
     let path = database_path()?;
-    restore_plaintext_database_if_needed(&path)?;
-
     let connection = Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     migrate(&connection)?;
     Ok(connection)
-}
-
-fn restore_plaintext_database_if_needed(database_path: &Path) -> Result<(), StorageError> {
-    if database_path.exists() && is_plaintext_sqlite(database_path)? {
-        return Ok(());
-    }
-
-    if let Some(source_path) = plaintext_restore_source()? {
-        if database_path.exists() {
-            fs::rename(
-                database_path,
-                unique_backup_path(database_path, "sqlcipher-backup"),
-            )?;
-        }
-        fs::copy(source_path, database_path)?;
-        return Ok(());
-    }
-
-    if database_path.exists() {
-        return Err(StorageError::Database(format!(
-            "数据库文件不是普通 SQLite：{}。如果要回退 SQLCipher，请保留旧的 history.sqlite3 或 history.ucp.plaintext-backup 后再启动。",
-            database_path.display()
-        )));
-    }
-
-    Ok(())
-}
-
-fn plaintext_restore_source() -> Result<Option<PathBuf>, StorageError> {
-    for file_name in [LEGACY_DATABASE_FILE, "history.ucp.plaintext-backup"] {
-        let path = data_directory().join(file_name);
-        if is_plaintext_sqlite(&path)? {
-            return Ok(Some(path));
-        }
-    }
-
-    Ok(None)
-}
-
-fn is_plaintext_sqlite(path: &Path) -> Result<bool, StorageError> {
-    if !path.exists() {
-        return Ok(false);
-    }
-
-    let mut header = [0; 16];
-    let mut file = fs::File::open(path)?;
-    let bytes_read = file.read(&mut header)?;
-    Ok(bytes_read == header.len() && header == *b"SQLite format 3\0")
-}
-
-fn unique_backup_path(path: &Path, suffix: &str) -> PathBuf {
-    for index in 0.. {
-        let extension = if index == 0 {
-            format!("ucp.{suffix}")
-        } else {
-            format!("ucp.{suffix}-{index}")
-        };
-        let candidate = path.with_extension(extension);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-
-    unreachable!()
 }
 
 fn migrate(connection: &Connection) -> Result<(), StorageError> {
@@ -436,11 +425,13 @@ fn migrate(connection: &Connection) -> Result<(), StorageError> {
              text_content TEXT, \
              image_width INTEGER, \
              image_height INTEGER, \
-             image_rgba BLOB, \
+             image_blob BLOB, \
+             image_format TEXT, \
              image_preview_url TEXT, \
              captured_at_millis INTEGER NOT NULL, \
              pinned INTEGER NOT NULL DEFAULT 0, \
-             favorite INTEGER NOT NULL DEFAULT 0\
+             favorite INTEGER NOT NULL DEFAULT 0, \
+             content_hash TEXT\
          );
 
          CREATE TABLE IF NOT EXISTS clipboard_files (\
@@ -462,8 +453,247 @@ fn migrate(connection: &Connection) -> Result<(), StorageError> {
                value TEXT NOT NULL\
            );",
     )?;
+
+    ensure_current_schema_columns(connection)?;
+    connection.execute(
+        "UPDATE clipboard_entries \
+         SET image_format = ?1 \
+         WHERE kind = 'image' AND image_blob IS NOT NULL AND image_format IS NULL",
+        params![IMAGE_FORMAT_PNG],
+    )?;
+    compress_stored_images(connection)?;
+    populate_content_hashes(connection)?;
+    deduplicate_entries(connection)?;
+    create_content_hash_index(connection)?;
+
     connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
+}
+
+fn ensure_current_schema_columns(connection: &Connection) -> Result<(), StorageError> {
+    if column_exists(connection, "clipboard_entries", "image_rgba")?
+        && !column_exists(connection, "clipboard_entries", "image_blob")?
+    {
+        connection.execute_batch(
+            "ALTER TABLE clipboard_entries RENAME COLUMN image_rgba TO image_blob;",
+        )?;
+    }
+
+    if !column_exists(connection, "clipboard_entries", "image_format")? {
+        connection.execute_batch("ALTER TABLE clipboard_entries ADD COLUMN image_format TEXT;")?;
+    }
+
+    if !column_exists(connection, "clipboard_entries", "content_hash")? {
+        connection.execute_batch("ALTER TABLE clipboard_entries ADD COLUMN content_hash TEXT;")?;
+    }
+
+    Ok(())
+}
+
+fn populate_content_hashes(connection: &Connection) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT id, kind, text_content, image_blob \
+         FROM clipboard_entries \
+         WHERE content_hash IS NULL",
+    )?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<Vec<u8>>>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+
+    for (id, kind, text, image_blob) in rows {
+        let files = if kind == "file" {
+            load_files(connection, id as u64)?
+        } else {
+            Vec::new()
+        };
+        let Some(hash) = content_hash_from_parts(
+            &kind,
+            text.as_deref(),
+            image_blob.as_deref(),
+            files.as_slice(),
+        ) else {
+            continue;
+        };
+
+        connection.execute(
+            "UPDATE clipboard_entries SET content_hash = ?2 WHERE id = ?1",
+            params![id, hash],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn deduplicate_entries(connection: &Connection) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT content_hash \
+         FROM clipboard_entries \
+         WHERE content_hash IS NOT NULL \
+         GROUP BY content_hash \
+         HAVING COUNT(*) > 1",
+    )?;
+    let hashes = statement
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+
+    for hash in hashes {
+        let mut rows_statement = connection.prepare(
+            "SELECT id, pinned, favorite, captured_at_millis \
+             FROM clipboard_entries \
+             WHERE content_hash = ?1 \
+             ORDER BY pinned DESC, favorite DESC, captured_at_millis DESC, id DESC",
+        )?;
+        let rows = rows_statement
+            .query_map(params![hash], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(rows_statement);
+
+        let Some((keep_id, _, _, _)) = rows.first().copied() else {
+            continue;
+        };
+        let pinned = rows.iter().any(|(_, pinned, _, _)| *pinned != 0) as i64;
+        let favorite = rows.iter().any(|(_, _, favorite, _)| *favorite != 0) as i64;
+        let captured_at_millis = rows
+            .iter()
+            .map(|(_, _, _, captured_at_millis)| *captured_at_millis)
+            .max()
+            .unwrap_or_default();
+
+        connection.execute(
+            "UPDATE clipboard_entries \
+             SET pinned = ?2, favorite = ?3, captured_at_millis = ?4 \
+             WHERE id = ?1",
+            params![keep_id, pinned, favorite, captured_at_millis],
+        )?;
+
+        for (id, _, _, _) in rows.into_iter().skip(1) {
+            connection.execute("DELETE FROM clipboard_entries WHERE id = ?1", params![id])?;
+        }
+    }
+
+    Ok(())
+}
+
+fn create_content_hash_index(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_entries_content_hash \
+             ON clipboard_entries(content_hash) \
+             WHERE content_hash IS NOT NULL;",
+    )?;
+    Ok(())
+}
+
+fn compress_stored_images(connection: &Connection) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT id, image_width, image_height, image_blob, image_preview_url \
+         FROM clipboard_entries \
+         WHERE kind = 'image' AND image_blob IS NOT NULL",
+    )?;
+
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?.unwrap_or_default().max(0) as usize,
+                row.get::<_, Option<i64>>(2)?.unwrap_or_default().max(0) as usize,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+
+    for (id, width, height, bytes, preview_url) in rows {
+        if bytes.starts_with(PNG_SIGNATURE) {
+            continue;
+        }
+
+        let Some(image) = ClipboardImage::from_stored_bytes(width, height, bytes, preview_url)
+        else {
+            continue;
+        };
+        let Some(compressed) = image.to_png_bytes() else {
+            continue;
+        };
+
+        connection.execute(
+            "UPDATE clipboard_entries \
+             SET image_width = ?2, image_height = ?3, image_blob = ?4, image_format = ?5 \
+             WHERE id = ?1",
+            params![
+                id,
+                image.width as i64,
+                image.height as i64,
+                compressed,
+                IMAGE_FORMAT_PNG,
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn column_exists(connection: &Connection, table: &str, column: &str) -> Result<bool, StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(columns.iter().any(|name| name == column))
+}
+
+fn content_hash_for_entry(entry: &ClipboardEntry, image_blob: Option<&[u8]>) -> Option<String> {
+    match &entry.content {
+        ClipboardContent::Text(text) => content_hash_from_parts("text", Some(text), None, &[]),
+        ClipboardContent::Image(_) => content_hash_from_parts("image", None, image_blob, &[]),
+        ClipboardContent::Files(files) => content_hash_from_parts("file", None, None, files),
+    }
+}
+
+fn content_hash_from_parts(
+    kind: &str,
+    text: Option<&str>,
+    image_blob: Option<&[u8]>,
+    files: &[String],
+) -> Option<String> {
+    let mut hasher = Sha256::new();
+    hash_part(&mut hasher, kind.as_bytes());
+
+    match kind {
+        "text" => hash_part(&mut hasher, text?.as_bytes()),
+        "image" => hash_part(&mut hasher, image_blob?),
+        "file" => {
+            if files.is_empty() {
+                return None;
+            }
+            for file in files {
+                hash_part(&mut hasher, file.as_bytes());
+            }
+        }
+        _ => return None,
+    }
+
+    Some(format!("{:x}", hasher.finalize()))
+}
+
+fn hash_part(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update(bytes.len().to_le_bytes());
+    hasher.update(bytes);
 }
 
 fn schema_version(connection: &Connection) -> Result<i32, StorageError> {
@@ -557,7 +787,9 @@ impl ClipboardKindKey for crate::model::ClipboardKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
+    use crate::model::{
+        ClipboardContent, ClipboardEntry, ClipboardImage, DEFAULT_BACKGROUND_OPACITY,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -574,12 +806,15 @@ mod tests {
             auto_cleanup_days: Some(30),
             language: AppLanguage::English,
             launch_at_startup: true,
+            desktop_widget: false,
+            desktop_widget_topmost: false,
             keyboard_shortcuts: false,
             auto_focus_history: false,
             promote_copied_entries: false,
             quick_paste: true,
             show_copy_time: false,
             show_text_length: false,
+            background_opacity: DEFAULT_BACKGROUND_OPACITY,
         };
         save_settings(&settings).unwrap();
 
@@ -606,9 +841,29 @@ mod tests {
         assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
 
         let schema_version = with_connection(|connection| schema_version(connection)).unwrap();
+        let has_image_rgba = with_connection(|connection| {
+            column_exists(connection, "clipboard_entries", "image_rgba")
+        })
+        .unwrap();
+        let has_image_blob = with_connection(|connection| {
+            column_exists(connection, "clipboard_entries", "image_blob")
+        })
+        .unwrap();
+        let has_image_format = with_connection(|connection| {
+            column_exists(connection, "clipboard_entries", "image_format")
+        })
+        .unwrap();
+        let has_content_hash = with_connection(|connection| {
+            column_exists(connection, "clipboard_entries", "content_hash")
+        })
+        .unwrap();
 
         assert_eq!(loaded_settings, settings);
         assert_eq!(schema_version, SCHEMA_VERSION);
+        assert!(!has_image_rgba);
+        assert!(has_image_blob);
+        assert!(has_image_format);
+        assert!(has_content_hash);
         assert_eq!(loaded_history.counts().text, 1);
         assert_eq!(loaded_history.counts().image, 1);
         assert_eq!(loaded_history.counts().file, 1);
@@ -626,6 +881,17 @@ mod tests {
             load_image(11).unwrap(),
             Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
         ));
+        let stored_image = with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT image_blob FROM clipboard_entries WHERE id = 11",
+                    [],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .unwrap();
+        assert!(stored_image.starts_with(PNG_SIGNATURE));
         assert!(matches!(
             &loaded_history.entry(12).unwrap().content,
             ClipboardContent::Files(files) if files == &["C:\\tmp\\a.txt", "D:\\b.png"]
@@ -639,81 +905,25 @@ mod tests {
             Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
         ));
 
+        save_entry(&ClipboardEntry::new(
+            13,
+            ClipboardContent::Text("hello".to_string()),
+        ))
+        .unwrap();
+        let hello_count = with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_entries WHERE text_content = 'hello'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .unwrap();
+        assert_eq!(hello_count, 1);
+
         delete_entry(10).unwrap();
         assert!(load_history(10).unwrap().entry(10).is_none());
-
-        reset_storage_for_tests();
-        *test_data_directory().lock().unwrap() = None;
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn legacy_plaintext_database_restores_ucp() {
-        let _guard = test_lock()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let directory = unique_test_directory();
-        reset_storage_for_tests();
-        fs::create_dir_all(&directory).unwrap();
-        *test_data_directory().lock().unwrap() = Some(directory.clone());
-
-        let legacy_path = directory.join(LEGACY_DATABASE_FILE);
-        let legacy_connection = Connection::open(&legacy_path).unwrap();
-        legacy_connection
-            .execute_batch(
-                "CREATE TABLE app_settings (
-                    key TEXT PRIMARY KEY NOT NULL,
-                    value TEXT NOT NULL
-                );
-                INSERT INTO app_settings (key, value) VALUES ('history_limit', '100');
-                PRAGMA user_version = 1;",
-            )
-            .unwrap();
-        legacy_connection.close().unwrap();
-
-        let settings = load_settings().unwrap();
-        let database_bytes = fs::read(database_path().unwrap()).unwrap();
-
-        assert_eq!(settings.history_limit, 100);
-        assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
-        assert!(legacy_path.exists());
-
-        reset_storage_for_tests();
-        *test_data_directory().lock().unwrap() = None;
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn unreadable_ucp_restores_from_legacy_plaintext_database() {
-        let _guard = test_lock()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let directory = unique_test_directory();
-        reset_storage_for_tests();
-        fs::create_dir_all(&directory).unwrap();
-        *test_data_directory().lock().unwrap() = Some(directory.clone());
-
-        let legacy_path = directory.join(LEGACY_DATABASE_FILE);
-        let legacy_connection = Connection::open(&legacy_path).unwrap();
-        legacy_connection
-            .execute_batch(
-                "CREATE TABLE app_settings (
-                    key TEXT PRIMARY KEY NOT NULL,
-                    value TEXT NOT NULL
-                );
-                INSERT INTO app_settings (key, value) VALUES ('history_limit', '500');
-                PRAGMA user_version = 1;",
-            )
-            .unwrap();
-        legacy_connection.close().unwrap();
-        fs::write(directory.join(DATABASE_FILE), b"not a sqlite database").unwrap();
-
-        let settings = load_settings().unwrap();
-        let database_bytes = fs::read(database_path().unwrap()).unwrap();
-
-        assert_eq!(settings.history_limit, 500);
-        assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
-        assert!(directory.join("history.ucp.sqlcipher-backup").exists());
 
         reset_storage_for_tests();
         *test_data_directory().lock().unwrap() = None;

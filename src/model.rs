@@ -12,6 +12,7 @@ pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
 const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
 const IMAGE_PREVIEW_MAX_HEIGHT: usize = 440;
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppLanguage {
@@ -91,6 +92,33 @@ impl ClipboardImage {
         }
     }
 
+    pub fn from_stored_bytes(
+        width: usize,
+        height: usize,
+        bytes: Vec<u8>,
+        preview_url: Option<String>,
+    ) -> Option<Self> {
+        if bytes.starts_with(PNG_SIGNATURE) {
+            let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
+            let (width, height) = image.dimensions();
+
+            return Some(Self {
+                width: width as usize,
+                height: height as usize,
+                bytes: Some(Arc::new(image.into_raw())),
+                preview_url,
+            });
+        }
+
+        let expected_len = width.checked_mul(height)?.checked_mul(4)?;
+        (bytes.len() == expected_len).then(|| Self {
+            width,
+            height,
+            bytes: Some(Arc::new(bytes)),
+            preview_url,
+        })
+    }
+
     pub fn has_bytes(&self) -> bool {
         self.bytes.is_some()
     }
@@ -101,6 +129,11 @@ impl ClipboardImage {
 
     pub fn to_png_bytes(&self) -> Option<Vec<u8>> {
         encode_png(self.rgba_bytes()?, self.width, self.height)
+    }
+
+    pub fn stored_bytes(&self) -> Option<Vec<u8>> {
+        self.to_png_bytes()
+            .or_else(|| self.rgba_bytes().map(Vec::from))
     }
 }
 
