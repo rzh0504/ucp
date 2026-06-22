@@ -7,15 +7,10 @@
         min-height: 34px;
     }
 
-    .search-field,
-    .top-bar-context {
+    .search-field {
         grid-column: 1 / -1;
         grid-row: 2;
         max-width: none;
-    }
-
-    .top-bar-context {
-        justify-self: start;
     }
 
     .window-controls {

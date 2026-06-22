@@ -35,11 +35,9 @@ pub fn SettingsPage(
 
     rsx! {
         div { class: header_class,
-            if !widget_mode {
-                div { class: "settings-title-copy",
-                    h2 { "{copy.settings}" }
-                    span { "{copy.app_preferences}" }
-                }
+            div { class: "settings-title-copy",
+                h2 { "{copy.settings}" }
+                span { "{copy.app_preferences}" }
             }
             button {
                 class: "settings-back-action",

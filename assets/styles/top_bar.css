@@ -30,15 +30,9 @@
     white-space: nowrap;
 }
 
-.top-bar-context {
-    justify-self: end;
-    color: #6e6e73;
-    font-size: 13px;
-    font-weight: 600;
-}
-
 .window-controls {
     display: flex;
+    grid-column: 3;
     align-items: center;
     justify-content: flex-end;
     gap: 10px;
