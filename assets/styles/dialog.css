@@ -2,7 +2,7 @@
     position: fixed;
     inset: 0;
     z-index: 90;
-    background: rgba(0, 0, 0, 0.24);
+    background: var(--app-overlay);
     backdrop-filter: blur(2px);
 }
 
@@ -15,23 +15,23 @@
     width: min(360px, calc(100vw - 32px));
     gap: 12px;
     padding: 18px;
-    border: 1px solid rgba(60, 60, 67, 0.16);
+    border: 1px solid var(--app-border);
     border-radius: 16px;
-    background: rgba(255, 255, 255, 0.96);
-    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.22), 0 8px 18px rgba(0, 0, 0, 0.12);
+    background: var(--app-elevated-bg);
+    box-shadow: 0 22px 60px var(--app-shadow), 0 8px 18px var(--app-shadow-soft);
     transform: translate(-50%, -50%);
 }
 
 .alert-dialog-title {
     margin: 0;
-    color: #1d1d1f;
+    color: var(--app-text);
     font-size: 17px;
     font-weight: 800;
 }
 
 .alert-dialog-description {
     margin: 0;
-    color: #6e6e73;
+    color: var(--app-muted);
     font-size: 13px;
     line-height: 1.5;
 }
@@ -48,22 +48,22 @@
     height: 34px;
     padding: 0 12px;
     border-radius: 9px;
-    background: rgba(118, 118, 128, 0.12);
-    color: #1d1d1f;
+    background: var(--app-control-bg);
+    color: var(--app-text);
     cursor: pointer;
     font-size: 13px;
     font-weight: 700;
 }
 
 .alert-dialog-button:hover {
-    background: rgba(118, 118, 128, 0.2);
+    background: var(--app-control-bg-strong);
 }
 
 .alert-dialog-button.is-danger {
-    background: #ff3b30;
+    background: var(--app-danger);
     color: #ffffff;
 }
 
 .alert-dialog-button.is-danger:hover {
-    background: #e03128;
+    background: var(--app-danger-hover);
 }

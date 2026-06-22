@@ -1,8 +1,8 @@
 use super::AppPage;
 use crate::i18n;
 use crate::model::{
-    AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory,
-    HISTORY_LIMIT_OPTIONS, MIN_BACKGROUND_OPACITY,
+    AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, AppTheme, ClipboardFilter,
+    ClipboardHistory, HISTORY_LIMIT_OPTIONS, MIN_BACKGROUND_OPACITY,
 };
 use crate::platform;
 use crate::storage;
@@ -51,6 +51,51 @@ pub fn SettingsPage(
         Separator { class: "list-separator", decorative: true }
         ScrollArea { class: "settings-scroll", direction: ScrollDirection::Vertical, tabindex: "0",
             div { class: "settings-page",
+                section { class: "settings-group",
+                    h3 { "{copy.display}" }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "{copy.language}" }
+                            p { "{copy.language_hint}" }
+                        }
+                        LanguageCombobox {
+                            value: settings_snapshot.language,
+                            on_change: move |language| {
+                                update_settings(settings, status, |next| next.language = language);
+                            },
+                        }
+                    }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "{copy.theme}" }
+                            p { "{copy.theme_hint}" }
+                        }
+                        ThemeCombobox {
+                            value: settings_snapshot.theme,
+                            language,
+                            on_change: move |theme| {
+                                update_settings(settings, status, |next| next.theme = theme);
+                            },
+                        }
+                    }
+                    SettingSwitchRow {
+                        label: copy.show_copy_time,
+                        hint: copy.show_copy_time_hint,
+                        checked: settings_snapshot.show_copy_time,
+                        on_change: move |checked| {
+                            update_settings(settings, status, |next| next.show_copy_time = checked);
+                        },
+                    }
+                    SettingSwitchRow {
+                        label: copy.show_text_length,
+                        hint: copy.show_text_length_hint,
+                        checked: settings_snapshot.show_text_length,
+                        on_change: move |checked| {
+                            update_settings(settings, status, |next| next.show_text_length = checked);
+                        },
+                    }
+                }
+
                 section { class: "settings-group",
                     h3 { "{copy.system}" }
                     SettingSwitchRow {
@@ -190,38 +235,6 @@ pub fn SettingsPage(
                         },
                     }
                 }
-
-                section { class: "settings-group",
-                    h3 { "{copy.display}" }
-                    div { class: "setting-row setting-row-control",
-                        div { class: "setting-row-copy",
-                            span { class: "setting-label", "{copy.language}" }
-                            p { "{copy.language_hint}" }
-                        }
-                        LanguageCombobox {
-                            value: settings_snapshot.language,
-                            on_change: move |language| {
-                                update_settings(settings, status, |next| next.language = language);
-                            },
-                        }
-                    }
-                    SettingSwitchRow {
-                        label: copy.show_copy_time,
-                        hint: copy.show_copy_time_hint,
-                        checked: settings_snapshot.show_copy_time,
-                        on_change: move |checked| {
-                            update_settings(settings, status, |next| next.show_copy_time = checked);
-                        },
-                    }
-                    SettingSwitchRow {
-                        label: copy.show_text_length,
-                        hint: copy.show_text_length_hint,
-                        checked: settings_snapshot.show_text_length,
-                        on_change: move |checked| {
-                            update_settings(settings, status, |next| next.show_text_length = checked);
-                        },
-                    }
-                }
             }
         }
     }
@@ -353,6 +366,41 @@ fn LanguageCombobox(value: AppLanguage, on_change: EventHandler<AppLanguage>) ->
                         value: language,
                         text_value: Some(language.label().to_string()),
                         "{language.label()}"
+                        ComboboxItemIndicator { span { "✓" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ThemeCombobox(
+    value: AppTheme,
+    language: AppLanguage,
+    on_change: EventHandler<AppTheme>,
+) -> Element {
+    let selected_value = use_memo(move || Some(value));
+    let copy = i18n::tr(language);
+
+    rsx! {
+        Combobox::<AppTheme> {
+            class: "settings-combobox",
+            value: Some(ReadSignal::from(selected_value)),
+            on_value_change: move |value: Option<AppTheme>| {
+                if let Some(theme) = value {
+                    on_change.call(theme);
+                }
+            },
+            ComboboxInput { class: "settings-combobox-input", placeholder: copy.select_theme }
+            ComboboxList { class: "settings-combobox-list",
+                for (index, theme) in AppTheme::OPTIONS.into_iter().enumerate() {
+                    ComboboxOption::<AppTheme> {
+                        class: "settings-combobox-option",
+                        index,
+                        value: theme,
+                        text_value: Some(theme.label(language).to_string()),
+                        "{theme.label(language)}"
                         ComboboxItemIndicator { span { "✓" } }
                     }
                 }

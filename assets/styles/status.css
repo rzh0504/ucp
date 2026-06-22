@@ -4,9 +4,9 @@
     gap: 12px;
     min-height: 30px;
     padding: 6px 16px;
-    border-top: 1px solid rgba(60, 60, 67, 0.14);
-    background: rgba(246, 246, 248, calc(var(--app-bg-alpha, 1) * 0.9));
-    color: #6e6e73;
+    border-top: 1px solid var(--app-border);
+    background: var(--app-status-bg);
+    color: var(--app-muted);
     font-size: 12px;
     line-height: 1.4;
 }
@@ -31,13 +31,13 @@
 }
 
 .status-settings-action {
-    color: #6e6e73;
+    color: var(--app-muted);
 }
 
 .status-settings-action:hover,
 .status-settings-action.is-active {
     background: rgba(0, 122, 255, 0.12);
-    color: #007aff;
+    color: var(--app-accent);
 }
 
 .status-settings-action .app-icon {
@@ -46,7 +46,7 @@
 }
 
 .status-clear-action {
-    color: #ff3b30;
+    color: var(--app-danger);
 }
 
 .status-clear-action .app-icon {
@@ -59,6 +59,6 @@
 }
 
 .status-clear-action:disabled {
-    color: #c7c7cc;
+    color: var(--app-disabled);
     cursor: default;
 }

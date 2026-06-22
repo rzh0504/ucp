@@ -1,5 +1,6 @@
 use crate::model::{
-    AppLanguage, AppSettings, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
+    AppLanguage, AppSettings, AppTheme, ClipboardContent, ClipboardEntry, ClipboardHistory,
+    ClipboardImage,
 };
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -303,6 +304,7 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                 }
                 "auto_cleanup_days" => settings.auto_cleanup_days = parse_auto_cleanup_days(&value),
                 "language" => settings.language = AppLanguage::from_key(&value),
+                "theme" => settings.theme = AppTheme::from_key(&value),
                 "launch_at_startup" => settings.launch_at_startup = parse_bool(&value),
                 "desktop_widget" => settings.desktop_widget = parse_bool(&value),
                 "desktop_widget_topmost" => settings.desktop_widget_topmost = parse_bool(&value),
@@ -338,6 +340,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
                     .unwrap_or_else(|| "none".to_string()),
             ),
             ("language", settings.language.key().to_string()),
+            ("theme", settings.theme.key().to_string()),
             ("launch_at_startup", settings.launch_at_startup.to_string()),
             ("desktop_widget", settings.desktop_widget.to_string()),
             (
@@ -788,7 +791,7 @@ impl ClipboardKindKey for crate::model::ClipboardKind {
 mod tests {
     use super::*;
     use crate::model::{
-        ClipboardContent, ClipboardEntry, ClipboardImage, DEFAULT_BACKGROUND_OPACITY,
+        AppTheme, ClipboardContent, ClipboardEntry, ClipboardImage, DEFAULT_BACKGROUND_OPACITY,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -805,6 +808,7 @@ mod tests {
             history_limit: 50,
             auto_cleanup_days: Some(30),
             language: AppLanguage::English,
+            theme: AppTheme::Dark,
             launch_at_startup: true,
             desktop_widget: false,
             desktop_widget_topmost: false,

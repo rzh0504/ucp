@@ -196,6 +196,7 @@ pub fn App() -> Element {
         100
     };
     let shell_style = format!("--app-bg-alpha: {:.2};", background_opacity as f32 / 100.0);
+    let theme = settings_snapshot.theme.key();
     let status_snapshot = status();
     let status_message = if status_snapshot.is_empty() {
         i18n::item_count(language, entry_count)
@@ -219,6 +220,7 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: RESPONSIVE_STYLES }
         main {
             class: "shell",
+            "data-theme": theme,
             style: "{shell_style}",
             tabindex: "-1",
             onmounted: move |event| {

@@ -47,6 +47,44 @@ impl AppLanguage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppTheme {
+    System,
+    Light,
+    Dark,
+}
+
+impl AppTheme {
+    pub const OPTIONS: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    pub fn label(self, language: AppLanguage) -> &'static str {
+        match (self, language) {
+            (Self::System, AppLanguage::Chinese) => "跟随设备",
+            (Self::Light, AppLanguage::Chinese) => "浅色",
+            (Self::Dark, AppLanguage::Chinese) => "深色",
+            (Self::System, AppLanguage::English) => "Use device setting",
+            (Self::Light, AppLanguage::English) => "Light",
+            (Self::Dark, AppLanguage::English) => "Dark",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "dark" => Self::Dark,
+            "light" => Self::Light,
+            _ => Self::System,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipboardKind {
     Text,
     Image,
@@ -150,6 +188,7 @@ pub struct AppSettings {
     pub history_limit: usize,
     pub auto_cleanup_days: Option<u16>,
     pub language: AppLanguage,
+    pub theme: AppTheme,
     pub launch_at_startup: bool,
     pub desktop_widget: bool,
     pub desktop_widget_topmost: bool,
@@ -168,6 +207,7 @@ impl Default for AppSettings {
             history_limit: DEFAULT_HISTORY_LIMIT,
             auto_cleanup_days: None,
             language: AppLanguage::Chinese,
+            theme: AppTheme::System,
             launch_at_startup: false,
             desktop_widget: false,
             desktop_widget_topmost: false,

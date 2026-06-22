@@ -23,8 +23,8 @@
     height: 30px;
     padding: 0 10px;
     border-radius: 8px;
-    background: rgba(118, 118, 128, 0.12);
-    color: #3a3a3c;
+    background: var(--app-control-bg);
+    color: var(--app-text-secondary);
     cursor: pointer;
     font-size: 12px;
     font-weight: 700;
@@ -32,7 +32,7 @@
 
 .settings-back-action:hover {
     background: rgba(0, 122, 255, 0.12);
-    color: #007aff;
+    color: var(--app-accent);
 }
 
 .settings-back-action span {
@@ -43,7 +43,7 @@
 .settings-scroll {
     min-height: 0;
     overflow-y: auto;
-    scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+    scrollbar-color: var(--app-border-strong) transparent;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
 }
@@ -61,14 +61,14 @@
     overflow: visible;
     border: 1px solid transparent;
     border-radius: 14px;
-    background: rgba(255, 255, 255, var(--app-bg-alpha, 1));
+    background: var(--app-panel-bg);
 }
 
 .settings-group::after {
     position: absolute;
     z-index: 1;
     inset: -1px;
-    border: 1px solid rgba(60, 60, 67, 0.14);
+    border: 1px solid var(--app-border);
     border-radius: inherit;
     content: "";
     pointer-events: none;
@@ -77,10 +77,10 @@
 .settings-group h3 {
     margin: 0;
     padding: 13px 16px;
-    border-bottom: 1px solid rgba(60, 60, 67, 0.12);
+    border-bottom: 1px solid var(--app-separator);
     border-radius: 13px 13px 0 0;
-    background: rgba(251, 251, 253, var(--app-bg-alpha, 1));
-    color: #1d1d1f;
+    background: var(--app-header-bg);
+    color: var(--app-text);
     font-size: 13px;
     font-weight: 800;
 }
@@ -92,7 +92,7 @@
     gap: 18px;
     align-items: center;
     padding: 14px 16px;
-    border-bottom: 1px solid rgba(60, 60, 67, 0.1);
+    border-bottom: 1px solid var(--app-separator);
 }
 
 .setting-row-control {
@@ -109,21 +109,21 @@
 
 .setting-label {
     display: block;
-    color: #1d1d1f;
+    color: var(--app-text);
     font-size: 14px;
     font-weight: 700;
 }
 
 .setting-row p {
     margin: 4px 0 0;
-    color: #8e8e93;
+    color: var(--app-subtle);
     font-size: 12px;
     line-height: 1.45;
 }
 
 .setting-row strong {
     overflow: hidden;
-    color: #3a3a3c;
+    color: var(--app-text-secondary);
     font-size: 13px;
     font-weight: 700;
     text-align: right;
@@ -136,16 +136,16 @@
     justify-self: end;
     width: 44px;
     height: 26px;
-    border: 1px solid rgba(60, 60, 67, 0.16);
+    border: 1px solid var(--app-border);
     border-radius: 999px;
-    background: rgba(118, 118, 128, 0.22);
+    background: var(--app-control-bg-strong);
     cursor: pointer;
     transition: background 120ms ease, border-color 120ms ease;
 }
 
 .settings-switch[data-state="checked"] {
     border-color: rgba(0, 122, 255, 0.36);
-    background: #007aff;
+    background: var(--app-accent);
 }
 
 .settings-switch-thumb {
@@ -178,21 +178,21 @@
     width: 100%;
     height: 44px;
     padding: 0 42px 0 14px;
-    border: 1px solid rgba(17, 24, 39, 0.12);
+    border: 1px solid var(--app-separator);
     border-radius: 9px;
     outline: none;
-    background: #ffffff;
-    color: #111827;
+    background: var(--app-input-bg);
+    color: var(--app-text-strong);
     font-size: 14px;
     font-weight: 500;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    box-shadow: 0 1px 2px var(--app-shadow-soft);
 }
 
 .settings-combobox::after {
     position: absolute;
     right: 14px;
     top: 50%;
-    color: #8a8f98;
+    color: var(--app-subtle);
     content: "⌃\A⌄";
     font-size: 12px;
     font-weight: 700;
@@ -205,8 +205,8 @@
 
 .settings-combobox-input:focus {
     border-color: rgba(17, 24, 39, 0.18);
-    background: rgba(255, 255, 255, calc(var(--app-bg-alpha, 1) * 0.96));
-    box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06);
+    background: var(--app-input-focus-bg);
+    box-shadow: 0 0 0 3px var(--app-shadow-soft);
 }
 
 .settings-combobox-list {
@@ -217,10 +217,10 @@
     overflow: hidden;
     width: 250px;
     padding: 5px;
-    border: 1px solid rgba(17, 24, 39, 0.1);
+    border: 1px solid var(--app-separator);
     border-radius: 10px;
-    background: #ffffff;
-    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.06);
+    background: var(--app-elevated-bg);
+    box-shadow: 0 12px 26px var(--app-shadow), 0 2px 8px var(--app-shadow-soft);
 }
 
 .settings-combobox-option {
@@ -230,19 +230,19 @@
     min-height: 40px;
     padding: 0 10px;
     border-radius: 7px;
-    color: #111827;
+    color: var(--app-text-strong);
     cursor: pointer;
     font-size: 14px;
     font-weight: 600;
 }
 
 .settings-combobox-option[data-highlighted="true"] {
-    background: #f4f4f5;
-    color: #111827;
+    background: var(--app-control-hover);
+    color: var(--app-text-strong);
 }
 
 .settings-combobox-option[data-selected="true"] {
-    color: #111827;
+    color: var(--app-text-strong);
 }
 
 .settings-range-control {
@@ -254,7 +254,7 @@
 }
 
 .settings-range-control strong {
-    color: #3a3a3c;
+    color: var(--app-text-secondary);
     font-size: 13px;
     font-variant-numeric: tabular-nums;
     font-weight: 800;
@@ -264,6 +264,6 @@
 .settings-range {
     width: 100%;
     height: 24px;
-    accent-color: #007aff;
+    accent-color: var(--app-accent);
     cursor: pointer;
 }
