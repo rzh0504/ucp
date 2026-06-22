@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const DEFAULT_BACKGROUND_OPACITY: u8 = 100;
 pub const MIN_BACKGROUND_OPACITY: u8 = 45;
+pub const TEXT_CONTENT_CHAR_LIMIT: usize = 50_000;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
 const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
@@ -215,7 +216,7 @@ impl ClipboardContent {
 
     pub fn normalized(self) -> Self {
         match self {
-            Self::Text(text) => Self::Text(text.trim().to_string()),
+            Self::Text(text) => Self::Text(limit_text_content(text.trim())),
             Self::Files(files) => Self::Files(
                 files
                     .into_iter()
@@ -580,6 +581,14 @@ fn sort_entries(entries: &mut [ClipboardEntry]) {
     });
 }
 
+fn limit_text_content(text: &str) -> String {
+    let Some((cutoff, _)) = text.char_indices().nth(TEXT_CONTENT_CHAR_LIMIT) else {
+        return text.to_string();
+    };
+
+    text[..cutoff].to_string()
+}
+
 fn format_bytes(bytes: usize) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
@@ -671,6 +680,34 @@ mod tests {
         assert!(duplicate.entry.is_none());
         assert_eq!(history.counts().total, 1);
         assert_eq!(history.counts().text, 1);
+    }
+
+    #[test]
+    fn text_content_is_limited_before_saving_to_history() {
+        let mut history = ClipboardHistory::new(10);
+        let text = format!("{}tail", "a".repeat(TEXT_CONTENT_CHAR_LIMIT));
+
+        let entry = history.push(ClipboardContent::Text(text)).entry.unwrap();
+
+        assert!(matches!(
+            entry.content,
+            ClipboardContent::Text(text) if text.chars().count() == TEXT_CONTENT_CHAR_LIMIT
+                && text.chars().all(|character| character == 'a')
+        ));
+    }
+
+    #[test]
+    fn text_content_limit_preserves_character_boundaries() {
+        let mut history = ClipboardHistory::new(10);
+        let text = format!("{}界外", "好".repeat(TEXT_CONTENT_CHAR_LIMIT));
+
+        let entry = history.push(ClipboardContent::Text(text)).entry.unwrap();
+
+        assert!(matches!(
+            entry.content,
+            ClipboardContent::Text(text) if text.chars().count() == TEXT_CONTENT_CHAR_LIMIT
+                && text.chars().all(|character| character == '好')
+        ));
     }
 
     #[test]
