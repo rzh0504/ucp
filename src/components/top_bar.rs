@@ -25,9 +25,14 @@ pub fn TopBar(
     let minimize_window = window.clone();
     let maximize_window = window.clone();
     let copy = i18n::tr(language);
+    let top_bar_class = if widget_mode {
+        "top-bar is-widget"
+    } else {
+        "top-bar"
+    };
 
     rsx! {
-        Toolbar { class: "top-bar", aria_label: copy.toolbar_label,
+        Toolbar { class: top_bar_class, aria_label: copy.toolbar_label,
             div {
                 class: "title-drag-region",
                 onmousedown: move |_| drag_window.drag(),

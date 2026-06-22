@@ -10,6 +10,11 @@
     backdrop-filter: saturate(180%) blur(20px);
 }
 
+.top-bar.is-widget {
+    grid-template-columns: minmax(0, 1fr) minmax(88px, 112px) auto;
+    gap: 8px;
+}
+
 .title-drag-region {
     display: flex;
     align-items: center;
@@ -134,6 +139,17 @@
     color: #1d1d1f;
     font-size: 14px;
     transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.top-bar.is-widget .search-field input {
+    height: 32px;
+    padding-right: 10px;
+    padding-left: 30px;
+    font-size: 12px;
+}
+
+.top-bar.is-widget .search-icon {
+    left: 10px;
 }
 
 .search-field input:focus {
