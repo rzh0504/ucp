@@ -50,15 +50,12 @@
     border-bottom: 0;
 }
 
-.history-row:hover {
-    background: var(--app-row-hover);
-}
-
 .history-row.is-selected {
     background: var(--app-row-selected);
 }
 
 .history-row.is-focused {
+    background: var(--app-row-selected);
     box-shadow: inset 3px 0 0 var(--app-accent);
 }
 

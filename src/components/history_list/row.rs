@@ -25,6 +25,7 @@ pub(super) fn HistoryRow(
     mut selected_ids: Signal<Vec<u64>>,
     mut selection_anchor_id: Signal<Option<u64>>,
     mut focused_id: Signal<Option<u64>>,
+    mut show_focus_highlight: Signal<bool>,
     promote_on_copy: bool,
     quick_paste: bool,
     show_copy_time: bool,
@@ -37,7 +38,8 @@ pub(super) fn HistoryRow(
     let mut files_expanded = use_signal(|| false);
     let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
-    let row_class = match (is_selected, focused_id() == Some(id)) {
+    let is_focus_highlighted = show_focus_highlight() && focused_id() == Some(id);
+    let row_class = match (is_selected, is_focus_highlighted) {
         (true, true) => "history-row is-selected is-focused",
         (true, false) => "history-row is-selected",
         (false, true) => "history-row is-focused",
@@ -116,6 +118,7 @@ pub(super) fn HistoryRow(
                     selected_ids.set(selection);
                     selection_anchor_id.set(anchor);
                     focused_id.set(Some(id));
+                    show_focus_highlight.set(false);
                 },
                 ondoubleclick: move |_| {
                     if quick_paste && is_text {

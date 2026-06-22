@@ -39,6 +39,7 @@ pub fn HistoryList(
     let mut selected_ids = use_signal(Vec::<u64>::new);
     let mut selection_anchor_id = use_signal(|| None::<u64>);
     let mut focused_id = use_signal(|| None::<u64>);
+    let mut show_focus_highlight = use_signal(|| false);
     let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
     let keyboard_entry_ids = entry_ids.clone();
     let keyboard_entries = entries.clone();
@@ -57,6 +58,7 @@ pub fn HistoryList(
             onclick: move |_| {
                 selected_ids.set(Vec::new());
                 selection_anchor_id.set(None);
+                show_focus_highlight.set(false);
             },
             FilterTabs { active_filter, counts, language }
             if visible_selected_count > 0 {
@@ -108,6 +110,7 @@ pub fn HistoryList(
                 onclick: move |_| {
                     selected_ids.set(Vec::new());
                     selection_anchor_id.set(None);
+                    show_focus_highlight.set(false);
                 },
                 onkeydown: move |event| {
                     if !keyboard_shortcuts {
@@ -131,6 +134,7 @@ pub fn HistoryList(
                                 modifiers.shift(),
                                 primary,
                             );
+                            show_focus_highlight.set(true);
                         }
                         Key::ArrowUp => {
                             event.prevent_default();
@@ -143,6 +147,7 @@ pub fn HistoryList(
                                 modifiers.shift(),
                                 primary,
                             );
+                            show_focus_highlight.set(true);
                         }
                         Key::Home => {
                             event.prevent_default();
@@ -155,6 +160,7 @@ pub fn HistoryList(
                                 modifiers.shift(),
                                 primary,
                             );
+                            show_focus_highlight.set(true);
                         }
                         Key::End => {
                             event.prevent_default();
@@ -167,6 +173,7 @@ pub fn HistoryList(
                                 modifiers.shift(),
                                 primary,
                             );
+                            show_focus_highlight.set(true);
                         }
                         Key::Enter => {
                             event.prevent_default();
@@ -211,6 +218,7 @@ pub fn HistoryList(
                             selected_ids.set(keyboard_entry_ids.clone());
                             selection_anchor_id.set(keyboard_entry_ids.first().copied());
                             focused_id.set(keyboard_entry_ids.last().copied());
+                            show_focus_highlight.set(true);
                         }
                         Key::Character(key) if !primary && key.eq_ignore_ascii_case("f") => {
                             event.prevent_default();
@@ -246,6 +254,7 @@ pub fn HistoryList(
                             selected_ids,
                             selection_anchor_id,
                             focused_id,
+                            show_focus_highlight,
                             promote_on_copy,
                             quick_paste,
                             show_copy_time,

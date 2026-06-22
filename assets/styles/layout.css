@@ -65,7 +65,7 @@
     --app-input-bg: #1f1f23;
     --app-input-focus-bg: rgba(40, 40, 44, calc(var(--app-bg-alpha, 1) * 0.96));
     --app-row-hover: rgba(44, 58, 78, calc(var(--app-bg-alpha, 1) * 0.78));
-    --app-row-selected: rgba(20, 72, 126, calc(var(--app-bg-alpha, 1) * 0.62));
+    --app-row-selected: rgba(64, 132, 210, calc(var(--app-bg-alpha, 1) * 0.28));
     --app-elevated-bg: rgba(36, 36, 38, 0.96);
     --app-image-bg: #2c2c2e;
     --app-inset-highlight: rgba(255, 255, 255, 0.08);
