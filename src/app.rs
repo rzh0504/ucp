@@ -1,6 +1,8 @@
 use crate::components::{AppIcon, AppPage, HistoryList, Icon, SettingsPage, TopBar};
 use crate::i18n;
-use crate::model::{AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory};
+use crate::model::{
+    AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory, DEFAULT_BACKGROUND_OPACITY,
+};
 use crate::storage;
 use dioxus::desktop::{
     self, DesktopContext, HotKeyState, LogicalSize, ShortcutRegistryError, WindowCloseBehaviour,
@@ -33,8 +35,8 @@ const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
 const STATUS_AUTO_CLEAR_DELAY: Duration = Duration::from_secs(4);
-const NORMAL_WINDOW_WIDTH: f64 = 1006.0;
-const NORMAL_WINDOW_HEIGHT: f64 = 754.0;
+const NORMAL_WINDOW_WIDTH: f64 = 900.0;
+const NORMAL_WINDOW_HEIGHT: f64 = 660.0;
 const NORMAL_WINDOW_MIN_WIDTH: f64 = 860.0;
 const NORMAL_WINDOW_MIN_HEIGHT: f64 = 620.0;
 const WIDGET_WINDOW_WIDTH: f64 = 420.0;
@@ -66,6 +68,7 @@ pub fn App() -> Element {
     let desktop = use_window();
     let mut shortcut_error_reported = use_signal(|| false);
     let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
+    let mut applied_window_opacity = use_signal(|| None::<u8>);
 
     use_app_tray(desktop.clone(), status, settings.peek().language);
 
@@ -81,6 +84,25 @@ pub fn App() -> Element {
 
             applied_widget_mode.set(Some((widget_mode, topmost)));
             apply_window_mode(&desktop, widget_mode, topmost);
+        }
+    });
+
+    use_effect({
+        let desktop = desktop.clone();
+        move || {
+            let settings_snapshot = settings();
+            let opacity = if settings_snapshot.desktop_widget {
+                settings_snapshot.background_opacity
+            } else {
+                DEFAULT_BACKGROUND_OPACITY
+            };
+
+            if *applied_window_opacity.peek() == Some(opacity) {
+                return;
+            }
+
+            applied_window_opacity.set(Some(opacity));
+            apply_window_opacity(&desktop, opacity);
         }
     });
 
@@ -591,6 +613,30 @@ fn apply_window_mode(desktop: &DesktopContext, widget_mode: bool, widget_topmost
         desktop.set_inner_size(LogicalSize::new(NORMAL_WINDOW_WIDTH, NORMAL_WINDOW_HEIGHT));
     }
 }
+
+#[cfg(windows)]
+fn apply_window_opacity(desktop: &DesktopContext, opacity: u8) {
+    use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongW,
+        WS_EX_LAYERED,
+    };
+
+    let hwnd = desktop.window.hwnd() as _;
+    let alpha = ((opacity as u16 * u8::MAX as u16) / DEFAULT_BACKGROUND_OPACITY as u16) as u8;
+
+    unsafe {
+        let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        if style & WS_EX_LAYERED as i32 == 0 {
+            SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as i32);
+        }
+
+        SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_window_opacity(_desktop: &DesktopContext, _opacity: u8) {}
 
 #[cfg(windows)]
 fn set_skip_taskbar(desktop: &DesktopContext, skip: bool) {

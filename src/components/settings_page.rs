@@ -87,7 +87,10 @@ pub fn SettingsPage(
                         label: copy.background_opacity,
                         hint: copy.background_opacity_hint,
                         value: settings_snapshot.background_opacity,
-                        on_change: move |opacity| {
+                        on_input: move |opacity| {
+                            update_settings_in_memory(settings, |next| next.background_opacity = opacity);
+                        },
+                        on_commit: move |opacity| {
                             update_settings(settings, status, |next| next.background_opacity = opacity);
                         },
                     }
@@ -363,7 +366,8 @@ fn OpacitySliderRow(
     label: &'static str,
     hint: &'static str,
     value: u8,
-    on_change: EventHandler<u8>,
+    on_input: EventHandler<u8>,
+    on_commit: EventHandler<u8>,
 ) -> Element {
     rsx! {
         div { class: "setting-row setting-row-control",
@@ -382,7 +386,12 @@ fn OpacitySliderRow(
                     aria_label: label,
                     oninput: move |event| {
                         if let Ok(value) = event.value().parse::<u8>() {
-                            on_change.call(value);
+                            on_input.call(value);
+                        }
+                    },
+                    onchange: move |event| {
+                        if let Ok(value) = event.value().parse::<u8>() {
+                            on_commit.call(value);
                         }
                     },
                 }
@@ -390,6 +399,15 @@ fn OpacitySliderRow(
             }
         }
     }
+}
+
+fn update_settings_in_memory(
+    mut settings: Signal<AppSettings>,
+    update: impl FnOnce(&mut AppSettings),
+) {
+    let mut next = settings();
+    update(&mut next);
+    settings.set(next.normalized());
 }
 
 fn update_settings(

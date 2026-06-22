@@ -28,7 +28,7 @@ fn main() {
                 .with_title("UCP Clipboard")
                 .with_decorations(false)
                 .with_transparent(true)
-                .with_inner_size(LogicalSize::new(1006.0, 754.0))
+                .with_inner_size(LogicalSize::new(900.0, 660.0))
                 .with_min_inner_size(LogicalSize::new(860.0, 620.0)),
         )
         .with_menu(None)
