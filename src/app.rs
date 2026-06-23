@@ -34,6 +34,7 @@ const RESPONSIVE_STYLES: Asset = asset!("/assets/styles/responsive.css");
 const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
 const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
+const TRAY_OPEN_WIDGET_ID: &str = "ucp-open-widget";
 const TRAY_QUIT_ID: &str = "ucp-quit";
 const STATUS_AUTO_CLEAR_DELAY: Duration = Duration::from_secs(4);
 const NORMAL_WINDOW_WIDTH: f64 = 900.0;
@@ -71,7 +72,14 @@ pub fn App() -> Element {
     let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
     let mut applied_window_opacity = use_signal(|| None::<u8>);
 
-    use_app_tray(desktop.clone(), status, settings.peek().language);
+    use_app_tray(
+        desktop.clone(),
+        settings,
+        status,
+        active_page,
+        active_filter,
+        settings.peek().language,
+    );
 
     use_effect({
         let desktop = desktop.clone();
@@ -498,16 +506,25 @@ fn ClearHistoryButton(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>, language: AppLanguage) {
+fn use_app_tray(
+    desktop: DesktopContext,
+    settings: Signal<AppSettings>,
+    status: Signal<String>,
+    active_page: Signal<AppPage>,
+    active_filter: Signal<ClipboardFilter>,
+    language: AppLanguage,
+) {
     let _tray = use_hook(|| {
         use desktop::trayicon::menu::{Menu, MenuItem, PredefinedMenuItem};
 
         let copy = i18n::tr(language);
         let menu = Menu::new();
         let show_window = MenuItem::with_id(TRAY_SHOW_WINDOW_ID, copy.show_window, true, None);
+        let open_widget =
+            MenuItem::with_id(TRAY_OPEN_WIDGET_ID, copy.open_desktop_widget, true, None);
         let separator = PredefinedMenuItem::separator();
         let quit = MenuItem::with_id(TRAY_QUIT_ID, copy.quit, true, None);
-        menu.append_items(&[&show_window, &separator, &quit])
+        menu.append_items(&[&show_window, &open_widget, &separator, &quit])
             .expect("tray menu creation failed");
 
         let tray_icon: Option<desktop::trayicon::DioxusTrayIcon> =
@@ -516,9 +533,64 @@ fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>, language: A
         desktop::trayicon::init_tray_icon(menu, tray_icon)
     });
 
-    desktop::use_tray_menu_event_handler(move |event| match event.id().0.as_str() {
+    let tray_desktop = desktop.clone();
+    desktop::use_tray_menu_event_handler(move |event| {
+        handle_app_tray_event(
+            event.id().0.as_str(),
+            &tray_desktop,
+            settings,
+            status,
+            active_page,
+            active_filter,
+            language,
+        );
+    });
+
+    desktop::use_muda_event_handler(move |event| {
+        handle_app_tray_event(
+            event.id().0.as_str(),
+            &desktop,
+            settings,
+            status,
+            active_page,
+            active_filter,
+            language,
+        );
+    });
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+fn use_app_tray(
+    _desktop: DesktopContext,
+    _settings: Signal<AppSettings>,
+    _status: Signal<String>,
+    _active_page: Signal<AppPage>,
+    _active_filter: Signal<ClipboardFilter>,
+    _language: AppLanguage,
+) {
+}
+
+fn show_desktop_window(desktop: &DesktopContext) {
+    desktop.set_visible(true);
+    restore_desktop_window(desktop);
+    desktop.set_focus();
+}
+
+fn handle_app_tray_event(
+    event_id: &str,
+    desktop: &DesktopContext,
+    settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+    active_page: Signal<AppPage>,
+    active_filter: Signal<ClipboardFilter>,
+    language: AppLanguage,
+) {
+    match event_id {
         TRAY_SHOW_WINDOW_ID => {
-            show_desktop_window(&desktop);
+            show_desktop_window(desktop);
+        }
+        TRAY_OPEN_WIDGET_ID => {
+            open_desktop_widget(desktop, settings, status, active_page, active_filter);
         }
         TRAY_QUIT_ID => {
             status.set(i18n::tr(language).exiting_app.to_string());
@@ -526,16 +598,7 @@ fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>, language: A
             desktop.close();
         }
         _ => {}
-    });
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-fn use_app_tray(_desktop: DesktopContext, _status: Signal<String>, _language: AppLanguage) {}
-
-fn show_desktop_window(desktop: &DesktopContext) {
-    desktop.set_visible(true);
-    restore_desktop_window(desktop);
-    desktop.set_focus();
+    }
 }
 
 fn handle_window_close(
@@ -557,6 +620,47 @@ fn handle_window_close(
             apply_window_mode(desktop, false, next.desktop_widget_topmost);
             apply_window_opacity(desktop, DEFAULT_BACKGROUND_OPACITY);
             show_desktop_window(desktop);
+            status.set(i18n::tr(next.language).settings_saved.to_string());
+        }
+        Err(error) => status.set(match next.language {
+            AppLanguage::Chinese => format!("设置保存失败：{error}"),
+            AppLanguage::English => format!("Failed to save settings: {error}"),
+        }),
+    }
+}
+
+fn open_desktop_widget(
+    desktop: &DesktopContext,
+    mut settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+    mut active_page: Signal<AppPage>,
+    mut active_filter: Signal<ClipboardFilter>,
+) {
+    let mut next = settings();
+    let language = next.language;
+
+    show_desktop_window(desktop);
+    status.set(match language {
+        AppLanguage::Chinese => "正在打开桌面小组件...".to_string(),
+        AppLanguage::English => "Opening desktop widget...".to_string(),
+    });
+
+    active_filter.set(ClipboardFilter::All);
+    active_page.set(AppPage::History);
+
+    if next.desktop_widget {
+        apply_window_mode(desktop, true, next.desktop_widget_topmost);
+        apply_window_opacity(desktop, next.background_opacity);
+        return;
+    }
+
+    next.desktop_widget = true;
+    next = next.normalized();
+    match storage::save_settings(&next) {
+        Ok(()) => {
+            settings.set(next);
+            apply_window_mode(desktop, true, next.desktop_widget_topmost);
+            apply_window_opacity(desktop, next.background_opacity);
             status.set(i18n::tr(next.language).settings_saved.to_string());
         }
         Err(error) => status.set(match next.language {
