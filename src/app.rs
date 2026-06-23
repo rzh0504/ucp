@@ -31,6 +31,19 @@ const LIST_HEADER_STYLES: Asset = asset!("/assets/styles/list_header.css");
 const HISTORY_LIST_STYLES: Asset = asset!("/assets/styles/history_list.css");
 const SETTINGS_STYLES: Asset = asset!("/assets/styles/settings.css");
 const RESPONSIVE_STYLES: Asset = asset!("/assets/styles/responsive.css");
+const APP_STYLES: [Asset; 11] = [
+    STYLES,
+    BASE_STYLES,
+    LAYOUT_STYLES,
+    TOP_BAR_STYLES,
+    STATUS_STYLES,
+    DIALOG_STYLES,
+    FILTER_TABS_STYLES,
+    LIST_HEADER_STYLES,
+    HISTORY_LIST_STYLES,
+    SETTINGS_STYLES,
+    RESPONSIVE_STYLES,
+];
 const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
 const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
@@ -49,6 +62,16 @@ struct InitialStorageState {
     settings: AppSettings,
     history: ClipboardHistory,
     status: String,
+}
+
+pub(crate) fn style_head() -> String {
+    use std::fmt::Write as _;
+
+    let mut head = String::new();
+    for style in APP_STYLES {
+        let _ = writeln!(head, r#"<link rel="stylesheet" href="{style}">"#);
+    }
+    head
 }
 
 #[component]
@@ -224,17 +247,6 @@ pub fn App() -> Element {
     let topmost_desktop = desktop.clone();
 
     rsx! {
-        document::Link { rel: "stylesheet", href: STYLES }
-        document::Link { rel: "stylesheet", href: BASE_STYLES }
-        document::Link { rel: "stylesheet", href: LAYOUT_STYLES }
-        document::Link { rel: "stylesheet", href: TOP_BAR_STYLES }
-        document::Link { rel: "stylesheet", href: STATUS_STYLES }
-        document::Link { rel: "stylesheet", href: DIALOG_STYLES }
-        document::Link { rel: "stylesheet", href: FILTER_TABS_STYLES }
-        document::Link { rel: "stylesheet", href: LIST_HEADER_STYLES }
-        document::Link { rel: "stylesheet", href: HISTORY_LIST_STYLES }
-        document::Link { rel: "stylesheet", href: SETTINGS_STYLES }
-        document::Link { rel: "stylesheet", href: RESPONSIVE_STYLES }
         main {
             class: "shell",
             "data-theme": theme,

@@ -36,6 +36,7 @@ fn main() {
         .with_menu(None)
         .with_close_behaviour(WindowCloseBehaviour::WindowHides)
         .with_disable_context_menu(true)
+        .with_custom_head(app::style_head())
         .with_background_color((0, 0, 0, 0));
 
     #[cfg(windows)]
