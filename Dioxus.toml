@@ -21,6 +21,18 @@ script = []
 [bundle]
 identifier = "dev.ucp.clipboard"
 publisher = "UCP"
+icon = [
+    "assets/icons/app-256x256.ico",
+    "assets/icons/app-128x128.ico",
+    "assets/icons/app-64x64.ico",
+    "assets/icons/app-48x48.ico",
+    "assets/icons/app-32x32.ico",
+    "assets/icons/app-16x16.ico",
+    "assets/icons/Ucp.png",
+]
 category = "Utility"
 short_description = "Desktop clipboard history manager"
 long_description = "A Windows-first desktop clipboard history manager built with Dioxus."
+
+[bundle.windows]
+icon_path = "assets/icons/app-256x256.ico"

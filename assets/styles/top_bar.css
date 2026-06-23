@@ -49,6 +49,16 @@
     min-width: 92px;
 }
 
+.window-controls.is-windows {
+    align-self: stretch;
+    gap: 0;
+    min-width: 138px;
+}
+
+.window-controls.is-widget.is-windows {
+    min-width: 138px;
+}
+
 .window-icon-control,
 .window-dot {
     position: relative;
@@ -78,6 +88,68 @@
 .window-icon-control .app-icon {
     width: 14px;
     height: 14px;
+}
+
+.window-controls.is-windows .window-icon-control,
+.window-controls.is-windows .window-dot {
+    width: 46px;
+    height: 100%;
+    min-height: 36px;
+    border-radius: 0;
+    color: var(--app-muted);
+    transition: background 90ms ease, box-shadow 90ms ease, color 90ms ease;
+}
+
+.window-controls.is-windows .window-dot {
+    border-radius: 8px;
+}
+
+.window-controls.is-windows .window-icon-control:hover,
+.window-controls.is-windows .window-dot:hover {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.window-controls.is-windows .window-icon-control.is-active {
+    background: rgba(0, 122, 255, 0.12);
+    color: var(--app-accent);
+}
+
+.window-controls.is-windows .window-dot::before {
+    display: none;
+}
+
+.window-controls.is-windows .window-dot span {
+    position: static;
+    color: currentColor;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    font-weight: 400;
+    opacity: 1;
+    transform: none;
+}
+
+.window-controls.is-windows .window-dot.is-minimize span {
+    transform: translateY(-2px);
+}
+
+.window-controls.is-windows .window-dot.is-maximize span {
+    font-size: 14px;
+    transform: translateY(-1px);
+}
+
+.window-controls.is-windows .window-dot.is-close span {
+    font-size: 20px;
+}
+
+.window-controls.is-windows .window-dot.is-close:hover {
+    background: #c42b1c;
+    color: #ffffff;
+}
+
+.window-controls.is-windows .window-icon-control .app-icon {
+    width: 15px;
+    height: 15px;
 }
 
 .window-dot::before {

@@ -11,6 +11,7 @@ mod storage;
 use app::App;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour};
 
+const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
 const APP_DIR: &str = "UCP Clipboard";
 
 fn main() {
@@ -26,6 +27,7 @@ fn main() {
         .with_window(
             WindowBuilder::new()
                 .with_title("UCP Clipboard")
+                .with_window_icon(dioxus::desktop::icon_from_memory(APP_ICON_BYTES).ok())
                 .with_decorations(false)
                 .with_transparent(true)
                 .with_inner_size(LogicalSize::new(900.0, 660.0))

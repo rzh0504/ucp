@@ -31,6 +31,7 @@ const LIST_HEADER_STYLES: Asset = asset!("/assets/styles/list_header.css");
 const HISTORY_LIST_STYLES: Asset = asset!("/assets/styles/history_list.css");
 const SETTINGS_STYLES: Asset = asset!("/assets/styles/settings.css");
 const RESPONSIVE_STYLES: Asset = asset!("/assets/styles/responsive.css");
+const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
 const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_QUIT_ID: &str = "ucp-quit";
@@ -501,7 +502,10 @@ fn use_app_tray(desktop: DesktopContext, mut status: Signal<String>, language: A
         menu.append_items(&[&show_window, &separator, &quit])
             .expect("tray menu creation failed");
 
-        desktop::trayicon::init_tray_icon(menu, None)
+        let tray_icon: Option<desktop::trayicon::DioxusTrayIcon> =
+            desktop::icon_from_memory(APP_ICON_BYTES).ok();
+
+        desktop::trayicon::init_tray_icon(menu, tray_icon)
     });
 
     desktop::use_tray_menu_event_handler(move |event| match event.id().0.as_str() {

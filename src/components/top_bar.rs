@@ -71,11 +71,7 @@ fn WindowControls(
     on_close: EventHandler<()>,
 ) -> Element {
     let copy = i18n::tr(language);
-    let controls_class = if widget_mode {
-        "window-controls is-widget"
-    } else {
-        "window-controls"
-    };
+    let controls_class = window_controls_class(widget_mode);
     let topmost_class = if widget_topmost {
         "window-icon-control is-topmost is-active"
     } else {
@@ -119,6 +115,24 @@ fn WindowControls(
                 span { "×" }
             }
         }
+    }
+}
+
+#[cfg(windows)]
+fn window_controls_class(widget_mode: bool) -> &'static str {
+    if widget_mode {
+        "window-controls is-widget is-windows"
+    } else {
+        "window-controls is-windows"
+    }
+}
+
+#[cfg(not(windows))]
+fn window_controls_class(widget_mode: bool) -> &'static str {
+    if widget_mode {
+        "window-controls is-widget"
+    } else {
+        "window-controls"
     }
 }
 
