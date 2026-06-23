@@ -79,6 +79,17 @@ pub fn SettingsPage(
                         }
                     }
                     SettingSwitchRow {
+                        label: copy.desktop_widget,
+                        hint: copy.desktop_widget_hint,
+                        checked: settings_snapshot.desktop_widget,
+                        on_change: move |checked| {
+                            if update_settings(settings, status, |next| next.desktop_widget = checked) && checked {
+                                active_filter.set(ClipboardFilter::All);
+                                active_page.set(AppPage::History);
+                            }
+                        },
+                    }
+                    SettingSwitchRow {
                         label: copy.show_copy_time,
                         hint: copy.show_copy_time_hint,
                         checked: settings_snapshot.show_copy_time,
@@ -114,17 +125,6 @@ pub fn SettingsPage(
                                         AppLanguage::English => format!("Failed to update startup setting: {error}"),
                                     });
                                 }
-                            }
-                        },
-                    }
-                    SettingSwitchRow {
-                        label: copy.desktop_widget,
-                        hint: copy.desktop_widget_hint,
-                        checked: settings_snapshot.desktop_widget,
-                        on_change: move |checked| {
-                            if update_settings(settings, status, |next| next.desktop_widget = checked) && checked {
-                                active_filter.set(ClipboardFilter::All);
-                                active_page.set(AppPage::History);
                             }
                         },
                     }
