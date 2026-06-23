@@ -16,12 +16,35 @@ mod imp {
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
     use windows_sys::Win32::UI::Shell::{
-        SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW,
+        SHFILEINFOW, SHGFI_ICON, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW,
+        SHGetImageList, SHIL_EXTRALARGE, SHIL_LARGE,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{DI_NORMAL, DestroyIcon, DrawIconEx};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DI_NORMAL, DestroyIcon, DrawIconEx, HICON};
+    use windows_sys::core::{GUID, HRESULT, IUnknown_Vtbl};
 
-    const ICON_SIZE: i32 = 32;
+    const EXTRA_LARGE_ICON_SIZE: i32 = 48;
+    const LARGE_ICON_SIZE: i32 = 32;
+    const IID_IIMAGELIST: GUID = GUID::from_u128(0x46eb5926_582e_4017_9fdf_e8998daa0950);
+    const ILD_TRANSPARENT: u32 = 1;
     static ICON_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+
+    #[repr(C)]
+    struct IImageList {
+        vtbl: *const IImageListVtbl,
+    }
+
+    #[repr(C)]
+    struct IImageListVtbl {
+        base: IUnknown_Vtbl,
+        add: usize,
+        replace_icon: usize,
+        set_overlay_image: usize,
+        replace: usize,
+        add_masked: usize,
+        draw: usize,
+        remove: usize,
+        get_icon: unsafe extern "system" fn(*mut c_void, i32, u32, *mut HICON) -> HRESULT,
+    }
 
     pub fn data_url(path: &str) -> Option<String> {
         let key = cache_key(path)?;
@@ -66,36 +89,99 @@ mod imp {
             return None;
         }
 
+        if let Some(png) = system_icon_png(path) {
+            return Some(png);
+        }
+
         let hicon = shell_icon(path)?;
-        let rgba = unsafe { icon_rgba(hicon, ICON_SIZE, ICON_SIZE) };
+        let rgba = unsafe { icon_rgba(hicon, LARGE_ICON_SIZE, LARGE_ICON_SIZE) };
 
         unsafe {
             DestroyIcon(hicon);
         }
 
-        encode_png(&rgba?, ICON_SIZE as u32, ICON_SIZE as u32)
+        encode_png(&rgba?, LARGE_ICON_SIZE as u32, LARGE_ICON_SIZE as u32)
     }
 
-    fn shell_icon(path: &str) -> Option<windows_sys::Win32::UI::WindowsAndMessaging::HICON> {
+    fn system_icon_png(path: &str) -> Option<Vec<u8>> {
+        let index = system_icon_index(path)?;
+        let icon = unsafe { image_list_icon(index) }?;
+        let rgba = unsafe { icon_rgba(icon.hicon, icon.size, icon.size) };
+
+        unsafe {
+            DestroyIcon(icon.hicon);
+        }
+
+        encode_png(&rgba?, icon.size as u32, icon.size as u32)
+    }
+
+    fn system_icon_index(path: &str) -> Option<i32> {
         let path_ref = Path::new(path);
-        let attributes = if path_ref.is_dir() {
-            FILE_ATTRIBUTE_DIRECTORY
-        } else {
-            FILE_ATTRIBUTE_NORMAL
-        };
-        let wide_path = path_ref
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
+        let wide_path = wide_path(path_ref);
         let mut info = unsafe { zeroed::<SHFILEINFOW>() };
         let result = unsafe {
             SHGetFileInfoW(
                 wide_path.as_ptr(),
-                attributes,
+                file_attributes(path_ref),
                 &mut info,
                 size_of::<SHFILEINFOW>() as u32,
-                SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
+                SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES,
+            )
+        };
+
+        if result == 0 { None } else { Some(info.iIcon) }
+    }
+
+    struct IconHandle {
+        hicon: HICON,
+        size: i32,
+    }
+
+    unsafe fn image_list_icon(index: i32) -> Option<IconHandle> {
+        for (list, size) in [
+            (SHIL_EXTRALARGE, EXTRA_LARGE_ICON_SIZE),
+            (SHIL_LARGE, LARGE_ICON_SIZE),
+        ] {
+            let mut image_list = std::ptr::null_mut::<c_void>();
+            let result = unsafe { SHGetImageList(list as i32, &IID_IIMAGELIST, &mut image_list) };
+            if result < 0 || image_list.is_null() {
+                continue;
+            }
+
+            let image_list = image_list as *mut IImageList;
+            let vtbl = unsafe { (*image_list).vtbl };
+            let mut hicon = std::ptr::null_mut::<c_void>();
+            let result = unsafe {
+                ((*vtbl).get_icon)(
+                    image_list as *mut c_void,
+                    index,
+                    ILD_TRANSPARENT,
+                    &mut hicon,
+                )
+            };
+            unsafe {
+                ((*vtbl).base.Release)(image_list as *mut c_void);
+            }
+
+            if result >= 0 && !hicon.is_null() {
+                return Some(IconHandle { hicon, size });
+            }
+        }
+
+        None
+    }
+
+    fn shell_icon(path: &str) -> Option<windows_sys::Win32::UI::WindowsAndMessaging::HICON> {
+        let path_ref = Path::new(path);
+        let wide_path = wide_path(path_ref);
+        let mut info = unsafe { zeroed::<SHFILEINFOW>() };
+        let result = unsafe {
+            SHGetFileInfoW(
+                wide_path.as_ptr(),
+                file_attributes(path_ref),
+                &mut info,
+                size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON | SHGFI_USEFILEATTRIBUTES,
             )
         };
 
@@ -104,6 +190,21 @@ mod imp {
         } else {
             Some(info.hIcon)
         }
+    }
+
+    fn file_attributes(path: &Path) -> u32 {
+        if path.is_dir() {
+            FILE_ATTRIBUTE_DIRECTORY
+        } else {
+            FILE_ATTRIBUTE_NORMAL
+        }
+    }
+
+    fn wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
 
     unsafe fn icon_rgba(

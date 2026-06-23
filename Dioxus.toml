@@ -22,6 +22,7 @@ script = []
 identifier = "dev.ucp.clipboard"
 publisher = "UCP"
 icon = [
+    "assets/icons/app.ico",
     "assets/icons/app-256x256.ico",
     "assets/icons/app-128x128.ico",
     "assets/icons/app-64x64.ico",
@@ -35,5 +36,8 @@ short_description = "Desktop clipboard history manager"
 long_description = "A Windows-first desktop clipboard history manager built with Dioxus."
 
 [bundle.windows]
-icon_path = "assets/icons/app-256x256.ico"
+icon_path = "assets/icons/app.ico"
 webview_install_mode = "Skip"
+
+[bundle.windows.nsis]
+installer_hooks = "installer/windows/nsis-hooks.nsh"
