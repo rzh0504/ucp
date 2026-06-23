@@ -95,6 +95,10 @@ async fn capture_clipboard(
     let language = settings.peek().language;
     match read_clipboard_content(language).await {
         Ok(Some(content)) => {
+            if !history.peek().would_push_change(&content) {
+                return;
+            }
+
             let result = history.write().push(content);
             let mut auto_cleanup_cutoff = None;
 

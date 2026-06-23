@@ -447,7 +447,7 @@ impl ClipboardHistory {
             .iter()
             .position(|entry| entry.content == content)
         {
-            if position == 0 {
+            if !self.should_promote_position(position) {
                 return PushResult::default();
             }
 
@@ -473,6 +473,18 @@ impl ClipboardHistory {
             entry: Some(inserted_entry),
             removed_ids,
         }
+    }
+
+    pub fn would_push_change(&self, content: &ClipboardContent) -> bool {
+        let content = content.clone().normalized();
+        if content.is_empty() {
+            return false;
+        }
+
+        self.entries
+            .iter()
+            .position(|entry| entry.content == content)
+            .is_none_or(|position| self.should_promote_position(position))
     }
 
     pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<ClipboardEntry> {
@@ -534,8 +546,19 @@ impl ClipboardHistory {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
+    pub fn should_promote(&self, id: u64) -> bool {
+        self.entries
+            .iter()
+            .position(|entry| entry.id == id)
+            .is_some_and(|position| self.should_promote_position(position))
+    }
+
     pub fn promote(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
+            if !self.should_promote_position(position) {
+                return None;
+            }
+
             let mut entry = self.entries.remove(position);
             entry.captured_at = Local::now();
             let updated_entry = entry.clone();
@@ -590,6 +613,10 @@ impl ClipboardHistory {
 
     fn sort_entries(&mut self) {
         sort_entries(&mut self.entries);
+    }
+
+    fn should_promote_position(&self, position: usize) -> bool {
+        position != 0 && !self.entries[position].pinned
     }
 
     fn truncate(&mut self) -> Vec<u64> {
@@ -801,6 +828,25 @@ mod tests {
         assert!(history.entry(old_id).is_none());
         assert!(history.entry(pinned_id).is_some());
         assert!(history.entry(latest_id).is_some());
+    }
+
+    #[test]
+    fn pinned_entries_are_not_promoted_by_copy_or_capture() {
+        let mut history = ClipboardHistory::new(10);
+        history.push(ClipboardContent::Text("old".to_string()));
+        let pinned_id = history
+            .push(ClipboardContent::Text("pinned".to_string()))
+            .entry
+            .unwrap()
+            .id;
+        history.push(ClipboardContent::Text("latest".to_string()));
+        history.toggle_pin(pinned_id);
+        let captured_at = history.entry(pinned_id).unwrap().captured_at;
+
+        assert!(!history.should_promote(pinned_id));
+        assert!(!history.would_push_change(&ClipboardContent::Text("pinned".to_string())));
+        assert!(history.promote(pinned_id).is_none());
+        assert_eq!(history.entry(pinned_id).unwrap().captured_at, captured_at);
     }
 
     #[test]

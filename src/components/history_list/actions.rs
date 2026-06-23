@@ -45,7 +45,7 @@ pub(super) fn copy_entry(
     }
 
     let copied_to_clipboard = i18n::tr(language).copied_to_clipboard;
-    if promote_on_copy {
+    if promote_on_copy && history.peek().should_promote(id) {
         if let Some(entry) = history.write().promote(id) {
             save_entry_with_status(&entry, status, copied_to_clipboard, language);
         } else {
