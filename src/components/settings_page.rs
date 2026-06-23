@@ -89,6 +89,17 @@ pub fn SettingsPage(
                             }
                         },
                     }
+                    OpacitySliderRow {
+                        label: copy.background_opacity,
+                        hint: copy.background_opacity_hint,
+                        value: settings_snapshot.background_opacity,
+                        on_input: move |opacity| {
+                            update_settings_in_memory(settings, |next| next.background_opacity = opacity);
+                        },
+                        on_commit: move |opacity| {
+                            update_settings(settings, status, |next| next.background_opacity = opacity);
+                        },
+                    }
                     SettingSwitchRow {
                         label: copy.show_copy_time,
                         hint: copy.show_copy_time_hint,
@@ -126,17 +137,6 @@ pub fn SettingsPage(
                                     });
                                 }
                             }
-                        },
-                    }
-                    OpacitySliderRow {
-                        label: copy.background_opacity,
-                        hint: copy.background_opacity_hint,
-                        value: settings_snapshot.background_opacity,
-                        on_input: move |opacity| {
-                            update_settings_in_memory(settings, |next| next.background_opacity = opacity);
-                        },
-                        on_commit: move |opacity| {
-                            update_settings(settings, status, |next| next.background_opacity = opacity);
                         },
                     }
                 }

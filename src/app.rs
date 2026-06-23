@@ -85,6 +85,14 @@ pub fn App() -> Element {
 
             applied_widget_mode.set(Some((widget_mode, topmost)));
             apply_window_mode(&desktop, widget_mode, topmost);
+
+            let opacity = if widget_mode {
+                settings_snapshot.background_opacity
+            } else {
+                DEFAULT_BACKGROUND_OPACITY
+            };
+            applied_window_opacity.set(Some(opacity));
+            apply_window_opacity(&desktop, opacity);
         }
     });
 
@@ -547,6 +555,7 @@ fn handle_window_close(
         Ok(()) => {
             settings.set(next);
             apply_window_mode(desktop, false, next.desktop_widget_topmost);
+            apply_window_opacity(desktop, DEFAULT_BACKGROUND_OPACITY);
             show_desktop_window(desktop);
             status.set(i18n::tr(next.language).settings_saved.to_string());
         }
@@ -571,6 +580,12 @@ fn handle_widget_topmost_change(
         Ok(()) => {
             settings.set(next);
             apply_window_mode(desktop, next.desktop_widget, next.desktop_widget_topmost);
+            let opacity = if next.desktop_widget {
+                next.background_opacity
+            } else {
+                DEFAULT_BACKGROUND_OPACITY
+            };
+            apply_window_opacity(desktop, opacity);
         }
         Err(error) => status.set(match next.language {
             AppLanguage::Chinese => format!("设置保存失败：{error}"),
