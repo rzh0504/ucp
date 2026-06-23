@@ -38,7 +38,7 @@ pub fn TopBar(
                 onmousedown: move |_| drag_window.drag(),
                 h1 { class: "app-title", "UCP Clipboard" }
             }
-            if active_page() == AppPage::History {
+            if active_page() == AppPage::History && !widget_mode {
                 SearchField { query, search_input, keyboard_shortcuts, language }
             }
             WindowControls {

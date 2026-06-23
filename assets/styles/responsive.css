@@ -4,7 +4,7 @@
     }
 
     .top-bar.is-widget {
-        grid-template-columns: minmax(0, 1fr) minmax(88px, 112px) auto;
+        grid-template-columns: minmax(0, 1fr) auto;
     }
 
     .title-drag-region {
@@ -17,19 +17,9 @@
         max-width: none;
     }
 
-    .top-bar.is-widget .search-field {
-        grid-column: 2;
-        grid-row: 1;
-        max-width: 112px;
-    }
-
     .window-controls {
         grid-column: 2;
         grid-row: 1;
-    }
-
-    .top-bar.is-widget .window-controls {
-        grid-column: 3;
     }
 
     .filter-tabs {

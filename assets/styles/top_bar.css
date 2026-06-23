@@ -11,7 +11,7 @@
 }
 
 .top-bar.is-widget {
-    grid-template-columns: minmax(0, 1fr) minmax(88px, 112px) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
 }
 
@@ -46,6 +46,7 @@
 }
 
 .window-controls.is-widget {
+    grid-column: 2;
     min-width: 92px;
 }
 
@@ -117,7 +118,8 @@
 }
 
 .window-controls.is-windows .window-icon-control.is-active {
-    background: rgba(0, 122, 255, 0.12);
+    background: transparent;
+    box-shadow: none;
     color: var(--app-accent);
 }
 
@@ -217,17 +219,6 @@
     color: var(--app-text);
     font-size: 14px;
     transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.top-bar.is-widget .search-field input {
-    height: 32px;
-    padding-right: 10px;
-    padding-left: 30px;
-    font-size: 12px;
-}
-
-.top-bar.is-widget .search-icon {
-    left: 10px;
 }
 
 .search-field input:focus {
