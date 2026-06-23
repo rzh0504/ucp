@@ -36,3 +36,4 @@ long_description = "A Windows-first desktop clipboard history manager built with
 
 [bundle.windows]
 icon_path = "assets/icons/app-256x256.ico"
+webview_install_mode = "Skip"
