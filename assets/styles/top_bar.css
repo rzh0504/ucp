@@ -110,6 +110,12 @@
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
+.shell:not([data-theme="dark"]) .window-controls.is-windows .window-dot.is-minimize:hover,
+.shell:not([data-theme="dark"]) .window-controls.is-windows .window-dot.is-maximize:hover {
+    background: var(--app-control-hover);
+    box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.06);
+}
+
 .window-controls.is-windows .window-icon-control.is-active {
     background: rgba(0, 122, 255, 0.12);
     color: var(--app-accent);
