@@ -23,6 +23,19 @@ fn main() {
         return;
     }
 
+    #[cfg(windows)]
+    let _single_instance = match platform::single_instance::acquire() {
+        platform::single_instance::SingleInstance::Primary(guard) => {
+            platform::single_instance::start_activation_listener();
+            Some(guard)
+        }
+        platform::single_instance::SingleInstance::AlreadyRunning => {
+            platform::single_instance::notify_existing_instance();
+            return;
+        }
+        platform::single_instance::SingleInstance::Unavailable => None,
+    };
+
     let mut config = Config::new()
         .with_window(
             WindowBuilder::new()

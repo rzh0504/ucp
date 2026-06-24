@@ -95,6 +95,25 @@ pub fn App() -> Element {
     let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
     let mut applied_window_opacity = use_signal(|| None::<u8>);
 
+    #[cfg(windows)]
+    let _activation_task = use_hook({
+        let desktop = desktop.clone();
+        move || {
+            spawn(async move {
+                let mut last_activation_count =
+                    crate::platform::single_instance::activation_count();
+                loop {
+                    Delay::new(Duration::from_millis(200)).await;
+                    let activation_count = crate::platform::single_instance::activation_count();
+                    if activation_count != last_activation_count {
+                        last_activation_count = activation_count;
+                        show_desktop_window(&desktop);
+                    }
+                }
+            })
+        }
+    });
+
     use_app_tray(
         desktop.clone(),
         settings,
