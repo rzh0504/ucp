@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  DIOXUS_CLI_VERSION: "0.7.0"
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }} installer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            artifact_name: ucp-windows
+            package_type: nsis
+          - name: macOS
+            os: macos-latest
+            artifact_name: ucp-macos
+            package_type: dmg
+          - name: Linux
+            os: ubuntu-24.04
+            artifact_name: ucp-linux
+            package_type: deb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Windows bundler dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Install Dioxus CLI
+        run: cargo install dioxus-cli --version "${{ env.DIOXUS_CLI_VERSION }}" --locked
+
+      - name: Build installer
+        run: dx bundle --platform desktop --release --package-types ${{ matrix.package_type }}
+
+      - name: Collect installer artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artifactName = "${{ matrix.artifact_name }}"
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+
+          $roots = @("dist", "target/dx", "target/release/bundle")
+          $installerExtensions = @(".msi", ".dmg", ".pkg", ".AppImage", ".deb", ".rpm")
+          $allFiles = @()
+
+          foreach ($root in $roots) {
+            if (Test-Path -LiteralPath $root) {
+              $allFiles += Get-ChildItem -LiteralPath $root -Recurse -File
+            }
+          }
+
+          $files = $allFiles | Where-Object {
+            if ($installerExtensions -contains $_.Extension) {
+              $true
+            } elseif ($_.Extension -ieq ".exe") {
+              $_.FullName -match "[\\/](dist|bundle|nsis|msi)[\\/]" -or $_.BaseName -match "(?i)(setup|installer|install)"
+            } else {
+              $false
+            }
+          }
+
+          $files = $files | Sort-Object -Property FullName -Unique
+          if (-not $files) {
+            if (Test-Path -LiteralPath "target") {
+              Get-ChildItem -LiteralPath "target" -Recurse -File | Select-Object FullName, Length
+            }
+            throw "No installer artifacts were produced."
+          }
+
+          foreach ($file in $files) {
+            $destination = Join-Path "release-assets" "$artifactName-$($file.Name)"
+            Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+          }
+
+          Get-ChildItem -LiteralPath release-assets -File | Select-Object Name, Length
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_name="${GITHUB_REF_NAME}"
+          current_sha="$(git rev-list -n 1 "$tag_name")"
+          previous_tag="$(git describe --tags --match 'v*' --abbrev=0 "${current_sha}^" 2>/dev/null || true)"
+
+          {
+            echo "## Changes"
+            echo
+            if [ -n "$previous_tag" ]; then
+              echo "Commits since \`$previous_tag\`:"
+              echo
+              git log "${previous_tag}..${current_sha}" --pretty=format:'- %s (%h)'
+            else
+              echo "Commits included in \`$tag_name\`:"
+              echo
+              git log "$current_sha" --pretty=format:'- %s (%h)'
+            fi
+            echo
+            echo
+            echo "## Installers"
+            echo
+            echo "Download the installer for your platform from the release assets below."
+          } > release-notes.md
+
+          cat release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: release-assets/*
