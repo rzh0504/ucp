@@ -209,6 +209,27 @@
     box-shadow: 0 0 0 3px var(--app-shadow-soft);
 }
 
+.settings-text-input {
+    justify-self: end;
+    width: 250px;
+    height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--app-separator);
+    border-radius: 9px;
+    outline: none;
+    background: var(--app-input-bg);
+    color: var(--app-text-strong);
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 1px 2px var(--app-shadow-soft);
+}
+
+.settings-text-input:focus {
+    border-color: rgba(17, 24, 39, 0.18);
+    background: var(--app-input-focus-bg);
+    box-shadow: 0 0 0 3px var(--app-shadow-soft);
+}
+
 .settings-combobox-list {
     position: absolute;
     right: 0;

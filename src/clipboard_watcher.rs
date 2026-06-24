@@ -21,7 +21,6 @@ struct PersistCaptureJob {
     reply: oneshot::Sender<Result<(), String>>,
 }
 
-#[cfg(windows)]
 pub(crate) async fn watch_clipboard(
     history: Signal<ClipboardHistory>,
     settings: Signal<AppSettings>,
@@ -52,15 +51,6 @@ pub(crate) async fn watch_clipboard(
     while updates_rx.next().await.is_some() {
         capture_clipboard(history, settings, status).await;
     }
-}
-
-#[cfg(not(windows))]
-pub(crate) async fn watch_clipboard(
-    history: Signal<ClipboardHistory>,
-    settings: Signal<AppSettings>,
-    status: Signal<String>,
-) {
-    poll_clipboard(history, settings, status).await;
 }
 
 async fn poll_clipboard(

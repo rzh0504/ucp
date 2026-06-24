@@ -210,6 +210,15 @@ pub fn SettingsPage(
                             update_settings(settings, status, |next| next.keyboard_shortcuts = checked);
                         },
                     }
+                    ShortcutInputRow {
+                        label: copy.global_shortcut,
+                        hint: copy.global_shortcut_hint,
+                        placeholder: copy.global_shortcut_placeholder,
+                        value: settings_snapshot.global_show_shortcut.clone(),
+                        on_commit: move |shortcut| {
+                            update_settings(settings, status, |next| next.global_show_shortcut = shortcut);
+                        },
+                    }
                     SettingSwitchRow {
                         label: copy.auto_focus_history,
                         hint: copy.auto_focus_history_hint,
@@ -299,6 +308,33 @@ fn SettingSwitchRow(
                 aria_label: label,
                 on_checked_change: move |value| on_change.call(value),
                 SwitchThumb { class: "settings-switch-thumb" }
+            }
+        }
+    }
+}
+
+#[component]
+fn ShortcutInputRow(
+    label: &'static str,
+    hint: &'static str,
+    placeholder: &'static str,
+    value: String,
+    on_commit: EventHandler<String>,
+) -> Element {
+    rsx! {
+        div { class: "setting-row setting-row-control",
+            div { class: "setting-row-copy",
+                span { class: "setting-label", "{label}" }
+                p { "{hint}" }
+            }
+            input {
+                class: "settings-text-input",
+                r#type: "text",
+                value,
+                placeholder,
+                aria_label: label,
+                spellcheck: "false",
+                onchange: move |event| on_commit.call(event.value()),
             }
         }
     }
@@ -469,8 +505,9 @@ fn update_settings(
 
     match storage::save_settings(&next) {
         Ok(()) => {
+            let language = next.language;
             settings.set(next);
-            status.set(i18n::tr(next.language).settings_saved.to_string());
+            status.set(i18n::tr(language).settings_saved.to_string());
             true
         }
         Err(error) => {

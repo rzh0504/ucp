@@ -4,6 +4,8 @@ use std::borrow::Cow;
 use std::fmt;
 #[cfg(target_os = "linux")]
 use std::io::Write;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::time::Duration;
 
 #[derive(Debug)]
 pub enum ClipboardError {
@@ -293,6 +295,41 @@ pub struct ClipboardUpdateListener {
     _shutdown: clipboard_win::monitor::Shutdown,
 }
 
+#[cfg(target_os = "macos")]
+pub struct ClipboardUpdateListener {
+    shutdown: Option<std::sync::mpsc::Sender<()>>,
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for ClipboardUpdateListener {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub struct ClipboardUpdateListener {
+    shutdown: Option<std::sync::mpsc::Sender<()>>,
+    child: Option<std::process::Child>,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ClipboardUpdateListener {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
+pub struct ClipboardUpdateListener;
+
 #[cfg(windows)]
 pub fn listen_for_updates(
     mut on_update: impl FnMut() + Send + 'static,
@@ -327,6 +364,50 @@ pub fn listen_for_updates(
     })
 }
 
+#[cfg(target_os = "macos")]
+pub fn listen_for_updates(
+    mut on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let mut last_change_count = macos_pasteboard_change_count();
+        while shutdown_rx
+            .recv_timeout(Duration::from_millis(650))
+            .is_err()
+        {
+            let change_count = macos_pasteboard_change_count();
+            if change_count.is_some() && change_count != last_change_count {
+                last_change_count = change_count;
+                on_update();
+            }
+        }
+    });
+
+    Ok(ClipboardUpdateListener {
+        shutdown: Some(shutdown_tx),
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn listen_for_updates(
+    on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let on_update = std::sync::Arc::new(std::sync::Mutex::new(
+        Box::new(on_update) as Box<dyn FnMut() + Send>
+    ));
+    listen_with_wl_paste(on_update.clone()).or_else(|_| listen_with_clipnotify(on_update))
+}
+
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
+pub fn listen_for_updates(
+    _on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    Err(ClipboardError::Unavailable(
+        "当前平台暂不支持剪贴板事件监听".to_string(),
+    ))
+}
+
 #[cfg(windows)]
 pub fn sequence_number() -> Option<u32> {
     clipboard_win::raw::seq_num().map(|sequence| sequence.get())
@@ -358,6 +439,99 @@ fn image_data_is_unreadable(error: &ArboardError) -> bool {
         error,
         ArboardError::Unknown { description } if description == "failed to read clipboard image data"
     )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_pasteboard_change_count() -> Option<String> {
+    command_stdout(
+        "osascript",
+        &[
+            "-l",
+            "JavaScript",
+            "-e",
+            "ObjC.import('AppKit'); $.NSPasteboard.generalPasteboard.changeCount.toString()",
+        ],
+    )
+    .map(|output| output.trim().to_string())
+    .filter(|output| !output.is_empty())
+}
+
+#[cfg(target_os = "linux")]
+fn listen_with_wl_paste(
+    on_update: std::sync::Arc<std::sync::Mutex<Box<dyn FnMut() + Send>>>,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let mut child = std::process::Command::new("wl-paste")
+        .args(["--watch", "sh", "-c", "echo changed"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| ClipboardError::Unavailable(error.to_string()))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ClipboardError::Unavailable("wl-paste stdout unavailable".to_string()))?;
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stdout);
+        for line in std::io::BufRead::lines(reader) {
+            if shutdown_rx.try_recv().is_ok() || line.is_err() {
+                break;
+            }
+            if let Ok(mut on_update) = on_update.lock() {
+                on_update();
+            }
+        }
+    });
+
+    Ok(ClipboardUpdateListener {
+        shutdown: Some(shutdown_tx),
+        child: Some(child),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn listen_with_clipnotify(
+    on_update: std::sync::Arc<std::sync::Mutex<Box<dyn FnMut() + Send>>>,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let has_clipnotify = std::process::Command::new("sh")
+        .args(["-c", "command -v clipnotify >/dev/null 2>&1"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    if !has_clipnotify {
+        return Err(ClipboardError::Unavailable(
+            "clipnotify is not installed".to_string(),
+        ));
+    }
+
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        while shutdown_rx.try_recv().is_err() {
+            let status = std::process::Command::new("clipnotify")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+
+            match status {
+                Ok(status) if status.success() => {
+                    if let Ok(mut on_update) = on_update.lock() {
+                        on_update();
+                    }
+                }
+                Ok(_) | Err(_) => break,
+            }
+        }
+    });
+
+    Ok(ClipboardUpdateListener {
+        shutdown: Some(shutdown_tx),
+        child: None,
+    })
 }
 
 #[cfg(target_os = "macos")]

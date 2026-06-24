@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const DEFAULT_BACKGROUND_OPACITY: u8 = 100;
+pub const DEFAULT_GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 pub const MIN_BACKGROUND_OPACITY: u8 = 45;
 pub const TEXT_CONTENT_CHAR_LIMIT: usize = 50_000;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
@@ -183,7 +184,7 @@ pub enum ClipboardContent {
     Files(Vec<String>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     pub history_limit: usize,
     pub auto_cleanup_days: Option<u16>,
@@ -193,6 +194,7 @@ pub struct AppSettings {
     pub desktop_widget: bool,
     pub desktop_widget_topmost: bool,
     pub keyboard_shortcuts: bool,
+    pub global_show_shortcut: String,
     pub auto_focus_history: bool,
     pub promote_copied_entries: bool,
     pub quick_paste: bool,
@@ -212,6 +214,7 @@ impl Default for AppSettings {
             desktop_widget: false,
             desktop_widget_topmost: false,
             keyboard_shortcuts: true,
+            global_show_shortcut: DEFAULT_GLOBAL_SHOW_SHORTCUT.to_string(),
             auto_focus_history: true,
             promote_copied_entries: true,
             quick_paste: true,
@@ -233,7 +236,17 @@ impl AppSettings {
         self.background_opacity = self
             .background_opacity
             .clamp(MIN_BACKGROUND_OPACITY, DEFAULT_BACKGROUND_OPACITY);
+        self.global_show_shortcut = normalized_global_shortcut(self.global_show_shortcut);
         self
+    }
+}
+
+fn normalized_global_shortcut(shortcut: String) -> String {
+    let shortcut = shortcut.trim();
+    if shortcut.is_empty() {
+        DEFAULT_GLOBAL_SHOW_SHORTCUT.to_string()
+    } else {
+        shortcut.to_string()
     }
 }
 

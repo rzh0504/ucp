@@ -5,8 +5,8 @@ use crate::model::{
 };
 use crate::storage;
 use dioxus::desktop::{
-    self, DesktopContext, HotKeyState, LogicalSize, ShortcutRegistryError, WindowCloseBehaviour,
-    use_global_shortcut, use_window,
+    self, DesktopContext, HotKeyState, LogicalSize, ShortcutHandle, ShortcutRegistryError,
+    WindowCloseBehaviour, use_window,
 };
 use dioxus::events::MountedData;
 use dioxus::html::Key;
@@ -17,7 +17,9 @@ use dioxus_primitives::alert_dialog::{
 };
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_timer::Delay;
+use global_hotkey::hotkey::HotKey;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
@@ -45,7 +47,6 @@ const APP_STYLES: [Asset; 11] = [
     RESPONSIVE_STYLES,
 ];
 const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
-const GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 const TRAY_SHOW_WINDOW_ID: &str = "ucp-show-window";
 const TRAY_OPEN_WIDGET_ID: &str = "ucp-open-widget";
 const TRAY_QUIT_ID: &str = "ucp-quit";
@@ -77,7 +78,7 @@ pub(crate) fn style_head() -> String {
 #[component]
 pub fn App() -> Element {
     let initial_storage = use_hook(load_initial_storage);
-    let initial_settings = initial_storage.settings;
+    let initial_settings = initial_storage.settings.clone();
     let initial_history = initial_storage.history.clone();
     let initial_status = initial_storage.status.clone();
     let settings = use_signal(move || initial_settings);
@@ -91,7 +92,8 @@ pub fn App() -> Element {
     let mut status_clear_generation = use_signal(|| 0_u64);
     let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
-    let mut shortcut_error_reported = use_signal(|| false);
+    let mut global_shortcut_handle = use_signal(|| None::<ShortcutHandle>);
+    let mut applied_global_shortcut = use_signal(String::new);
     let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
     let mut applied_window_opacity = use_signal(|| None::<u8>);
 
@@ -165,26 +167,50 @@ pub fn App() -> Element {
         }
     });
 
-    let global_shortcut = use_global_shortcut(GLOBAL_SHOW_SHORTCUT, {
+    use_effect({
         let desktop = desktop.clone();
-        move |state| {
-            if state == HotKeyState::Pressed {
-                show_desktop_window(&desktop);
+        move || {
+            let settings_snapshot = settings();
+            let shortcut = settings_snapshot.global_show_shortcut.trim().to_string();
+            if applied_global_shortcut.peek().as_str() == shortcut.as_str() {
+                return;
             }
-        }
-    });
 
-    let shortcut_error = global_shortcut
-        .as_ref()
-        .err()
-        .map(|error| shortcut_error_message(error, settings.peek().language));
-    use_effect(move || {
-        if let Some(error) = shortcut_error.as_ref()
-            && !shortcut_error_reported()
-        {
-            shortcut_error_reported.set(true);
-            let mut status = status;
-            status.set(error.clone());
+            if let Some(handle) = global_shortcut_handle.write().take() {
+                handle.remove();
+            }
+            applied_global_shortcut.set(shortcut.clone());
+
+            let hotkey = match HotKey::from_str(&shortcut) {
+                Ok(hotkey) => hotkey,
+                Err(_) => {
+                    let mut status = status;
+                    status.set(invalid_shortcut_message(
+                        &shortcut,
+                        settings_snapshot.language,
+                    ));
+                    return;
+                }
+            };
+
+            let shortcut_desktop = desktop.clone();
+            match desktop.create_shortcut(hotkey, move |state| {
+                if state == HotKeyState::Pressed {
+                    show_desktop_window(&shortcut_desktop);
+                }
+            }) {
+                Ok(handle) => {
+                    global_shortcut_handle.set(Some(handle));
+                }
+                Err(error) => {
+                    let mut status = status;
+                    status.set(shortcut_error_message(
+                        &error,
+                        &shortcut,
+                        settings_snapshot.language,
+                    ));
+                }
+            }
         }
     });
 
@@ -388,7 +414,18 @@ pub fn App() -> Element {
     }
 }
 
-fn shortcut_error_message(error: &ShortcutRegistryError, language: AppLanguage) -> String {
+fn invalid_shortcut_message(shortcut: &str, language: AppLanguage) -> String {
+    match language {
+        AppLanguage::Chinese => format!("全局快捷键配置无效：{shortcut}"),
+        AppLanguage::English => format!("Invalid global shortcut configuration: {shortcut}"),
+    }
+}
+
+fn shortcut_error_message(
+    error: &ShortcutRegistryError,
+    shortcut: &str,
+    language: AppLanguage,
+) -> String {
     match error {
         ShortcutRegistryError::InvalidShortcut(shortcut) => match language {
             AppLanguage::Chinese => format!("全局快捷键配置无效：{shortcut}"),
@@ -402,28 +439,26 @@ fn shortcut_error_message(error: &ShortcutRegistryError, language: AppLanguage) 
             {
                 match language {
                     AppLanguage::Chinese => {
-                        format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 已被占用，仍可通过托盘打开窗口")
+                        format!("全局快捷键 {shortcut} 已被占用，仍可通过托盘或窗口按钮打开窗口")
                     }
                     AppLanguage::English => format!(
-                        "Global shortcut {GLOBAL_SHOW_SHORTCUT} is already in use. You can still open the window from the tray"
+                        "Global shortcut {shortcut} is already in use. You can still open the window from the tray or window controls"
                     ),
                 }
             } else {
                 match language {
                     AppLanguage::Chinese => {
-                        format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败：{message}")
+                        format!("全局快捷键 {shortcut} 注册失败：{message}")
                     }
-                    AppLanguage::English => format!(
-                        "Failed to register global shortcut {GLOBAL_SHOW_SHORTCUT}: {message}"
-                    ),
+                    AppLanguage::English => {
+                        format!("Failed to register global shortcut {shortcut}: {message}")
+                    }
                 }
             }
         }
         _ => match language {
-            AppLanguage::Chinese => format!("全局快捷键 {GLOBAL_SHOW_SHORTCUT} 注册失败"),
-            AppLanguage::English => {
-                format!("Failed to register global shortcut {GLOBAL_SHOW_SHORTCUT}")
-            }
+            AppLanguage::Chinese => format!("全局快捷键 {shortcut} 注册失败"),
+            AppLanguage::English => format!("Failed to register global shortcut {shortcut}"),
         },
     }
 }
@@ -436,18 +471,24 @@ fn load_initial_storage() -> InitialStorageState {
                 history,
                 status: String::new(),
             },
-            Err(error) => InitialStorageState {
-                settings,
-                history: ClipboardHistory::new(settings.history_limit),
-                status: storage_initialization_failed(settings.language, &error.to_string()),
-            },
+            Err(error) => {
+                let history_limit = settings.history_limit;
+                let language = settings.language;
+                InitialStorageState {
+                    settings,
+                    history: ClipboardHistory::new(history_limit),
+                    status: storage_initialization_failed(language, &error.to_string()),
+                }
+            }
         },
         Err(error) => {
             let settings = AppSettings::default();
+            let history_limit = settings.history_limit;
+            let language = settings.language;
             InitialStorageState {
                 settings,
-                history: ClipboardHistory::new(settings.history_limit),
-                status: storage_initialization_failed(settings.language, &error.to_string()),
+                history: ClipboardHistory::new(history_limit),
+                status: storage_initialization_failed(language, &error.to_string()),
             }
         }
     }
@@ -545,7 +586,9 @@ fn use_app_tray(
     active_filter: Signal<ClipboardFilter>,
     language: AppLanguage,
 ) {
-    let _tray = use_hook(|| {
+    let mut tray_status = status;
+    let _tray = use_hook(move || {
+        use desktop::trayicon::TrayIconBuilder;
         use desktop::trayicon::menu::{Menu, MenuItem, PredefinedMenuItem};
 
         let copy = i18n::tr(language);
@@ -561,7 +604,25 @@ fn use_app_tray(
         let tray_icon: Option<desktop::trayicon::DioxusTrayIcon> =
             desktop::icon_from_memory(APP_ICON_BYTES).ok();
 
-        desktop::trayicon::init_tray_icon(menu, tray_icon)
+        let builder = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_menu_on_left_click(false);
+        let builder = if let Some(icon) = tray_icon {
+            builder.with_icon(icon)
+        } else {
+            builder
+        };
+
+        match builder.build() {
+            Ok(tray) => Some(tray),
+            Err(error) => {
+                tray_status.set(match language {
+                    AppLanguage::Chinese => format!("系统托盘初始化失败：{error}"),
+                    AppLanguage::English => format!("Failed to initialize system tray: {error}"),
+                });
+                None
+            }
+        }
     });
 
     let tray_desktop = desktop.clone();
@@ -639,7 +700,7 @@ fn handle_window_close(
 ) {
     let mut next = settings();
     if !next.desktop_widget {
-        desktop.close();
+        close_normal_window(desktop, status, next.language);
         return;
     }
 
@@ -647,17 +708,39 @@ fn handle_window_close(
     next = next.normalized();
     match storage::save_settings(&next) {
         Ok(()) => {
+            let language = next.language;
+            let widget_topmost = next.desktop_widget_topmost;
             settings.set(next);
-            apply_window_mode(desktop, false, next.desktop_widget_topmost);
+            apply_window_mode(desktop, false, widget_topmost);
             apply_window_opacity(desktop, DEFAULT_BACKGROUND_OPACITY);
             show_desktop_window(desktop);
-            status.set(i18n::tr(next.language).settings_saved.to_string());
+            status.set(i18n::tr(language).settings_saved.to_string());
         }
         Err(error) => status.set(match next.language {
             AppLanguage::Chinese => format!("设置保存失败：{error}"),
             AppLanguage::English => format!("Failed to save settings: {error}"),
         }),
     }
+}
+
+#[cfg(windows)]
+fn close_normal_window(desktop: &DesktopContext, _status: Signal<String>, _language: AppLanguage) {
+    desktop.close();
+}
+
+#[cfg(not(windows))]
+fn close_normal_window(
+    desktop: &DesktopContext,
+    mut status: Signal<String>,
+    language: AppLanguage,
+) {
+    desktop.set_minimized(true);
+    status.set(match language {
+        AppLanguage::Chinese => "窗口已最小化；如果托盘可用，也可从托盘恢复".to_string(),
+        AppLanguage::English => {
+            "Window minimized; restore it from the dock/taskbar or tray if available".to_string()
+        }
+    });
 }
 
 fn open_desktop_widget(
@@ -689,10 +772,13 @@ fn open_desktop_widget(
     next = next.normalized();
     match storage::save_settings(&next) {
         Ok(()) => {
+            let language = next.language;
+            let widget_topmost = next.desktop_widget_topmost;
+            let background_opacity = next.background_opacity;
             settings.set(next);
-            apply_window_mode(desktop, true, next.desktop_widget_topmost);
-            apply_window_opacity(desktop, next.background_opacity);
-            status.set(i18n::tr(next.language).settings_saved.to_string());
+            apply_window_mode(desktop, true, widget_topmost);
+            apply_window_opacity(desktop, background_opacity);
+            status.set(i18n::tr(language).settings_saved.to_string());
         }
         Err(error) => status.set(match next.language {
             AppLanguage::Chinese => format!("设置保存失败：{error}"),
@@ -713,10 +799,13 @@ fn handle_widget_topmost_change(
 
     match storage::save_settings(&next) {
         Ok(()) => {
+            let widget_mode = next.desktop_widget;
+            let widget_topmost = next.desktop_widget_topmost;
+            let background_opacity = next.background_opacity;
             settings.set(next);
-            apply_window_mode(desktop, next.desktop_widget, next.desktop_widget_topmost);
-            let opacity = if next.desktop_widget {
-                next.background_opacity
+            apply_window_mode(desktop, widget_mode, widget_topmost);
+            let opacity = if widget_mode {
+                background_opacity
             } else {
                 DEFAULT_BACKGROUND_OPACITY
             };

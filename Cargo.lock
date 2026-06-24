@@ -4798,6 +4798,7 @@ dependencies = [
  "futures-channel",
  "futures-timer",
  "futures-util",
+ "global-hotkey",
  "image",
  "rfd",
  "rusqlite",

@@ -309,6 +309,7 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
                 "desktop_widget" => settings.desktop_widget = parse_bool(&value),
                 "desktop_widget_topmost" => settings.desktop_widget_topmost = parse_bool(&value),
                 "keyboard_shortcuts" => settings.keyboard_shortcuts = parse_bool(&value),
+                "global_show_shortcut" => settings.global_show_shortcut = value,
                 "auto_focus_history" => settings.auto_focus_history = parse_bool(&value),
                 "promote_copied_entries" => settings.promote_copied_entries = parse_bool(&value),
                 "quick_paste" => settings.quick_paste = parse_bool(&value),
@@ -350,6 +351,10 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
             (
                 "keyboard_shortcuts",
                 settings.keyboard_shortcuts.to_string(),
+            ),
+            (
+                "global_show_shortcut",
+                settings.global_show_shortcut.clone(),
             ),
             (
                 "auto_focus_history",
@@ -813,6 +818,7 @@ mod tests {
             desktop_widget: false,
             desktop_widget_topmost: false,
             keyboard_shortcuts: false,
+            global_show_shortcut: "Ctrl+Alt+Space".to_string(),
             auto_focus_history: false,
             promote_copied_entries: false,
             quick_paste: true,

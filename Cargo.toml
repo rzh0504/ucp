@@ -13,6 +13,7 @@ dioxus-primitives = { path = "vendor/dioxus-primitives", default-features = fals
 futures-channel = "0.3"
 futures-timer = "3"
 futures-util = "0.3"
+global-hotkey = "0.7"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = { version = "0.17", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
