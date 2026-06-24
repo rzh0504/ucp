@@ -59,11 +59,18 @@ jobs:
         shell: pwsh
         run: choco install nsis -y --no-progress
 
+      - name: Configure MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version "${{ env.DIOXUS_CLI_VERSION }}" --locked
+        run: cargo install dioxus-cli --version "${{ env.DIOXUS_CLI_VERSION }}" --locked --force
+
+      - name: Show Dioxus CLI version
+        run: dx --version
 
       - name: Build installer
-        run: dx bundle --platform desktop --release --package-types ${{ matrix.package_type }}
+        run: dx bundle --desktop --release --package-types ${{ matrix.package_type }}
 
       - name: Collect installer artifacts
         shell: pwsh
