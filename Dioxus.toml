@@ -22,6 +22,7 @@ script = []
 identifier = "dev.ucp.clipboard"
 publisher = "UCP"
 icon = [
+    "assets/icons/app.icns",
     "assets/icons/app.ico",
     "assets/icons/app-256x256.ico",
     "assets/icons/app-128x128.ico",
