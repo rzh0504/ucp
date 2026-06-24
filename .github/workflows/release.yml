@@ -94,7 +94,7 @@ jobs:
             if ($installerExtensions -contains $_.Extension) {
               $true
             } elseif ($_.Extension -ieq ".exe") {
-              $_.FullName -match "[\\/](dist|bundle|nsis|msi)[\\/]" -or $_.BaseName -match "(?i)(setup|installer|install)"
+              $_.BaseName -match "(?i)(setup|installer|install)"
             } else {
               $false
             }
