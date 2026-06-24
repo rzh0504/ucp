@@ -7,6 +7,7 @@ use crate::model::{
 use crate::platform;
 use crate::storage;
 use chrono::{Duration as ChronoDuration, Local};
+use dioxus::html::{Code, Key};
 use dioxus::prelude::*;
 use dioxus_primitives::combobox::{
     Combobox, ComboboxInput, ComboboxItemIndicator, ComboboxList, ComboboxOption,
@@ -333,11 +334,126 @@ fn ShortcutInputRow(
                 value,
                 placeholder,
                 aria_label: label,
+                readonly: true,
                 spellcheck: "false",
-                onchange: move |event| on_commit.call(event.value()),
+                onkeydown: move |event| {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    let data = event.data();
+                    if let Some(shortcut) = recorded_shortcut(data.key(), data.code(), data.modifiers().ctrl(), data.modifiers().alt(), data.modifiers().shift(), data.modifiers().meta()) {
+                        on_commit.call(shortcut);
+                    }
+                },
             }
         }
     }
+}
+
+fn recorded_shortcut(
+    key: Key,
+    code: Code,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    meta: bool,
+) -> Option<String> {
+    if !ctrl && !alt && !shift && !meta {
+        return None;
+    }
+
+    if is_modifier_key(&key) || code == Code::Unidentified {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    if ctrl {
+        parts.push("Ctrl".to_string());
+    }
+    if alt {
+        parts.push("Alt".to_string());
+    }
+    if shift {
+        parts.push("Shift".to_string());
+    }
+    if meta {
+        parts.push("Super".to_string());
+    }
+    parts.push(shortcut_key_label(&code));
+
+    Some(parts.join("+"))
+}
+
+fn shortcut_key_label(code: &Code) -> String {
+    let label = match code {
+        Code::Backquote => "`",
+        Code::Backslash => "\\",
+        Code::BracketLeft => "[",
+        Code::BracketRight => "]",
+        Code::Comma => ",",
+        Code::Digit0 => "0",
+        Code::Digit1 => "1",
+        Code::Digit2 => "2",
+        Code::Digit3 => "3",
+        Code::Digit4 => "4",
+        Code::Digit5 => "5",
+        Code::Digit6 => "6",
+        Code::Digit7 => "7",
+        Code::Digit8 => "8",
+        Code::Digit9 => "9",
+        Code::Equal => "=",
+        Code::KeyA => "A",
+        Code::KeyB => "B",
+        Code::KeyC => "C",
+        Code::KeyD => "D",
+        Code::KeyE => "E",
+        Code::KeyF => "F",
+        Code::KeyG => "G",
+        Code::KeyH => "H",
+        Code::KeyI => "I",
+        Code::KeyJ => "J",
+        Code::KeyK => "K",
+        Code::KeyL => "L",
+        Code::KeyM => "M",
+        Code::KeyN => "N",
+        Code::KeyO => "O",
+        Code::KeyP => "P",
+        Code::KeyQ => "Q",
+        Code::KeyR => "R",
+        Code::KeyS => "S",
+        Code::KeyT => "T",
+        Code::KeyU => "U",
+        Code::KeyV => "V",
+        Code::KeyW => "W",
+        Code::KeyX => "X",
+        Code::KeyY => "Y",
+        Code::KeyZ => "Z",
+        Code::Minus => "-",
+        Code::Period => ".",
+        Code::Quote => "'",
+        Code::Semicolon => ";",
+        Code::Slash => "/",
+        _ => return code.to_string(),
+    };
+
+    label.to_string()
+}
+
+fn is_modifier_key(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::Alt
+            | Key::AltGraph
+            | Key::Control
+            | Key::Fn
+            | Key::FnLock
+            | Key::Meta
+            | Key::Shift
+            | Key::Super
+            | Key::Hyper
+            | Key::CapsLock
+            | Key::NumLock
+            | Key::ScrollLock
+    )
 }
 
 #[component]

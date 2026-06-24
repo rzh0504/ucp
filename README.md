@@ -15,7 +15,7 @@ Cross-platform desktop clipboard history app built with Dioxus 0.7. Windows is t
 
 ## Shortcuts
 
-- `Ctrl+Shift+V`: Default global shortcut to show and focus UCP Clipboard. This can be changed in settings.
+- `Ctrl+Shift+V`: Default global shortcut to show and focus UCP Clipboard. This can be changed in settings by clicking the shortcut field and pressing a new key combination.
 - `Ctrl+F`: Focus search.
 - `Ctrl+,`: Toggle settings.
 - `Ctrl+1` to `Ctrl+5`: Switch filters.
@@ -28,7 +28,7 @@ Cross-platform desktop clipboard history app built with Dioxus 0.7. Windows is t
 - `P`: Toggle pin on the focused entry.
 - `Escape`: Clear selection, clear search, or close settings.
 
-In-app keyboard shortcuts can be disabled in settings. If the global shortcut is invalid or already used by another app, UCP shows a status message and keeps running.
+In-app keyboard shortcuts can be disabled in settings. The global shortcut is recorded automatically from key presses; if it is invalid or already used by another app, UCP shows a status message and keeps running.
 
 ## Platform Notes
 
