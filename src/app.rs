@@ -841,6 +841,7 @@ fn restore_desktop_window(desktop: &DesktopContext) {
 fn apply_window_mode(desktop: &DesktopContext, widget_mode: bool, widget_topmost: bool) {
     desktop.set_maximized(false);
     desktop.set_always_on_top(widget_mode && widget_topmost);
+    desktop.set_visible_on_all_workspaces(widget_mode);
     desktop.set_resizable(!widget_mode);
     desktop.set_maximizable(!widget_mode);
     set_skip_taskbar(desktop, widget_mode);
@@ -890,7 +891,14 @@ fn set_skip_taskbar(desktop: &DesktopContext, skip: bool) {
     let _ = desktop.window.set_skip_taskbar(skip);
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn set_skip_taskbar(desktop: &DesktopContext, skip: bool) {
+    use dioxus::desktop::tao::platform::unix::WindowExtUnix;
+
+    let _ = desktop.window.set_skip_taskbar(skip);
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
 fn set_skip_taskbar(_desktop: &DesktopContext, _skip: bool) {}
 
 fn filter_shortcut(key: &Key) -> Option<ClipboardFilter> {
