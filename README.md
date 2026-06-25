@@ -8,6 +8,13 @@
 
 基于 Dioxus 0.7 的跨平台桌面剪贴板历史应用。Windows 是主要验证目标；macOS 和 Linux 已尽量补齐支持，但在真实设备和发布包验证完成前仍属于实验支持。
 
+## 界面预览
+
+<p align="center">
+  <img src="assets/screeshots/ucp1.png" alt="UCP Clipboard 主窗口" height="420">
+  <img src="assets/screeshots/ucp2.png" alt="UCP Clipboard 小组件模式" height="420">
+</p>
+
 ## 功能
 
 - 捕获文本、图片和文件剪贴板记录。
