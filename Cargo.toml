@@ -2,7 +2,8 @@
 name = "ucp"
 version = "0.1.1"
 edition = "2024"
-description = "A Windows-first desktop clipboard history app built with Dioxus."
+description = "A desktop clipboard history app built with Dioxus."
+license = "MIT"
 
 [dependencies]
 arboard = "3"

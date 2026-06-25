@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icons/Ucp.png" alt="UCP Clipboard app icon" width="96" height="96">
+</p>
+
 # UCP Clipboard
 
 [简体中文](README.md)
@@ -110,3 +114,7 @@ $XDG_DATA_HOME/UCP Clipboard/history.ucp
 ```
 
 If `$XDG_DATA_HOME` is unset on Linux, UCP falls back to `~/.local/share/UCP Clipboard/history.ucp`. If platform-specific environment variables are unavailable, it falls back to the current directory.
+
+## License
+
+This project is open source under the [MIT License](LICENSE).
