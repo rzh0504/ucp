@@ -1,7 +1,7 @@
 const APP_RUN_VALUE: &str = "UCP Clipboard";
 
 #[cfg(windows)]
-const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(target_os = "macos")]
 const LAUNCH_AGENT_LABEL: &str = "dev.ucp.clipboard";
 #[cfg(target_os = "linux")]
@@ -13,58 +13,81 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
 
 #[cfg(windows)]
 fn enable() -> Result<(), String> {
-    use std::process::Command;
+    use windows_sys::Win32::System::Registry::{REG_SZ, RegSetValueExW};
 
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let command = format!("\"{}\"", executable.display());
-    let output = Command::new("reg")
-        .args(["add", RUN_KEY, "/v", APP_RUN_VALUE, "/t", "REG_SZ", "/d"])
-        .arg(command)
-        .arg("/f")
-        .output()
-        .map_err(|error| error.to_string())?;
+    let value_name = wide_null(APP_RUN_VALUE);
+    let command = wide_null(&command);
+    let key = open_run_key()?;
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
-    }
+    let result = unsafe {
+        RegSetValueExW(
+            key.0,
+            value_name.as_ptr(),
+            0,
+            REG_SZ,
+            command.as_ptr().cast::<u8>(),
+            (command.len() * std::mem::size_of::<u16>()) as u32,
+        )
+    };
+
+    win32_result(result)
 }
 
 #[cfg(windows)]
 fn disable() -> Result<(), String> {
-    use std::process::Command;
+    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    use windows_sys::Win32::System::Registry::RegDeleteValueW;
 
-    let output = Command::new("reg")
-        .args(["delete", RUN_KEY, "/v", APP_RUN_VALUE, "/f"])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let value_name = wide_null(APP_RUN_VALUE);
+    let key = open_run_key()?;
+    let result = unsafe { RegDeleteValueW(key.0, value_name.as_ptr()) };
 
-    if output.status.success() || registry_value_was_missing(&output) {
+    if result == ERROR_FILE_NOT_FOUND {
         Ok(())
     } else {
-        Err(command_error(&output))
+        win32_result(result)
     }
 }
 
 #[cfg(windows)]
-fn registry_value_was_missing(output: &std::process::Output) -> bool {
-    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-    stderr.contains("unable to find")
-        || stderr.contains("cannot find")
-        || stdout.contains("unable to find")
-        || stdout.contains("cannot find")
+struct RegistryKey(windows_sys::Win32::System::Registry::HKEY);
+
+#[cfg(windows)]
+impl Drop for RegistryKey {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::System::Registry::RegCloseKey(self.0);
+        }
+    }
 }
 
 #[cfg(windows)]
-fn command_error(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
+fn open_run_key() -> Result<RegistryKey, String> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCreateKeyW};
+
+    let run_key = wide_null(RUN_KEY);
+    let mut key: HKEY = null_mut();
+    let result = unsafe { RegCreateKeyW(HKEY_CURRENT_USER, run_key.as_ptr(), &mut key) };
+    win32_result(result).map(|()| RegistryKey(key))
+}
+
+#[cfg(windows)]
+fn win32_result(code: windows_sys::Win32::Foundation::WIN32_ERROR) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+
+    if code == ERROR_SUCCESS {
+        Ok(())
     } else {
-        stderr
+        Err(std::io::Error::from_raw_os_error(code as i32).to_string())
     }
+}
+
+#[cfg(windows)]
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 #[cfg(target_os = "macos")]

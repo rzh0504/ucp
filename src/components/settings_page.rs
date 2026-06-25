@@ -25,9 +25,13 @@ pub fn SettingsPage(
     history: Signal<ClipboardHistory>,
     status: Signal<String>,
 ) -> Element {
+    let startup_pending = use_signal(|| None::<bool>);
     let settings_snapshot = settings();
     let language = settings_snapshot.language;
     let copy = i18n::tr(language);
+    let startup_pending_value = startup_pending();
+    let startup_checked = startup_pending_value.unwrap_or(settings_snapshot.launch_at_startup);
+    let startup_disabled = startup_pending_value.is_some();
     let header_class = if widget_mode {
         "list-header settings-header is-widget"
     } else {
@@ -124,20 +128,20 @@ pub fn SettingsPage(
                     SettingSwitchRow {
                         label: copy.launch_at_startup,
                         hint: copy.launch_at_startup_hint,
-                        checked: settings_snapshot.launch_at_startup,
+                        checked: startup_checked,
+                        disabled: startup_disabled,
                         on_change: move |checked| {
-                            match platform::startup::set_enabled(checked) {
-                                Ok(()) => {
-                                    update_settings(settings, status, |next| next.launch_at_startup = checked);
-                                }
-                                Err(error) => {
-                                    let mut status = status;
-                                    status.set(match language {
-                                        AppLanguage::Chinese => format!("开机启动设置失败：{error}"),
-                                        AppLanguage::English => format!("Failed to update startup setting: {error}"),
-                                    });
-                                }
+                            if startup_pending.peek().is_some() {
+                                return;
                             }
+
+                            update_startup_setting(
+                                checked,
+                                language,
+                                settings,
+                                status,
+                                startup_pending,
+                            );
                         },
                     }
                 }
@@ -295,6 +299,7 @@ fn SettingSwitchRow(
     label: &'static str,
     hint: &'static str,
     checked: bool,
+    #[props(default = false)] disabled: bool,
     on_change: EventHandler<bool>,
 ) -> Element {
     rsx! {
@@ -306,6 +311,7 @@ fn SettingSwitchRow(
             Switch {
                 class: "settings-switch",
                 checked,
+                disabled,
                 aria_label: label,
                 on_checked_change: move |value| on_change.call(value),
                 SwitchThumb { class: "settings-switch-thumb" }
@@ -599,6 +605,44 @@ fn OpacitySliderRow(
             }
         }
     }
+}
+
+fn update_startup_setting(
+    checked: bool,
+    language: AppLanguage,
+    settings: Signal<AppSettings>,
+    mut status: Signal<String>,
+    mut startup_pending: Signal<Option<bool>>,
+) {
+    startup_pending.set(Some(checked));
+    status.set(match language {
+        AppLanguage::Chinese => "正在更新开机启动设置...".to_string(),
+        AppLanguage::English => "Updating startup setting...".to_string(),
+    });
+
+    let (sender, receiver) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(platform::startup::set_enabled(checked));
+    });
+
+    spawn(async move {
+        let result = receiver
+            .await
+            .unwrap_or_else(|_| Err("startup setting task was cancelled".to_string()));
+        startup_pending.set(None);
+
+        match result {
+            Ok(()) => {
+                update_settings(settings, status, |next| next.launch_at_startup = checked);
+            }
+            Err(error) => {
+                status.set(match language {
+                    AppLanguage::Chinese => format!("开机启动设置失败：{error}"),
+                    AppLanguage::English => format!("Failed to update startup setting: {error}"),
+                });
+            }
+        }
+    });
 }
 
 fn update_settings_in_memory(

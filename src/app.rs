@@ -753,7 +753,6 @@ fn open_desktop_widget(
     let mut next = settings();
     let language = next.language;
 
-    show_desktop_window(desktop);
     status.set(match language {
         AppLanguage::Chinese => "正在打开桌面小组件...".to_string(),
         AppLanguage::English => "Opening desktop widget...".to_string(),
@@ -765,6 +764,7 @@ fn open_desktop_widget(
     if next.desktop_widget {
         apply_window_mode(desktop, true, next.desktop_widget_topmost);
         apply_window_opacity(desktop, next.background_opacity);
+        show_desktop_window(desktop);
         return;
     }
 
@@ -778,12 +778,16 @@ fn open_desktop_widget(
             settings.set(next);
             apply_window_mode(desktop, true, widget_topmost);
             apply_window_opacity(desktop, background_opacity);
+            show_desktop_window(desktop);
             status.set(i18n::tr(language).settings_saved.to_string());
         }
-        Err(error) => status.set(match next.language {
-            AppLanguage::Chinese => format!("设置保存失败：{error}"),
-            AppLanguage::English => format!("Failed to save settings: {error}"),
-        }),
+        Err(error) => {
+            show_desktop_window(desktop);
+            status.set(match next.language {
+                AppLanguage::Chinese => format!("设置保存失败：{error}"),
+                AppLanguage::English => format!("Failed to save settings: {error}"),
+            });
+        }
     }
 }
 
