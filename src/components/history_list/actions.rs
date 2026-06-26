@@ -15,6 +15,7 @@ const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
 pub(super) fn copy_entry(
     id: u64,
     mut history: Signal<ClipboardHistory>,
+    mut ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     promote_on_copy: bool,
     mut status: Signal<String>,
     language: AppLanguage,
@@ -42,6 +43,10 @@ pub(super) fn copy_entry(
     if let Err(error) = platform::clipboard::write_content(&content) {
         status.set(copy_failed(language, &error.to_string()));
         return false;
+    }
+
+    if !promote_on_copy {
+        ignored_clipboard_write.set(Some(content.clone()));
     }
 
     let copied_to_clipboard = i18n::tr(language).copied_to_clipboard;

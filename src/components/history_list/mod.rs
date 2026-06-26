@@ -12,7 +12,9 @@ use self::selection::{focus_index, focused_entry_id, move_focus};
 use super::filter_tabs::FilterTabs;
 use super::icons::{AppIcon, Icon};
 use crate::i18n;
-use crate::model::{AppLanguage, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts};
+use crate::model::{
+    AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
+};
 use dioxus::desktop::use_window;
 use dioxus::html::Key;
 use dioxus::prelude::*;
@@ -24,6 +26,7 @@ use dioxus_primitives::toolbar::{Toolbar, ToolbarButton};
 pub fn HistoryList(
     entries: Vec<ClipboardEntry>,
     history: Signal<ClipboardHistory>,
+    ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     query: String,
     active_filter: Signal<ClipboardFilter>,
     counts: HistoryCounts,
@@ -184,12 +187,12 @@ pub fn HistoryList(
                                         .any(|entry| entry.id == id && entry.is_text());
 
                                 if should_quick_paste {
-                                    if copy_entry(id, history, promote_on_copy, status, language) {
+                                    if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language) {
                                         paste_window.set_minimized(true);
                                         run_quick_paste_shortcut(status, language);
                                     }
                                 } else {
-                                    copy_entry(id, history, promote_on_copy, status, language);
+                                    copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language);
                                 }
                             }
                         }
@@ -251,6 +254,7 @@ pub fn HistoryList(
                             index: index + 1,
                             entry_ids: entry_ids.clone(),
                             history,
+                            ignored_clipboard_write,
                             selected_ids,
                             selection_anchor_id,
                             focused_id,

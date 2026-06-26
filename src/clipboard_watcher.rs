@@ -25,6 +25,7 @@ pub(crate) async fn watch_clipboard(
     history: Signal<ClipboardHistory>,
     settings: Signal<AppSettings>,
     mut status: Signal<String>,
+    ignored_clipboard_write: Signal<Option<ClipboardContent>>,
 ) {
     use futures_util::StreamExt;
 
@@ -42,14 +43,14 @@ pub(crate) async fn watch_clipboard(
                     format!("Clipboard event listener failed; switched to polling: {error}")
                 }
             });
-            poll_clipboard(history, settings, status).await;
+            poll_clipboard(history, settings, status, ignored_clipboard_write).await;
             return;
         }
     };
 
-    capture_clipboard(history, settings, status).await;
+    capture_clipboard(history, settings, status, ignored_clipboard_write).await;
     while updates_rx.next().await.is_some() {
-        capture_clipboard(history, settings, status).await;
+        capture_clipboard(history, settings, status, ignored_clipboard_write).await;
     }
 }
 
@@ -57,6 +58,7 @@ async fn poll_clipboard(
     history: Signal<ClipboardHistory>,
     settings: Signal<AppSettings>,
     status: Signal<String>,
+    ignored_clipboard_write: Signal<Option<ClipboardContent>>,
 ) {
     let mut last_sequence = None;
 
@@ -67,7 +69,7 @@ async fn poll_clipboard(
             continue;
         }
 
-        capture_clipboard(history, settings, status).await;
+        capture_clipboard(history, settings, status, ignored_clipboard_write).await;
 
         if sequence.is_some() {
             last_sequence = sequence;
@@ -81,10 +83,19 @@ async fn capture_clipboard(
     mut history: Signal<ClipboardHistory>,
     settings: Signal<AppSettings>,
     mut status: Signal<String>,
+    mut ignored_clipboard_write: Signal<Option<ClipboardContent>>,
 ) {
     let language = settings.peek().language;
     match read_clipboard_content(language).await {
         Ok(Some(content)) => {
+            let ignored_content = { ignored_clipboard_write.peek().clone() };
+            if let Some(ignored_content) = ignored_content {
+                ignored_clipboard_write.set(None);
+                if ignored_content == content {
+                    return;
+                }
+            }
+
             if !history.peek().would_push_change(&content) {
                 return;
             }

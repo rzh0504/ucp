@@ -1,7 +1,8 @@
 use crate::components::{AppIcon, AppPage, HistoryList, Icon, SettingsPage, TopBar};
 use crate::i18n;
 use crate::model::{
-    AppLanguage, AppSettings, ClipboardFilter, ClipboardHistory, DEFAULT_BACKGROUND_OPACITY,
+    AppLanguage, AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory,
+    DEFAULT_BACKGROUND_OPACITY,
 };
 use crate::storage;
 use dioxus::desktop::{
@@ -89,6 +90,7 @@ pub fn App() -> Element {
     let search_input = use_signal(|| None::<Rc<MountedData>>);
     let mut shell = use_signal(|| None::<Rc<MountedData>>);
     let status = use_signal(move || initial_status);
+    let ignored_clipboard_write = use_signal(|| None::<ClipboardContent>);
     let mut status_clear_generation = use_signal(|| 0_u64);
     let mut startup_cleanup_done = use_signal(|| false);
     let desktop = use_window();
@@ -234,7 +236,13 @@ pub fn App() -> Element {
     });
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
-        crate::clipboard_watcher::watch_clipboard(history, settings, status).await;
+        crate::clipboard_watcher::watch_clipboard(
+            history,
+            settings,
+            status,
+            ignored_clipboard_write,
+        )
+        .await;
     });
 
     use_effect(move || {
@@ -383,6 +391,7 @@ pub fn App() -> Element {
                     HistoryList {
                         entries: snapshot_entries,
                         history,
+                        ignored_clipboard_write,
                         query: query_snapshot,
                         active_filter,
                         counts: counts_snapshot,

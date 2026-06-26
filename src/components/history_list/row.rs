@@ -22,6 +22,7 @@ pub(super) fn HistoryRow(
     index: usize,
     entry_ids: Vec<u64>,
     history: Signal<ClipboardHistory>,
+    ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     mut selected_ids: Signal<Vec<u64>>,
     mut selection_anchor_id: Signal<Option<u64>>,
     mut focused_id: Signal<Option<u64>>,
@@ -122,12 +123,12 @@ pub(super) fn HistoryRow(
                 },
                 ondoubleclick: move |_| {
                     if quick_paste && is_text {
-                        if copy_entry(id, history, promote_on_copy, status, language) {
+                        if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language) {
                             paste_window.set_minimized(true);
                             run_quick_paste_shortcut(status, language);
                         }
                     } else {
-                        copy_entry(id, history, promote_on_copy, status, language);
+                        copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language);
                     }
                 },
                 div { class: "entry-index", "{index}" }
