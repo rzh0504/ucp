@@ -132,20 +132,23 @@
 }
 
 .settings-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     justify-self: end;
-    overflow: hidden;
-    max-width: 320px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid rgba(0, 122, 255, 0.22);
+    border-radius: 9px;
+    background: rgba(0, 122, 255, 0.1);
     color: var(--app-accent);
     font-size: 13px;
-    font-weight: 700;
-    text-align: right;
+    font-weight: 800;
     text-decoration: none;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .settings-link:hover {
-    text-decoration: underline;
+    background: rgba(0, 122, 255, 0.16);
 }
 
 .settings-switch {

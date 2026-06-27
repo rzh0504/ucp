@@ -258,7 +258,6 @@ pub fn SettingsPage(
                     div { class: "setting-row setting-row-control",
                         div { class: "setting-row-copy",
                             span { class: "setting-label", "{copy.app_version}" }
-                            p { "{copy.app_version_hint}" }
                         }
                         strong { "{APP_VERSION}" }
                     }
@@ -273,7 +272,7 @@ pub fn SettingsPage(
                             target: "_blank",
                             rel: "noopener noreferrer",
                             title: REPOSITORY_URL,
-                            "{REPOSITORY_URL}"
+                            "GitHub"
                         }
                     }
                 }
