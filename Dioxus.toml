@@ -39,3 +39,6 @@ long_description = "A Windows-first desktop clipboard history manager built with
 [bundle.windows]
 icon_path = "assets/icons/app.ico"
 webview_install_mode = "Skip"
+
+[bundle.windows.nsis]
+installer_hooks = "installer/windows/nsis-hooks.nsh"

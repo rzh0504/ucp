@@ -131,6 +131,23 @@
     white-space: nowrap;
 }
 
+.settings-link {
+    justify-self: end;
+    overflow: hidden;
+    max-width: 320px;
+    color: var(--app-accent);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: right;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-link:hover {
+    text-decoration: underline;
+}
+
 .settings-switch {
     position: relative;
     justify-self: end;

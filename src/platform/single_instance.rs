@@ -5,6 +5,13 @@ const ACTIVATION_ENDPOINT: &str = "127.0.0.1:49731";
 
 #[cfg(windows)]
 static ACTIVATION_REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(windows)]
+static QUIT_REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(windows)]
+const SHOW_REQUEST: u8 = 1;
+#[cfg(windows)]
+const QUIT_REQUEST: u8 = 2;
 
 #[cfg(windows)]
 pub enum SingleInstance {
@@ -50,14 +57,22 @@ pub fn acquire() -> SingleInstance {
 
 #[cfg(windows)]
 pub fn start_activation_listener() {
+    use std::io::Read as _;
+
     std::thread::spawn(|| {
         let Ok(listener) = std::net::TcpListener::bind(ACTIVATION_ENDPOINT) else {
             return;
         };
 
         for stream in listener.incoming() {
-            if stream.is_ok() {
-                ACTIVATION_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
+            if let Ok(mut stream) = stream {
+                let mut request = [SHOW_REQUEST];
+                let _ = stream.read(&mut request);
+                if request[0] == QUIT_REQUEST {
+                    QUIT_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
+                } else {
+                    ACTIVATION_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
+                }
             }
         }
     });
@@ -65,12 +80,22 @@ pub fn start_activation_listener() {
 
 #[cfg(windows)]
 pub fn notify_existing_instance() {
+    send_activation_request(SHOW_REQUEST);
+}
+
+#[cfg(windows)]
+pub fn notify_existing_instance_to_quit() {
+    send_activation_request(QUIT_REQUEST);
+}
+
+#[cfg(windows)]
+fn send_activation_request(request: u8) {
     use std::io::Write as _;
     use std::time::Duration;
 
     for _ in 0..5 {
         if let Ok(mut stream) = std::net::TcpStream::connect(ACTIVATION_ENDPOINT) {
-            let _ = stream.write_all(&[1]);
+            let _ = stream.write_all(&[request]);
             return;
         }
 
@@ -81,6 +106,11 @@ pub fn notify_existing_instance() {
 #[cfg(windows)]
 pub fn activation_count() -> u64 {
     ACTIVATION_REQUESTS.load(std::sync::atomic::Ordering::Acquire)
+}
+
+#[cfg(windows)]
+pub fn quit_count() -> u64 {
+    QUIT_REQUESTS.load(std::sync::atomic::Ordering::Acquire)
 }
 
 #[cfg(windows)]

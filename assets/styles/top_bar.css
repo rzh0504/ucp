@@ -155,6 +155,12 @@
     color: #ffffff;
 }
 
+.shell[data-suppress-window-hover="true"] .window-controls.is-windows .window-dot.is-close:hover {
+    background: transparent;
+    box-shadow: none;
+    color: var(--app-muted);
+}
+
 .window-controls.is-windows .window-icon-control .app-icon {
     width: 15px;
     height: 15px;

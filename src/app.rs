@@ -93,6 +93,7 @@ pub fn App() -> Element {
     let ignored_clipboard_write = use_signal(|| None::<ClipboardContent>);
     let mut status_clear_generation = use_signal(|| 0_u64);
     let mut startup_cleanup_done = use_signal(|| false);
+    let mut suppress_window_control_hover = use_signal(|| false);
     let desktop = use_window();
     let mut global_shortcut_handle = use_signal(|| None::<ShortcutHandle>);
     let mut applied_global_shortcut = use_signal(String::new);
@@ -106,8 +107,16 @@ pub fn App() -> Element {
             spawn(async move {
                 let mut last_activation_count =
                     crate::platform::single_instance::activation_count();
+                let last_quit_count = crate::platform::single_instance::quit_count();
                 loop {
                     Delay::new(Duration::from_millis(200)).await;
+                    let quit_count = crate::platform::single_instance::quit_count();
+                    if quit_count != last_quit_count {
+                        desktop.set_close_behavior(WindowCloseBehaviour::WindowCloses);
+                        desktop.close();
+                        return;
+                    }
+
                     let activation_count = crate::platform::single_instance::activation_count();
                     if activation_count != last_activation_count {
                         last_activation_count = activation_count;
@@ -303,6 +312,7 @@ pub fn App() -> Element {
         main {
             class: "shell",
             "data-theme": theme,
+            "data-suppress-window-hover": if suppress_window_control_hover() { "true" } else { "false" },
             style: "{shell_style}",
             tabindex: "-1",
             onmounted: move |event| {
@@ -311,6 +321,11 @@ pub fn App() -> Element {
                 spawn(async move {
                     let _ = element.set_focus(true).await;
                 });
+            },
+            onmousemove: move |_| {
+                if suppress_window_control_hover() {
+                    suppress_window_control_hover.set(false);
+                }
             },
             onkeydown: move |event| {
                 let data = event.data();
@@ -375,7 +390,10 @@ pub fn App() -> Element {
                 on_topmost_change: move |topmost| {
                     handle_widget_topmost_change(&topmost_desktop, settings, status, topmost);
                 },
-                on_close: move |_| handle_window_close(&close_desktop, settings, status),
+                on_close: move |_| {
+                    suppress_window_control_hover.set(true);
+                    handle_window_close(&close_desktop, settings, status);
+                },
             }
             section { class: "content-panel",
                 if active_page() == AppPage::Settings {

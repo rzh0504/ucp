@@ -16,6 +16,9 @@ use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::switch::{Switch, SwitchThumb};
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const REPOSITORY_URL: &str = "https://github.com/rzh0504/ucp";
+
 #[component]
 pub fn SettingsPage(
     mut active_page: Signal<AppPage>,
@@ -247,6 +250,31 @@ pub fn SettingsPage(
                         on_change: move |checked| {
                             update_settings(settings, status, |next| next.quick_paste = checked);
                         },
+                    }
+                }
+
+                section { class: "settings-group",
+                    h3 { "{copy.about}" }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "{copy.app_version}" }
+                            p { "{copy.app_version_hint}" }
+                        }
+                        strong { "{APP_VERSION}" }
+                    }
+                    div { class: "setting-row setting-row-control",
+                        div { class: "setting-row-copy",
+                            span { class: "setting-label", "{copy.open_source_repository}" }
+                            p { "{copy.open_source_repository_hint}" }
+                        }
+                        a {
+                            class: "settings-link",
+                            href: REPOSITORY_URL,
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            title: REPOSITORY_URL,
+                            "{REPOSITORY_URL}"
+                        }
                     }
                 }
             }

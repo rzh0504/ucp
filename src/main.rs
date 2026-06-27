@@ -23,6 +23,12 @@ fn main() {
         return;
     }
 
+    if std::env::args().any(|argument| argument == "--quit") {
+        #[cfg(windows)]
+        platform::single_instance::notify_existing_instance_to_quit();
+        return;
+    }
+
     #[cfg(windows)]
     let _single_instance = match platform::single_instance::acquire() {
         platform::single_instance::SingleInstance::Primary(guard) => {
