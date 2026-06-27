@@ -1,4 +1,4 @@
-use super::AppPage;
+use super::{AppIcon, AppPage, Icon};
 use crate::i18n;
 use crate::model::{
     AUTO_CLEANUP_DAY_OPTIONS, AppLanguage, AppSettings, AppTheme, ClipboardFilter,
@@ -272,7 +272,8 @@ pub fn SettingsPage(
                             target: "_blank",
                             rel: "noopener noreferrer",
                             title: REPOSITORY_URL,
-                            "GitHub"
+                            aria_label: copy.open_source_repository,
+                            Icon { icon: AppIcon::Github }
                         }
                     }
                 }
