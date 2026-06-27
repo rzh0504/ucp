@@ -25,10 +25,11 @@ pub fn TopBar(
     let minimize_window = window.clone();
     let maximize_window = window.clone();
     let copy = i18n::tr(language);
-    let top_bar_class = if widget_mode {
-        "top-bar is-widget"
-    } else {
-        "top-bar"
+    let top_bar_class = match (widget_mode, active_page() == AppPage::Settings) {
+        (true, true) => "top-bar is-widget is-settings",
+        (true, false) => "top-bar is-widget",
+        (false, true) => "top-bar is-settings",
+        (false, false) => "top-bar",
     };
 
     rsx! {

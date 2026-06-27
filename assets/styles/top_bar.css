@@ -24,6 +24,10 @@
     user-select: none;
 }
 
+.top-bar.is-settings:not(.is-widget) .title-drag-region {
+    grid-column: 1 / 3;
+}
+
 .app-title {
     margin: 0;
     overflow: hidden;
