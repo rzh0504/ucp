@@ -131,13 +131,17 @@
     white-space: nowrap;
 }
 
-.settings-update-control {
+.settings-version-control {
     display: inline-flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
     justify-content: flex-end;
     justify-self: end;
+}
+
+.settings-version-control strong {
+    align-self: center;
 }
 
 .settings-action-button {
@@ -163,6 +167,34 @@
     border-color: rgba(0, 122, 255, 0.22);
     background: rgba(0, 122, 255, 0.12);
     color: var(--app-accent);
+}
+
+.settings-icon-action {
+    width: 34px;
+    min-width: 34px;
+    border: 0;
+    background: transparent;
+    padding: 0;
+}
+
+.settings-icon-action:hover:not(:disabled) {
+    border-color: transparent;
+    background: transparent;
+}
+
+.settings-icon-action .app-icon {
+    width: 17px;
+    height: 17px;
+}
+
+.settings-icon-action.is-loading .app-icon {
+    animation: settings-update-spin 900ms linear infinite;
+}
+
+@keyframes settings-update-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .settings-action-button.is-primary {

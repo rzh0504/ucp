@@ -6,7 +6,9 @@ use std::time::Duration;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/rzh0504/ucp/releases/latest";
+const LATEST_RELEASE_URL: &str = "https://github.com/rzh0504/ucp/releases/latest";
 const RELEASE_ACCEPT: &str = "application/vnd.github+json";
+const RELEASE_TAG_PATH: &str = "/releases/tag/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_USER_AGENT: &str = concat!("ucp/", env!("CARGO_PKG_VERSION"));
 
@@ -37,7 +39,12 @@ struct GithubAsset {
 }
 
 pub fn check_for_updates() -> Result<UpdateCheck, String> {
-    let release = fetch_latest_release()?;
+    let client = update_client()?;
+    let release = fetch_latest_release(&client).or_else(|api_error| {
+        fetch_latest_release_from_redirect(&client).map_err(|fallback_error| {
+            format!("{api_error}; fallback release check failed: {fallback_error}")
+        })
+    })?;
     let current_version = parse_release_version(APP_VERSION)?;
     let latest_version = parse_release_version(&release.tag_name)?;
 
@@ -59,12 +66,14 @@ pub fn check_for_updates() -> Result<UpdateCheck, String> {
     }))
 }
 
-fn fetch_latest_release() -> Result<GithubRelease, String> {
-    let client = Client::builder()
+fn update_client() -> Result<Client, String> {
+    Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .map_err(|error| format!("failed to create update client: {error}"))?;
+        .map_err(|error| format!("failed to create update client: {error}"))
+}
 
+fn fetch_latest_release(client: &Client) -> Result<GithubRelease, String> {
     client
         .get(LATEST_RELEASE_API)
         .header(USER_AGENT, REQUEST_USER_AGENT)
@@ -74,6 +83,31 @@ fn fetch_latest_release() -> Result<GithubRelease, String> {
         .map_err(|error| format!("failed to fetch latest release: {error}"))?
         .json::<GithubRelease>()
         .map_err(|error| format!("failed to read latest release: {error}"))
+}
+
+fn fetch_latest_release_from_redirect(client: &Client) -> Result<GithubRelease, String> {
+    let response = client
+        .get(LATEST_RELEASE_URL)
+        .header(USER_AGENT, REQUEST_USER_AGENT)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("failed to fetch latest release page: {error}"))?;
+    let release_url = response.url().to_string();
+    let tag_name = release_tag_from_url(&release_url)
+        .ok_or_else(|| format!("latest release page did not resolve to a tag: {release_url}"))?;
+
+    Ok(GithubRelease {
+        tag_name,
+        html_url: release_url,
+        assets: Vec::new(),
+    })
+}
+
+fn release_tag_from_url(url: &str) -> Option<String> {
+    let (_, tag) = url.split_once(RELEASE_TAG_PATH)?;
+    let tag = tag.split(['?', '#', '/']).next().unwrap_or_default().trim();
+
+    (!tag.is_empty()).then(|| tag.to_string())
 }
 
 fn parse_release_version(version: &str) -> Result<Version, String> {
@@ -149,6 +183,22 @@ mod tests {
         assert_eq!(
             parse_release_version("0.4.5").unwrap(),
             Version::new(0, 4, 5)
+        );
+    }
+
+    #[test]
+    fn extracts_release_tag_from_latest_redirect_url() {
+        assert_eq!(
+            release_tag_from_url("https://github.com/rzh0504/ucp/releases/tag/v0.2.0"),
+            Some("v0.2.0".to_string())
+        );
+        assert_eq!(
+            release_tag_from_url("https://github.com/rzh0504/ucp/releases/tag/v0.2.0?from=latest"),
+            Some("v0.2.0".to_string())
+        );
+        assert_eq!(
+            release_tag_from_url("https://github.com/rzh0504/ucp/releases"),
+            None
         );
     }
 

@@ -96,12 +96,12 @@
 
     .settings-switch,
     .settings-combobox,
-    .settings-update-control,
+    .settings-version-control,
     .settings-range-control {
         justify-self: start;
     }
 
-    .settings-update-control {
+    .settings-version-control {
         justify-content: flex-start;
     }
 

@@ -28,8 +28,6 @@ pub struct Translations {
     pub quick_paste: &'static str,
     pub quick_paste_hint: &'static str,
     pub about: &'static str,
-    pub check_updates: &'static str,
-    pub check_updates_hint: &'static str,
     pub check_updates_button: &'static str,
     pub check_updates_again: &'static str,
     pub checking_updates: &'static str,
@@ -136,8 +134,6 @@ static ZH: Translations = Translations {
     quick_paste: "快捷粘贴",
     quick_paste_hint: "双击或按 Enter 使用文本记录时，复制后自动粘贴到当前光标位置。",
     about: "关于",
-    check_updates: "检查更新",
-    check_updates_hint: "检查 GitHub Releases 是否有新版本发布。",
     check_updates_button: "检查更新",
     check_updates_again: "重新检查",
     checking_updates: "正在检查更新...",
@@ -244,8 +240,6 @@ static EN: Translations = Translations {
     quick_paste: "Quick paste",
     quick_paste_hint: "Double-click or press Enter on text records to copy and paste at the current cursor.",
     about: "About",
-    check_updates: "Check for updates",
-    check_updates_hint: "Check GitHub Releases for a newer version.",
     check_updates_button: "Check for updates",
     check_updates_again: "Check again",
     checking_updates: "Checking for updates...",
@@ -404,14 +398,14 @@ pub fn auto_cleanup_label(language: AppLanguage, days: Option<u16>) -> String {
 
 pub fn update_available(language: AppLanguage, version: &str) -> String {
     match language {
-        AppLanguage::Chinese => format!("发现新版本 {version}，可下载安装。"),
+        AppLanguage::Chinese => format!("发现新版本 {version}。"),
         AppLanguage::English => format!("Version {version} is available to download."),
     }
 }
 
 pub fn update_up_to_date(language: AppLanguage, version: &str) -> String {
     match language {
-        AppLanguage::Chinese => format!("已是最新版本 {version}。"),
+        AppLanguage::Chinese => format!("当前是最新版本 {version}。"),
         AppLanguage::English => format!("UCP is up to date at version {version}."),
     }
 }
