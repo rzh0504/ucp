@@ -16,8 +16,11 @@ futures-timer = "3"
 futures-util = "0.3"
 global-hotkey = "0.7"
 image = { version = "0.25", default-features = false, features = ["png"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rfd = { version = "0.17", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]

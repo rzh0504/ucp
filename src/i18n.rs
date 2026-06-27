@@ -28,6 +28,13 @@ pub struct Translations {
     pub quick_paste: &'static str,
     pub quick_paste_hint: &'static str,
     pub about: &'static str,
+    pub check_updates: &'static str,
+    pub check_updates_hint: &'static str,
+    pub check_updates_button: &'static str,
+    pub check_updates_again: &'static str,
+    pub checking_updates: &'static str,
+    pub download_update: &'static str,
+    pub open_release_page: &'static str,
     pub app_version: &'static str,
     pub open_source_repository: &'static str,
     pub open_source_repository_hint: &'static str,
@@ -129,6 +136,13 @@ static ZH: Translations = Translations {
     quick_paste: "快捷粘贴",
     quick_paste_hint: "双击或按 Enter 使用文本记录时，复制后自动粘贴到当前光标位置。",
     about: "关于",
+    check_updates: "检查更新",
+    check_updates_hint: "检查 GitHub Releases 是否有新版本发布。",
+    check_updates_button: "检查更新",
+    check_updates_again: "重新检查",
+    checking_updates: "正在检查更新...",
+    download_update: "下载更新",
+    open_release_page: "查看发布页",
     app_version: "版本",
     open_source_repository: "开源仓库",
     open_source_repository_hint: "本项目基于 MIT License 开源",
@@ -230,6 +244,13 @@ static EN: Translations = Translations {
     quick_paste: "Quick paste",
     quick_paste_hint: "Double-click or press Enter on text records to copy and paste at the current cursor.",
     about: "About",
+    check_updates: "Check for updates",
+    check_updates_hint: "Check GitHub Releases for a newer version.",
+    check_updates_button: "Check for updates",
+    check_updates_again: "Check again",
+    checking_updates: "Checking for updates...",
+    download_update: "Download update",
+    open_release_page: "Open release page",
     app_version: "Version",
     open_source_repository: "Open-source repository",
     open_source_repository_hint: "This project is open source under the MIT License.",
@@ -378,6 +399,27 @@ pub fn auto_cleanup_label(language: AppLanguage, days: Option<u16>) -> String {
         (AppLanguage::English, Some(1)) => "1 day".to_string(),
         (AppLanguage::English, Some(days)) => format!("{days} days"),
         (_, None) => tr(language).no_auto_cleanup.to_string(),
+    }
+}
+
+pub fn update_available(language: AppLanguage, version: &str) -> String {
+    match language {
+        AppLanguage::Chinese => format!("发现新版本 {version}，可下载安装。"),
+        AppLanguage::English => format!("Version {version} is available to download."),
+    }
+}
+
+pub fn update_up_to_date(language: AppLanguage, version: &str) -> String {
+    match language {
+        AppLanguage::Chinese => format!("已是最新版本 {version}。"),
+        AppLanguage::English => format!("UCP is up to date at version {version}."),
+    }
+}
+
+pub fn update_check_failed(language: AppLanguage, error: &str) -> String {
+    match language {
+        AppLanguage::Chinese => format!("检查更新失败：{error}"),
+        AppLanguage::English => format!("Failed to check for updates: {error}"),
     }
 }
 

@@ -7,6 +7,7 @@ mod i18n;
 mod model;
 mod platform;
 mod storage;
+mod updater;
 
 use app::App;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour};

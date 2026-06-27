@@ -64,15 +64,13 @@ pub fn start_activation_listener() {
             return;
         };
 
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                let mut request = [SHOW_REQUEST];
-                let _ = stream.read(&mut request);
-                if request[0] == QUIT_REQUEST {
-                    QUIT_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
-                } else {
-                    ACTIVATION_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
-                }
+        for mut stream in listener.incoming().flatten() {
+            let mut request = [SHOW_REQUEST];
+            let _ = stream.read(&mut request);
+            if request[0] == QUIT_REQUEST {
+                QUIT_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
+            } else {
+                ACTIVATION_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
             }
         }
     });

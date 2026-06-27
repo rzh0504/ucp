@@ -6,6 +6,7 @@ use crate::model::{
 };
 use crate::platform;
 use crate::storage;
+use crate::updater::{self, UpdateCheck, UpdateInfo};
 use chrono::{Duration as ChronoDuration, Local};
 use dioxus::html::{Code, Key};
 use dioxus::prelude::*;
@@ -29,10 +30,12 @@ pub fn SettingsPage(
     status: Signal<String>,
 ) -> Element {
     let startup_pending = use_signal(|| None::<bool>);
+    let update_check = use_signal(|| UpdateCheckState::Idle);
     let settings_snapshot = settings();
     let language = settings_snapshot.language;
     let copy = i18n::tr(language);
     let startup_pending_value = startup_pending();
+    let update_check_snapshot = update_check();
     let startup_checked = startup_pending_value.unwrap_or(settings_snapshot.launch_at_startup);
     let startup_disabled = startup_pending_value.is_some();
     let header_class = if widget_mode {
@@ -255,6 +258,13 @@ pub fn SettingsPage(
 
                 section { class: "settings-group",
                     h3 { "{copy.about}" }
+                    UpdateCheckRow {
+                        language,
+                        state: update_check_snapshot,
+                        on_check: move |_| {
+                            start_update_check(language, status, update_check);
+                        },
+                    }
                     div { class: "setting-row setting-row-control",
                         div { class: "setting-row-copy",
                             span { class: "setting-label", "{copy.app_version}" }
@@ -279,6 +289,85 @@ pub fn SettingsPage(
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum UpdateCheckState {
+    Idle,
+    Checking,
+    UpToDate(String),
+    Available(UpdateInfo),
+    Failed(String),
+}
+
+#[component]
+fn UpdateCheckRow(
+    language: AppLanguage,
+    state: UpdateCheckState,
+    on_check: EventHandler<()>,
+) -> Element {
+    let copy = i18n::tr(language);
+    let checking = matches!(state, UpdateCheckState::Checking);
+    let hint = update_check_hint(language, &state);
+    let button_label = if checking {
+        copy.checking_updates
+    } else if matches!(state, UpdateCheckState::Available(_)) {
+        copy.check_updates_again
+    } else {
+        copy.check_updates_button
+    };
+    let download = match &state {
+        UpdateCheckState::Available(info) => {
+            let label = if info.asset_name.is_some() {
+                copy.download_update
+            } else {
+                copy.open_release_page
+            };
+            Some((info.download_url.clone(), label))
+        }
+        _ => None,
+    };
+
+    rsx! {
+        div { class: "setting-row setting-row-control",
+            div { class: "setting-row-copy",
+                span { class: "setting-label", "{copy.check_updates}" }
+                p { "{hint}" }
+            }
+            div { class: "settings-update-control",
+                button {
+                    class: "settings-action-button",
+                    type: "button",
+                    disabled: checking,
+                    title: button_label,
+                    aria_label: button_label,
+                    onclick: move |_| on_check.call(()),
+                    "{button_label}"
+                }
+                if let Some((download_url, download_label)) = download {
+                    a {
+                        class: "settings-action-button is-primary",
+                        href: "{download_url}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        title: "{download_url}",
+                        aria_label: download_label,
+                        "{download_label}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn update_check_hint(language: AppLanguage, state: &UpdateCheckState) -> String {
+    match state {
+        UpdateCheckState::Idle => i18n::tr(language).check_updates_hint.to_string(),
+        UpdateCheckState::Checking => i18n::tr(language).checking_updates.to_string(),
+        UpdateCheckState::UpToDate(version) => i18n::update_up_to_date(language, version),
+        UpdateCheckState::Available(info) => i18n::update_available(language, &info.version),
+        UpdateCheckState::Failed(error) => i18n::update_check_failed(language, error),
     }
 }
 
@@ -668,6 +757,45 @@ fn update_startup_setting(
                     AppLanguage::Chinese => format!("开机启动设置失败：{error}"),
                     AppLanguage::English => format!("Failed to update startup setting: {error}"),
                 });
+            }
+        }
+    });
+}
+
+fn start_update_check(
+    language: AppLanguage,
+    mut status: Signal<String>,
+    mut update_check: Signal<UpdateCheckState>,
+) {
+    if matches!(&*update_check.peek(), UpdateCheckState::Checking) {
+        return;
+    }
+
+    update_check.set(UpdateCheckState::Checking);
+    status.set(i18n::tr(language).checking_updates.to_string());
+
+    let (sender, receiver) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(updater::check_for_updates());
+    });
+
+    spawn(async move {
+        let result = receiver
+            .await
+            .unwrap_or_else(|_| Err("update check task was cancelled".to_string()));
+
+        match result {
+            Ok(UpdateCheck::Available(info)) => {
+                status.set(i18n::update_available(language, &info.version));
+                update_check.set(UpdateCheckState::Available(info));
+            }
+            Ok(UpdateCheck::UpToDate { latest_version }) => {
+                status.set(i18n::update_up_to_date(language, &latest_version));
+                update_check.set(UpdateCheckState::UpToDate(latest_version));
+            }
+            Err(error) => {
+                status.set(i18n::update_check_failed(language, &error));
+                update_check.set(UpdateCheckState::Failed(error));
             }
         }
     });

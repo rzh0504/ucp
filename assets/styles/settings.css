@@ -131,6 +131,58 @@
     white-space: nowrap;
 }
 
+.settings-update-control {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    justify-self: end;
+}
+
+.settings-action-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--app-separator);
+    border-radius: 9px;
+    background: var(--app-control-bg);
+    color: var(--app-text-secondary);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    text-decoration: none;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    white-space: nowrap;
+}
+
+.settings-action-button:hover:not(:disabled) {
+    border-color: rgba(0, 122, 255, 0.22);
+    background: rgba(0, 122, 255, 0.12);
+    color: var(--app-accent);
+}
+
+.settings-action-button.is-primary {
+    border-color: rgba(0, 122, 255, 0.36);
+    background: var(--app-accent);
+    color: #ffffff;
+}
+
+.settings-action-button.is-primary:hover {
+    border-color: rgba(0, 122, 255, 0.46);
+    background: var(--app-accent);
+    color: #ffffff;
+}
+
+.settings-action-button:disabled {
+    color: var(--app-disabled);
+    cursor: default;
+    opacity: 0.72;
+}
+
 .settings-link {
     display: inline-flex;
     align-items: center;

@@ -96,8 +96,13 @@
 
     .settings-switch,
     .settings-combobox,
+    .settings-update-control,
     .settings-range-control {
         justify-self: start;
+    }
+
+    .settings-update-control {
+        justify-content: flex-start;
     }
 
     .settings-range-control {
