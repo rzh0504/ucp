@@ -100,6 +100,17 @@ pub fn App() -> Element {
     let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
     let mut applied_window_opacity = use_signal(|| None::<u8>);
 
+    let _startup_command_sync = use_hook({
+        let settings = settings;
+        move || {
+            if settings.peek().launch_at_startup {
+                std::thread::spawn(|| {
+                    let _ = crate::platform::startup::set_enabled(true);
+                });
+            }
+        }
+    });
+
     #[cfg(windows)]
     let _activation_task = use_hook({
         let desktop = desktop.clone();

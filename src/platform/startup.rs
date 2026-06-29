@@ -1,4 +1,5 @@
 const APP_RUN_VALUE: &str = "UCP Clipboard";
+pub const SILENT_STARTUP_ARG: &str = "--silent-startup";
 
 #[cfg(windows)]
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -16,7 +17,7 @@ fn enable() -> Result<(), String> {
     use windows_sys::Win32::System::Registry::{REG_SZ, RegSetValueExW};
 
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let command = format!("\"{}\"", executable.display());
+    let command = format!("\"{}\" {SILENT_STARTUP_ARG}", executable.display());
     let value_name = wide_null(APP_RUN_VALUE);
     let command = wide_null(&command);
     let key = open_run_key()?;
@@ -109,6 +110,7 @@ fn enable() -> Result<(), String> {
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
+        <string>{}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -119,6 +121,7 @@ fn enable() -> Result<(), String> {
 "#,
         xml_escape(LAUNCH_AGENT_LABEL),
         xml_escape(&executable.to_string_lossy()),
+        xml_escape(SILENT_STARTUP_ARG),
     );
 
     std::fs::write(path, plist).map_err(|error| error.to_string())
@@ -144,7 +147,7 @@ fn enable() -> Result<(), String> {
          Version=1.0\n\
          Name={APP_RUN_VALUE}\n\
          Comment=Desktop clipboard history manager\n\
-         Exec={}\n\
+         Exec={} {SILENT_STARTUP_ARG}\n\
          Terminal=false\n\
          StartupNotify=false\n\
          X-GNOME-Autostart-enabled=true\n",

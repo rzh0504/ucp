@@ -16,7 +16,12 @@ const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
 const APP_DIR: &str = "UCP Clipboard";
 
 fn main() {
-    if std::env::args().any(|argument| argument == "--compact-storage") {
+    let args: Vec<String> = std::env::args().collect();
+    let silent_startup = args
+        .iter()
+        .any(|argument| argument == platform::startup::SILENT_STARTUP_ARG);
+
+    if args.iter().any(|argument| argument == "--compact-storage") {
         if let Err(error) = storage::compact_database() {
             eprintln!("Failed to compact storage: {error}");
             std::process::exit(1);
@@ -24,7 +29,7 @@ fn main() {
         return;
     }
 
-    if std::env::args().any(|argument| argument == "--quit") {
+    if args.iter().any(|argument| argument == "--quit") {
         #[cfg(windows)]
         platform::single_instance::notify_existing_instance_to_quit();
         return;
@@ -37,7 +42,9 @@ fn main() {
             Some(guard)
         }
         platform::single_instance::SingleInstance::AlreadyRunning => {
-            platform::single_instance::notify_existing_instance();
+            if !silent_startup {
+                platform::single_instance::notify_existing_instance();
+            }
             return;
         }
         platform::single_instance::SingleInstance::Unavailable => None,
@@ -50,6 +57,7 @@ fn main() {
                 .with_window_icon(dioxus::desktop::icon_from_memory(APP_ICON_BYTES).ok())
                 .with_decorations(false)
                 .with_transparent(true)
+                .with_visible(!silent_startup)
                 .with_inner_size(LogicalSize::new(900.0, 660.0))
                 .with_min_inner_size(LogicalSize::new(860.0, 620.0)),
         )

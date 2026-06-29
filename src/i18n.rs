@@ -219,7 +219,7 @@ static EN: Translations = Translations {
     back: "Back",
     system: "System",
     launch_at_startup: "Launch at startup",
-    launch_at_startup_hint: "Start UCP Clipboard automatically after signing in.",
+    launch_at_startup_hint: "Start UCP Clipboard in the background after signing in.",
     desktop_widget: "Desktop widget mode",
     desktop_widget_hint: "Use a fixed-size always-on-top compact window; turn it off to restore the normal window.",
     history_policy: "History policy",
