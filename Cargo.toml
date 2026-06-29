@@ -1,6 +1,6 @@
 [package]
 name = "ucp"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "A desktop clipboard history app built with Dioxus."
 license = "MIT"
