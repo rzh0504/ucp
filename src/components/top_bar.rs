@@ -18,6 +18,7 @@ pub fn TopBar(
     widget_topmost: bool,
     language: AppLanguage,
     on_topmost_change: EventHandler<bool>,
+    on_window_controls_mouseleave: EventHandler<()>,
     on_close: EventHandler<()>,
 ) -> Element {
     let window = use_window();
@@ -55,6 +56,7 @@ pub fn TopBar(
                 },
                 on_topmost_change: move |topmost| on_topmost_change.call(topmost),
                 on_maximize: move |_| maximize_window.toggle_maximized(),
+                on_mouse_leave: move |_| on_window_controls_mouseleave.call(()),
                 on_close: move |_| on_close.call(()),
             }
         }
@@ -69,6 +71,7 @@ fn WindowControls(
     on_minimize: EventHandler<()>,
     on_topmost_change: EventHandler<bool>,
     on_maximize: EventHandler<()>,
+    on_mouse_leave: EventHandler<()>,
     on_close: EventHandler<()>,
 ) -> Element {
     let copy = i18n::tr(language);
@@ -86,6 +89,7 @@ fn WindowControls(
 
     rsx! {
         div { class: controls_class, aria_label: copy.window_controls,
+            onmouseleave: move |_| on_mouse_leave.call(()),
             if widget_mode {
                 button {
                     class: topmost_class,

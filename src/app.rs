@@ -333,11 +333,6 @@ pub fn App() -> Element {
                     let _ = element.set_focus(true).await;
                 });
             },
-            onmousemove: move |_| {
-                if suppress_window_control_hover() {
-                    suppress_window_control_hover.set(false);
-                }
-            },
             onkeydown: move |event| {
                 let data = event.data();
                 let modifiers = data.modifiers();
@@ -400,6 +395,11 @@ pub fn App() -> Element {
                 language,
                 on_topmost_change: move |topmost| {
                     handle_widget_topmost_change(&topmost_desktop, settings, status, topmost);
+                },
+                on_window_controls_mouseleave: move |_| {
+                    if suppress_window_control_hover() {
+                        suppress_window_control_hover.set(false);
+                    }
                 },
                 on_close: move |_| {
                     suppress_window_control_hover.set(true);
