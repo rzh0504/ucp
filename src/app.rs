@@ -428,7 +428,7 @@ pub fn App() -> Element {
                         auto_focus: settings_snapshot.auto_focus_history,
                         promote_on_copy: settings_snapshot.promote_copied_entries,
                         quick_paste: settings_snapshot.quick_paste,
-                        hide_after_copy: settings_snapshot.hide_after_copy,
+                        hide_after_copy: settings_snapshot.hide_after_copy && !settings_snapshot.desktop_widget,
                         show_copy_time: settings_snapshot.show_copy_time,
                         show_text_length: settings_snapshot.show_text_length,
                         language,

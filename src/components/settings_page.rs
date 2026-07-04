@@ -238,6 +238,10 @@ pub fn SettingsPage(
                             update_settings(settings, status, |next| next.auto_focus_history = checked);
                         },
                     }
+                }
+
+                section { class: "settings-group",
+                    h3 { "{copy.copy_behavior}" }
                     SettingSwitchRow {
                         label: copy.promote_copied_entries,
                         hint: copy.promote_copied_entries_hint,
