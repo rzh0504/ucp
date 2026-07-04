@@ -31,10 +31,29 @@
 
 .history-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 68px;
+    grid-template-rows: 1fr;
     border-bottom: 1px solid var(--app-separator);
     background: var(--app-panel-bg);
+    overflow: hidden;
+    transition:
+        grid-template-rows 240ms cubic-bezier(0.65, 0, 0.35, 1),
+        border-color 180ms cubic-bezier(0.7, 0, 0.84, 0),
+        background-color 180ms cubic-bezier(0.7, 0, 0.84, 0);
+}
+
+.history-row-clip {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.history-row-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 68px;
+    transform-origin: center;
+    transition:
+        opacity 160ms cubic-bezier(0.7, 0, 0.84, 0),
+        transform 220ms cubic-bezier(0.7, 0, 0.84, 0);
 }
 
 .history-row-menu,
@@ -57,6 +76,17 @@
 .history-row.is-focused {
     background: var(--app-row-selected);
     box-shadow: inset 3px 0 0 var(--app-accent);
+}
+
+.history-row.is-deleting {
+    grid-template-rows: 0fr;
+    border-bottom-color: transparent;
+    pointer-events: none;
+}
+
+.history-row.is-deleting .history-row-content {
+    opacity: 0;
+    transform: translate3d(6px, -2px, 0) scale(0.992);
 }
 
 .history-row-main {
@@ -367,4 +397,19 @@
     margin: 0;
     font-size: 13px;
     line-height: 1.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .history-row {
+        transition-duration: 120ms;
+    }
+
+    .history-row-content {
+        transition-duration: 100ms;
+    }
+
+    .history-row.is-deleting .history-row-content {
+        opacity: 0;
+        transform: none;
+    }
 }

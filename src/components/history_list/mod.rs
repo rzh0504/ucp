@@ -4,7 +4,7 @@ mod row;
 mod selection;
 
 use self::actions::{
-    copy_entry, delete_entry_with_status, delete_focused_or_selected, hide_window_after_copy,
+    copy_entry, delete_entries_with_animation, delete_focused_or_selected, hide_window_after_copy,
     run_quick_paste_shortcut, save_entry_with_status,
 };
 use self::row::HistoryRow;
@@ -44,15 +44,17 @@ pub fn HistoryList(
     let mut selection_anchor_id = use_signal(|| None::<u64>);
     let mut focused_id = use_signal(|| None::<u64>);
     let mut show_focus_highlight = use_signal(|| false);
+    let deleting_ids = use_signal(Vec::<u64>::new);
     let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
     let keyboard_entry_ids = entry_ids.clone();
     let keyboard_entries = entries.clone();
     let paste_window = use_window();
+    let deleting_id_values = deleting_ids.read().clone();
     let visible_selected_ids = selected_ids
         .read()
         .iter()
         .copied()
-        .filter(|id| entry_ids.contains(id))
+        .filter(|id| entry_ids.contains(id) && !deleting_id_values.contains(id))
         .collect::<Vec<_>>();
     let visible_selected_count = visible_selected_ids.len();
 
@@ -73,15 +75,16 @@ pub fn HistoryList(
                             index: 0usize,
                             title: i18n::tr(language).delete_selected,
                             on_click: move |_| {
-                                for id in visible_selected_ids.clone() {
-                                    if history.write().remove(id) {
-                                        delete_entry_with_status(id, status, language);
-                                    }
-                                }
-
+                                delete_entries_with_animation(
+                                    visible_selected_ids.clone(),
+                                    deleting_ids,
+                                    history,
+                                    status,
+                                    language,
+                                    i18n::tr(language).selected_history_deleted,
+                                );
                                 selected_ids.set(Vec::new());
                                 selection_anchor_id.set(None);
-                                status.set(i18n::tr(language).selected_history_deleted.to_string());
                             },
                             Icon { icon: AppIcon::Delete }
                         }
@@ -206,6 +209,7 @@ pub fn HistoryList(
                                 focused_id(),
                                 &mut selected_ids,
                                 &mut selection_anchor_id,
+                                deleting_ids,
                                 history,
                                 status,
                                 language,
@@ -262,6 +266,7 @@ pub fn HistoryList(
                             selection_anchor_id,
                             focused_id,
                             show_focus_highlight,
+                            deleting_ids,
                             promote_on_copy,
                             quick_paste,
                             hide_after_copy,

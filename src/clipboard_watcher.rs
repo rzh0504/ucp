@@ -116,11 +116,12 @@ async fn capture_clipboard(
     mut ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     clipboard_monitor_paused: Signal<bool>,
 ) {
+    let language = settings.peek().language;
     if *clipboard_monitor_paused.peek() {
+        remember_paused_clipboard_content(ignored_clipboard_write, language).await;
         return;
     }
 
-    let language = settings.peek().language;
     match read_clipboard_content(language).await {
         Ok(Some(content)) => {
             let ignored_content = { ignored_clipboard_write.peek().clone() };
@@ -168,6 +169,16 @@ async fn capture_clipboard(
             AppLanguage::Chinese => format!("剪贴板暂不可用：{error}"),
             AppLanguage::English => format!("Clipboard is temporarily unavailable: {error}"),
         }),
+    }
+}
+
+async fn remember_paused_clipboard_content(
+    mut ignored_clipboard_write: Signal<Option<ClipboardContent>>,
+    language: AppLanguage,
+) {
+    match read_clipboard_content(language).await {
+        Ok(content) => ignored_clipboard_write.set(content),
+        Err(_) => {}
     }
 }
 

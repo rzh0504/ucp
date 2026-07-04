@@ -231,10 +231,6 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
     })
 }
 
-pub fn delete_entry(id: u64) -> Result<(), StorageError> {
-    delete_entries(&[id])
-}
-
 pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
     if ids.is_empty() {
         return Ok(());
@@ -935,7 +931,7 @@ mod tests {
         .unwrap();
         assert_eq!(hello_count, 1);
 
-        delete_entry(10).unwrap();
+        delete_entries(&[10]).unwrap();
         assert!(load_history(10).unwrap().entry(10).is_none());
 
         reset_storage_for_tests();

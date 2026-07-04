@@ -1,5 +1,5 @@
 use super::actions::{
-    copy_entry, delete_entry_with_status, hide_window_after_copy, open_file_location,
+    copy_entry, delete_entries_with_animation, hide_window_after_copy, open_file_location,
     run_quick_paste_shortcut, save_entry_with_status, save_image_file,
 };
 use super::file_display::FileListDisplay;
@@ -27,6 +27,7 @@ pub(super) fn HistoryRow(
     mut selection_anchor_id: Signal<Option<u64>>,
     mut focused_id: Signal<Option<u64>>,
     mut show_focus_highlight: Signal<bool>,
+    deleting_ids: Signal<Vec<u64>>,
     promote_on_copy: bool,
     quick_paste: bool,
     hide_after_copy: bool,
@@ -41,12 +42,17 @@ pub(super) fn HistoryRow(
     let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
     let is_focus_highlighted = show_focus_highlight() && focused_id() == Some(id);
-    let row_class = match (is_selected, is_focus_highlighted) {
-        (true, true) => "history-row is-selected is-focused",
-        (true, false) => "history-row is-selected",
-        (false, true) => "history-row is-focused",
-        (false, false) => "history-row",
-    };
+    let is_deleting = deleting_ids.read().contains(&id);
+    let mut row_class = "history-row".to_string();
+    if is_selected {
+        row_class.push_str(" is-selected");
+    }
+    if is_focus_highlighted {
+        row_class.push_str(" is-focused");
+    }
+    if is_deleting {
+        row_class.push_str(" is-deleting");
+    }
     let is_text = entry.is_text();
     let is_image = matches!(&entry.content, ClipboardContent::Image(_));
     let file_paths = match &entry.content {
@@ -98,147 +104,156 @@ pub(super) fn HistoryRow(
                 article {
                     class: "{row_class}",
                     onclick: move |event| event.stop_propagation(),
-                    button {
-                class: "{row_main_class}",
-                aria_selected: if is_selected { "true" } else { "false" },
-                onmounted: move |event| button_ref.set(Some(event.data())),
-                onfocus: move |_| focused_id.set(Some(id)),
-                onclick: move |event| {
-                    let modifiers = event.data.modifiers();
-                    let mut selection = selected_ids.read().clone();
-                    let mut anchor = selection_anchor_id();
+                    div { class: "history-row-clip",
+                        div { class: "history-row-content",
+                            button {
+                        class: "{row_main_class}",
+                        aria_selected: if is_selected { "true" } else { "false" },
+                        onmounted: move |event| button_ref.set(Some(event.data())),
+                        onfocus: move |_| focused_id.set(Some(id)),
+                        onclick: move |event| {
+                            let modifiers = event.data.modifiers();
+                            let mut selection = selected_ids.read().clone();
+                            let mut anchor = selection_anchor_id();
 
-                    update_selection(
-                        &entry_ids,
-                        &mut selection,
-                        &mut anchor,
-                        id,
-                        modifiers.ctrl() || modifiers.meta(),
-                        modifiers.shift(),
-                    );
+                            update_selection(
+                                &entry_ids,
+                                &mut selection,
+                                &mut anchor,
+                                id,
+                                modifiers.ctrl() || modifiers.meta(),
+                                modifiers.shift(),
+                            );
 
-                    selected_ids.set(selection);
-                    selection_anchor_id.set(anchor);
-                    focused_id.set(Some(id));
-                    show_focus_highlight.set(false);
-                },
-                ondoubleclick: move |_| {
-                    if quick_paste && is_text {
-                        if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language) {
-                            paste_window.set_minimized(true);
-                            run_quick_paste_shortcut(status, language);
-                        }
-                    } else if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language)
-                        && hide_after_copy
-                    {
-                        hide_window_after_copy(&paste_window);
-                    }
-                },
-                div { class: "entry-index", "{index}" }
-                if is_image {
-                    if let Some(preview_url) = &image_preview_url {
-                        img {
-                            class: "entry-image-preview",
-                            src: "{preview_url}",
-                            alt: i18n::tr(language).image_preview_alt,
-                        }
-                    } else {
-                        div { class: "entry-image-preview is-empty", "IMG" }
-                    }
-                }
-                div { class: "entry-content",
-                    div { class: "entry-kicker",
+                            selected_ids.set(selection);
+                            selection_anchor_id.set(anchor);
+                            focused_id.set(Some(id));
+                            show_focus_highlight.set(false);
+                        },
+                        ondoubleclick: move |_| {
+                            if quick_paste && is_text {
+                                if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language) {
+                                    paste_window.set_minimized(true);
+                                    run_quick_paste_shortcut(status, language);
+                                }
+                            } else if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language)
+                                && hide_after_copy
+                            {
+                                hide_window_after_copy(&paste_window);
+                            }
+                        },
+                        div { class: "entry-index", "{index}" }
                         if is_image {
-                            if let Some(dimensions) = &image_dimensions {
-                                span { "{dimensions}" }
+                            if let Some(preview_url) = &image_preview_url {
+                                img {
+                                    class: "entry-image-preview",
+                                    src: "{preview_url}",
+                                    alt: i18n::tr(language).image_preview_alt,
+                                }
+                            } else {
+                                div { class: "entry-image-preview is-empty", "IMG" }
                             }
                         }
-                        if show_copy_time {
-                            span { "{entry_age}" }
-                        }
-                    }
-                    if let Some(file_display) = &file_display {
-                        div { class: "entry-file-list",
-                            for file in file_display.visible_files(files_expanded()).iter() {
-                                div { class: if file.exists { "entry-file-row" } else { "entry-file-row is-missing" },
-                                    if let Some(icon_url) = &file.icon_url {
-                                        img {
-                                            class: "entry-file-app-icon",
-                                            src: "{icon_url}",
-                                            alt: "",
-                                        }
-                                    } else {
-                                        span { class: "entry-file-app-icon is-fallback",
-                                            Icon { icon: AppIcon::File }
+                        div { class: "entry-content",
+                            div { class: "entry-kicker",
+                                if is_image {
+                                    if let Some(dimensions) = &image_dimensions {
+                                        span { "{dimensions}" }
+                                    }
+                                }
+                                if show_copy_time {
+                                    span { "{entry_age}" }
+                                }
+                            }
+                            if let Some(file_display) = &file_display {
+                                div { class: "entry-file-list",
+                                    for file in file_display.visible_files(files_expanded()).iter() {
+                                        div { class: if file.exists { "entry-file-row" } else { "entry-file-row is-missing" },
+                                            if let Some(icon_url) = &file.icon_url {
+                                                img {
+                                                    class: "entry-file-app-icon",
+                                                    src: "{icon_url}",
+                                                    alt: "",
+                                                }
+                                            } else {
+                                                span { class: "entry-file-app-icon is-fallback",
+                                                    Icon { icon: AppIcon::File }
+                                                }
+                                            }
+                                            p { class: if file.exists { "entry-title" } else { "entry-title is-muted" }, "{file.name}" }
                                         }
                                     }
-                                    p { class: if file.exists { "entry-title" } else { "entry-title is-muted" }, "{file.name}" }
+                                    if file_display.hidden_count(files_expanded()) > 0 {
+                                        span {
+                                            class: "entry-file-expand",
+                                            role: "button",
+                                            onclick: move |event| {
+                                                event.stop_propagation();
+                                                files_expanded.set(true);
+                                            },
+                                            "{expand_more_label(language, file_display.hidden_count(files_expanded()))}"
+                                        }
+                                    } else if file_display.can_collapse(files_expanded()) {
+                                        span {
+                                            class: "entry-file-expand",
+                                            role: "button",
+                                            onclick: move |event| {
+                                                event.stop_propagation();
+                                                files_expanded.set(false);
+                                            },
+                                            "{i18n::tr(language).collapse_file_list}"
+                                        }
+                                    }
+                                }
+                                p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
+                            } else if !is_image {
+                                p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
+                                if show_size {
+                                    p { class: "entry-size", "{entry_size}" }
                                 }
                             }
-                            if file_display.hidden_count(files_expanded()) > 0 {
-                                span {
-                                    class: "entry-file-expand",
-                                    role: "button",
-                                    onclick: move |event| {
-                                        event.stop_propagation();
-                                        files_expanded.set(true);
-                                    },
-                                    "{expand_more_label(language, file_display.hidden_count(files_expanded()))}"
-                                }
-                            } else if file_display.can_collapse(files_expanded()) {
-                                span {
-                                    class: "entry-file-expand",
-                                    role: "button",
-                                    onclick: move |event| {
-                                        event.stop_propagation();
-                                        files_expanded.set(false);
-                                    },
-                                    "{i18n::tr(language).collapse_file_list}"
-                                }
-                            }
-                        }
-                        p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
-                    } else if !is_image {
-                        p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
-                        if show_size {
-                            p { class: "entry-size", "{entry_size}" }
                         }
                     }
-                }
-            }
-            Toolbar { class: "entry-actions", aria_label: i18n::tr(language).entry_actions,
-                ToolbarButton {
-                    class: if entry.favorite { "ghost-action is-favorite is-on is-favorite-visible" } else { "ghost-action is-favorite" },
-                    index: 0usize,
-                    on_click: move |_| {
-                        if let Some(entry) = history.write().toggle_favorite(id) {
-                            save_entry_with_status(&entry, status, i18n::tr(language).favorite_status_updated, language);
+                    Toolbar { class: "entry-actions", aria_label: i18n::tr(language).entry_actions,
+                        ToolbarButton {
+                            class: if entry.favorite { "ghost-action is-favorite is-on is-favorite-visible" } else { "ghost-action is-favorite" },
+                            index: 0usize,
+                            on_click: move |_| {
+                                if let Some(entry) = history.write().toggle_favorite(id) {
+                                    save_entry_with_status(&entry, status, i18n::tr(language).favorite_status_updated, language);
+                                }
+                            },
+                            Icon { icon: if entry.favorite { AppIcon::FavoriteFilled } else { AppIcon::Favorite } }
                         }
-                    },
-                    Icon { icon: if entry.favorite { AppIcon::FavoriteFilled } else { AppIcon::Favorite } }
-                }
-                ToolbarButton {
-                    class: if entry.pinned { "ghost-action is-on is-pin-visible" } else { "ghost-action" },
-                    index: 1usize,
-                    on_click: move |_| {
-                        if let Some(entry) = history.write().toggle_pin(id) {
-                            save_entry_with_status(&entry, status, i18n::tr(language).pin_status_updated, language);
+                        ToolbarButton {
+                            class: if entry.pinned { "ghost-action is-on is-pin-visible" } else { "ghost-action" },
+                            index: 1usize,
+                            on_click: move |_| {
+                                if let Some(entry) = history.write().toggle_pin(id) {
+                                    save_entry_with_status(&entry, status, i18n::tr(language).pin_status_updated, language);
+                                }
+                            },
+                            Icon { icon: if entry.pinned { AppIcon::PinFilled } else { AppIcon::Pin } }
                         }
-                    },
-                    Icon { icon: if entry.pinned { AppIcon::PinFilled } else { AppIcon::Pin } }
-                }
-                ToolbarSeparator { class: "entry-action-separator", decorative: true }
-                ToolbarButton {
-                    class: "ghost-action is-danger",
-                    index: 2usize,
-                    on_click: move |_| {
-                        if history.write().remove(id) {
-                            delete_entry_with_status(id, status, language);
+                        ToolbarSeparator { class: "entry-action-separator", decorative: true }
+                        ToolbarButton {
+                            class: "ghost-action is-danger",
+                            index: 2usize,
+                            on_click: move |_| {
+                                delete_entries_with_animation(
+                                    vec![id],
+                                    deleting_ids,
+                                    history,
+                                    status,
+                                    language,
+                                    i18n::tr(language).history_deleted,
+                                );
+                            },
+                            Icon { icon: AppIcon::Delete }
                         }
-                    },
-                    Icon { icon: AppIcon::Delete }
-                }
-            }
+                    }
+                        }
+                    }
                 }
             }
             ContextMenuContent { class: "entry-context-menu",

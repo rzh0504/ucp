@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const QUICK_PASTE_DELAY: Duration = Duration::from_millis(260);
+const DELETE_EXIT_DELAY: Duration = Duration::from_millis(240);
 
 pub(super) fn copy_entry(
     id: u64,
@@ -213,14 +214,51 @@ pub(super) fn save_entry_with_status(
     }
 }
 
-pub(super) fn delete_entry_with_status(id: u64, mut status: Signal<String>, language: AppLanguage) {
-    match storage::delete_entry(id) {
-        Ok(()) => status.set(i18n::tr(language).history_deleted.to_string()),
-        Err(error) => status.set(match language {
-            AppLanguage::Chinese => format!("历史删除失败：{error}"),
-            AppLanguage::English => format!("Failed to delete history: {error}"),
-        }),
+pub(super) fn delete_entries_with_animation(
+    mut ids: Vec<u64>,
+    mut deleting_ids: Signal<Vec<u64>>,
+    mut history: Signal<ClipboardHistory>,
+    mut status: Signal<String>,
+    language: AppLanguage,
+    success_message: &'static str,
+) {
+    let current_deleting_ids = deleting_ids.read().clone();
+    ids.retain(|id| !current_deleting_ids.contains(id));
+    if ids.is_empty() {
+        return;
     }
+
+    let mut next_deleting_ids = current_deleting_ids;
+    next_deleting_ids.extend(ids.iter().copied());
+    deleting_ids.set(next_deleting_ids);
+
+    spawn(async move {
+        Delay::new(DELETE_EXIT_DELAY).await;
+
+        let removed_ids = {
+            let mut history = history.write();
+            ids.iter()
+                .copied()
+                .filter(|id| history.remove(*id))
+                .collect::<Vec<_>>()
+        };
+
+        deleting_ids
+            .write()
+            .retain(|id| !ids.iter().any(|removed_id| removed_id == id));
+
+        if removed_ids.is_empty() {
+            return;
+        }
+
+        match storage::delete_entries(&removed_ids) {
+            Ok(()) => status.set(success_message.to_string()),
+            Err(error) => status.set(match language {
+                AppLanguage::Chinese => format!("历史删除失败：{error}"),
+                AppLanguage::English => format!("Failed to delete history: {error}"),
+            }),
+        }
+    });
 }
 
 pub(super) fn save_image_file(
@@ -300,7 +338,8 @@ pub(super) fn delete_focused_or_selected(
     focused_id: Option<u64>,
     selected_ids: &mut Signal<Vec<u64>>,
     selection_anchor_id: &mut Signal<Option<u64>>,
-    mut history: Signal<ClipboardHistory>,
+    deleting_ids: Signal<Vec<u64>>,
+    history: Signal<ClipboardHistory>,
     status: Signal<String>,
     language: AppLanguage,
 ) {
@@ -317,11 +356,19 @@ pub(super) fn delete_focused_or_selected(
         ids.push(id);
     }
 
-    for id in ids {
-        if history.write().remove(id) {
-            delete_entry_with_status(id, status, language);
-        }
-    }
+    let success_message = if ids.len() > 1 {
+        i18n::tr(language).selected_history_deleted
+    } else {
+        i18n::tr(language).history_deleted
+    };
+    delete_entries_with_animation(
+        ids,
+        deleting_ids,
+        history,
+        status,
+        language,
+        success_message,
+    );
 
     selected_ids.set(Vec::new());
     selection_anchor_id.set(None);
