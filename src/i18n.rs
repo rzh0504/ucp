@@ -376,6 +376,61 @@ pub fn filter_label(language: AppLanguage, filter: ClipboardFilter) -> &'static 
     }
 }
 
+pub fn clear_history_label(language: AppLanguage, filter: ClipboardFilter) -> String {
+    match (language, filter) {
+        (AppLanguage::Chinese, ClipboardFilter::All) => tr(language).clear_all_history.to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::Text) => "清空文本历史".to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::Image) => "清空图像历史".to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::File) => "清空文件历史".to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::Favorite) => "清空收藏历史".to_string(),
+        (AppLanguage::English, ClipboardFilter::All) => tr(language).clear_all_history.to_string(),
+        (AppLanguage::English, ClipboardFilter::Text) => "Clear text history".to_string(),
+        (AppLanguage::English, ClipboardFilter::Image) => "Clear image history".to_string(),
+        (AppLanguage::English, ClipboardFilter::File) => "Clear file history".to_string(),
+        (AppLanguage::English, ClipboardFilter::Favorite) => "Clear favorite history".to_string(),
+    }
+}
+
+pub fn clear_history_title(language: AppLanguage, filter: ClipboardFilter) -> String {
+    match filter {
+        ClipboardFilter::All => tr(language).clear_all_history_title.to_string(),
+        _ => match language {
+            AppLanguage::Chinese => format!("{}？", clear_history_label(language, filter)),
+            AppLanguage::English => format!("{}?", clear_history_label(language, filter)),
+        },
+    }
+}
+
+pub fn clear_history_description(language: AppLanguage, filter: ClipboardFilter) -> String {
+    match filter {
+        ClipboardFilter::All => tr(language).clear_all_history_description.to_string(),
+        _ => match language {
+            AppLanguage::Chinese => format!(
+                "这会删除“{}”标签下的所有剪贴板历史记录，操作不可撤销。",
+                filter_label(language, filter)
+            ),
+            AppLanguage::English => format!(
+                "This deletes every clipboard history record in the {} tab. This action cannot be undone.",
+                filter_label(language, filter)
+            ),
+        },
+    }
+}
+
+pub fn history_cleared_message(language: AppLanguage, filter: ClipboardFilter) -> String {
+    match (language, filter) {
+        (_, ClipboardFilter::All) => tr(language).history_cleared.to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::Text) => "文本历史已清空".to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::Image) => "图像历史已清空".to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::File) => "文件历史已清空".to_string(),
+        (AppLanguage::Chinese, ClipboardFilter::Favorite) => "收藏历史已清空".to_string(),
+        (AppLanguage::English, ClipboardFilter::Text) => "Text history cleared".to_string(),
+        (AppLanguage::English, ClipboardFilter::Image) => "Image history cleared".to_string(),
+        (AppLanguage::English, ClipboardFilter::File) => "File history cleared".to_string(),
+        (AppLanguage::English, ClipboardFilter::Favorite) => "Favorite history cleared".to_string(),
+    }
+}
+
 pub fn item_count(language: AppLanguage, count: usize) -> String {
     match language {
         AppLanguage::Chinese => format!("{count} 项"),

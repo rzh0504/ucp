@@ -2,7 +2,7 @@ use crate::components::{AppIcon, AppPage, HistoryList, Icon, SettingsPage, TopBa
 use crate::i18n;
 use crate::model::{
     AppLanguage, AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory,
-    DEFAULT_BACKGROUND_OPACITY,
+    DEFAULT_BACKGROUND_OPACITY, HistoryCounts,
 };
 use crate::storage;
 use dioxus::desktop::{
@@ -334,6 +334,8 @@ pub fn App() -> Element {
     let snapshot_entries = snapshot();
     let counts_snapshot = counts();
     let entry_count = snapshot_entries.len();
+    let active_filter_snapshot = active_filter();
+    let clear_history_count = history_count_for_filter(counts_snapshot, active_filter_snapshot);
     let settings_snapshot = settings();
     let language = settings_snapshot.language;
     let query_snapshot = query();
@@ -487,7 +489,8 @@ pub fn App() -> Element {
                 StatusSettingsButton { active_page, language }
                 ClearHistoryButton {
                     history,
-                    history_count: counts_snapshot.total,
+                    filter: active_filter_snapshot,
+                    history_count: clear_history_count,
                     language,
                     status,
                 }
@@ -784,6 +787,7 @@ fn StatusSettingsButton(mut active_page: Signal<AppPage>, language: AppLanguage)
 #[component]
 fn ClearHistoryButton(
     history: Signal<ClipboardHistory>,
+    filter: ClipboardFilter,
     history_count: usize,
     language: AppLanguage,
     mut status: Signal<String>,
@@ -791,14 +795,22 @@ fn ClearHistoryButton(
     let mut open = use_signal(|| false);
     let disabled = history_count == 0;
     let copy = i18n::tr(language);
+    let clear_label = i18n::clear_history_label(language, filter);
+    let button_label = if disabled {
+        copy.no_history_to_clear.to_string()
+    } else {
+        clear_label
+    };
+    let dialog_title = i18n::clear_history_title(language, filter);
+    let dialog_description = i18n::clear_history_description(language, filter);
 
     rsx! {
         button {
             class: "status-icon-action status-clear-action",
             type: "button",
             disabled,
-            title: if disabled { copy.no_history_to_clear } else { copy.clear_all_history },
-            aria_label: if disabled { copy.no_history_to_clear } else { copy.clear_all_history },
+            title: button_label.clone(),
+            aria_label: button_label.clone(),
             onclick: move |_| open.set(true),
             Icon { icon: AppIcon::Clear }
         }
@@ -807,19 +819,18 @@ fn ClearHistoryButton(
             on_open_change: move |value| open.set(value),
             div { class: "alert-dialog-backdrop" }
             AlertDialogContent { class: "alert-dialog-content",
-                AlertDialogTitle { class: "alert-dialog-title", "{copy.clear_all_history_title}" }
+                AlertDialogTitle { class: "alert-dialog-title", "{dialog_title}" }
                 AlertDialogDescription { class: "alert-dialog-description",
-                    "{copy.clear_all_history_description}"
+                    "{dialog_description}"
                 }
                 AlertDialogActions { class: "alert-dialog-actions",
                     AlertDialogCancel { class: "alert-dialog-button", "{copy.cancel}" }
                     AlertDialogAction {
                         class: "alert-dialog-button is-danger",
                         on_click: move |_| {
-                            match storage::clear_history() {
+                            match clear_history_for_filter(history, filter) {
                                 Ok(()) => {
-                                    history.write().clear();
-                                    status.set(i18n::tr(language).history_cleared.to_string());
+                                    status.set(i18n::history_cleared_message(language, filter));
                                 }
                                 Err(error) => status.set(match language {
                                     AppLanguage::Chinese => format!("历史清空失败：{error}"),
@@ -833,6 +844,41 @@ fn ClearHistoryButton(
             }
         }
     }
+}
+
+fn history_count_for_filter(counts: HistoryCounts, filter: ClipboardFilter) -> usize {
+    match filter {
+        ClipboardFilter::All => counts.total,
+        ClipboardFilter::Text => counts.text,
+        ClipboardFilter::Image => counts.image,
+        ClipboardFilter::File => counts.file,
+        ClipboardFilter::Favorite => counts.favorite,
+    }
+}
+
+fn clear_history_for_filter(
+    mut history: Signal<ClipboardHistory>,
+    filter: ClipboardFilter,
+) -> Result<(), storage::StorageError> {
+    if filter == ClipboardFilter::All {
+        storage::clear_history()?;
+        history.write().clear();
+        return Ok(());
+    }
+
+    let ids = history.read().ids_for_filter(filter);
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    storage::delete_entries(&ids)?;
+
+    let mut history = history.write();
+    for id in ids {
+        history.remove(id);
+    }
+
+    Ok(())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]

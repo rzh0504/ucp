@@ -507,13 +507,7 @@ impl ClipboardHistory {
         let mut entries = self
             .entries
             .iter()
-            .filter(|entry| match filter {
-                ClipboardFilter::All => true,
-                ClipboardFilter::Text => entry.kind() == ClipboardKind::Text,
-                ClipboardFilter::Image => entry.kind() == ClipboardKind::Image,
-                ClipboardFilter::File => entry.kind() == ClipboardKind::File,
-                ClipboardFilter::Favorite => entry.favorite,
-            })
+            .filter(|entry| matches_filter(*entry, filter))
             .filter(|entry| {
                 if normalized_query.is_empty() {
                     return true;
@@ -534,6 +528,14 @@ impl ClipboardHistory {
 
         sort_entries(&mut entries);
         entries
+    }
+
+    pub fn ids_for_filter(&self, filter: ClipboardFilter) -> Vec<u64> {
+        self.entries
+            .iter()
+            .filter(|entry| matches_filter(*entry, filter))
+            .map(|entry| entry.id)
+            .collect()
     }
 
     pub fn counts(&self) -> HistoryCounts {
@@ -650,6 +652,16 @@ impl ClipboardHistory {
         }
 
         removed_ids
+    }
+}
+
+fn matches_filter(entry: &ClipboardEntry, filter: ClipboardFilter) -> bool {
+    match filter {
+        ClipboardFilter::All => true,
+        ClipboardFilter::Text => entry.kind() == ClipboardKind::Text,
+        ClipboardFilter::Image => entry.kind() == ClipboardKind::Image,
+        ClipboardFilter::File => entry.kind() == ClipboardKind::File,
+        ClipboardFilter::Favorite => entry.favorite,
     }
 }
 
