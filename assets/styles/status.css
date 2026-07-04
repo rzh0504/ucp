@@ -45,6 +45,27 @@
     height: 16px;
 }
 
+.status-monitor-action {
+    color: var(--app-muted);
+}
+
+.status-monitor-action:hover {
+    color: var(--app-accent);
+}
+
+.status-monitor-action.is-paused {
+    color: var(--app-warning);
+}
+
+.status-monitor-action.is-paused:hover {
+    color: var(--app-warning);
+}
+
+.status-monitor-action .app-icon {
+    width: 16px;
+    height: 16px;
+}
+
 .status-clear-action {
     color: var(--app-danger);
 }

@@ -26,6 +26,7 @@ pub(crate) async fn watch_clipboard(
     settings: Signal<AppSettings>,
     mut status: Signal<String>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
+    clipboard_monitor_paused: Signal<bool>,
 ) {
     use futures_util::StreamExt;
 
@@ -43,14 +44,35 @@ pub(crate) async fn watch_clipboard(
                     format!("Clipboard event listener failed; switched to polling: {error}")
                 }
             });
-            poll_clipboard(history, settings, status, ignored_clipboard_write).await;
+            poll_clipboard(
+                history,
+                settings,
+                status,
+                ignored_clipboard_write,
+                clipboard_monitor_paused,
+            )
+            .await;
             return;
         }
     };
 
-    capture_clipboard(history, settings, status, ignored_clipboard_write).await;
+    capture_clipboard(
+        history,
+        settings,
+        status,
+        ignored_clipboard_write,
+        clipboard_monitor_paused,
+    )
+    .await;
     while updates_rx.next().await.is_some() {
-        capture_clipboard(history, settings, status, ignored_clipboard_write).await;
+        capture_clipboard(
+            history,
+            settings,
+            status,
+            ignored_clipboard_write,
+            clipboard_monitor_paused,
+        )
+        .await;
     }
 }
 
@@ -59,6 +81,7 @@ async fn poll_clipboard(
     settings: Signal<AppSettings>,
     status: Signal<String>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
+    clipboard_monitor_paused: Signal<bool>,
 ) {
     let mut last_sequence = None;
 
@@ -69,7 +92,14 @@ async fn poll_clipboard(
             continue;
         }
 
-        capture_clipboard(history, settings, status, ignored_clipboard_write).await;
+        capture_clipboard(
+            history,
+            settings,
+            status,
+            ignored_clipboard_write,
+            clipboard_monitor_paused,
+        )
+        .await;
 
         if sequence.is_some() {
             last_sequence = sequence;
@@ -84,7 +114,12 @@ async fn capture_clipboard(
     settings: Signal<AppSettings>,
     mut status: Signal<String>,
     mut ignored_clipboard_write: Signal<Option<ClipboardContent>>,
+    clipboard_monitor_paused: Signal<bool>,
 ) {
+    if *clipboard_monitor_paused.peek() {
+        return;
+    }
+
     let language = settings.peek().language;
     match read_clipboard_content(language).await {
         Ok(Some(content)) => {
