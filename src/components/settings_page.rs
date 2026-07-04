@@ -254,6 +254,14 @@ pub fn SettingsPage(
                             update_settings(settings, status, |next| next.quick_paste = checked);
                         },
                     }
+                    SettingSwitchRow {
+                        label: copy.hide_after_copy,
+                        hint: copy.hide_after_copy_hint,
+                        checked: settings_snapshot.hide_after_copy,
+                        on_change: move |checked| {
+                            update_settings(settings, status, |next| next.hide_after_copy = checked);
+                        },
+                    }
                 }
 
                 section { class: "settings-group",

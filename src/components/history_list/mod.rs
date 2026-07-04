@@ -4,8 +4,8 @@ mod row;
 mod selection;
 
 use self::actions::{
-    copy_entry, delete_entry_with_status, delete_focused_or_selected, run_quick_paste_shortcut,
-    save_entry_with_status,
+    copy_entry, delete_entry_with_status, delete_focused_or_selected, hide_window_after_copy,
+    run_quick_paste_shortcut, save_entry_with_status,
 };
 use self::row::HistoryRow;
 use self::selection::{focus_index, focused_entry_id, move_focus};
@@ -34,6 +34,7 @@ pub fn HistoryList(
     auto_focus: bool,
     promote_on_copy: bool,
     quick_paste: bool,
+    hide_after_copy: bool,
     show_copy_time: bool,
     show_text_length: bool,
     language: AppLanguage,
@@ -191,8 +192,10 @@ pub fn HistoryList(
                                         paste_window.set_minimized(true);
                                         run_quick_paste_shortcut(status, language);
                                     }
-                                } else {
-                                    copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language);
+                                } else if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language)
+                                    && hide_after_copy
+                                {
+                                    hide_window_after_copy(&paste_window);
                                 }
                             }
                         }
@@ -261,6 +264,7 @@ pub fn HistoryList(
                             show_focus_highlight,
                             promote_on_copy,
                             quick_paste,
+                            hide_after_copy,
                             show_copy_time,
                             show_text_length,
                             language,

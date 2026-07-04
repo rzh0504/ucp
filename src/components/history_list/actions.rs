@@ -5,6 +5,7 @@ use crate::model::{
 };
 use crate::platform;
 use crate::storage;
+use dioxus::desktop::DesktopContext;
 use dioxus::prelude::*;
 use futures_timer::Delay;
 use std::path::{Path, PathBuf};
@@ -75,6 +76,16 @@ pub(super) fn run_quick_paste_shortcut(mut status: Signal<String>, language: App
             }),
         }
     });
+}
+
+#[cfg(windows)]
+pub(super) fn hide_window_after_copy(window: &DesktopContext) {
+    window.close();
+}
+
+#[cfg(not(windows))]
+pub(super) fn hide_window_after_copy(window: &DesktopContext) {
+    window.set_minimized(true);
 }
 
 pub(super) fn open_file_location(

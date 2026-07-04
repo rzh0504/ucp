@@ -1,6 +1,6 @@
 use super::actions::{
-    copy_entry, delete_entry_with_status, open_file_location, run_quick_paste_shortcut,
-    save_entry_with_status, save_image_file,
+    copy_entry, delete_entry_with_status, hide_window_after_copy, open_file_location,
+    run_quick_paste_shortcut, save_entry_with_status, save_image_file,
 };
 use super::file_display::FileListDisplay;
 use super::selection::update_selection;
@@ -29,6 +29,7 @@ pub(super) fn HistoryRow(
     mut show_focus_highlight: Signal<bool>,
     promote_on_copy: bool,
     quick_paste: bool,
+    hide_after_copy: bool,
     show_copy_time: bool,
     show_text_length: bool,
     language: AppLanguage,
@@ -127,8 +128,10 @@ pub(super) fn HistoryRow(
                             paste_window.set_minimized(true);
                             run_quick_paste_shortcut(status, language);
                         }
-                    } else {
-                        copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language);
+                    } else if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language)
+                        && hide_after_copy
+                    {
+                        hide_window_after_copy(&paste_window);
                     }
                 },
                 div { class: "entry-index", "{index}" }
