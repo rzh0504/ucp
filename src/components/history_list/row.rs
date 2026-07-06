@@ -20,7 +20,7 @@ use std::rc::Rc;
 pub(super) fn HistoryRow(
     entry: ClipboardEntry,
     index: usize,
-    entry_ids: Vec<u64>,
+    entry_ids: Rc<Vec<u64>>,
     history: Signal<ClipboardHistory>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     mut selected_ids: Signal<Vec<u64>>,
@@ -39,6 +39,7 @@ pub(super) fn HistoryRow(
     let id = entry.id;
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
     let mut files_expanded = use_signal(|| false);
+    let mut context_menu_open = use_signal(|| None::<bool>);
     let paste_window = use_window();
     let is_selected = selected_ids.read().contains(&id);
     let is_focus_highlighted = show_focus_highlight() && focused_id() == Some(id);
@@ -99,11 +100,18 @@ pub(super) fn HistoryRow(
     });
 
     rsx! {
-        ContextMenu { tabindex: "-1", disabled: !has_context_menu,
+        ContextMenu {
+            tabindex: "-1",
+            disabled: !has_context_menu,
+            open: context_menu_open,
+            on_open_change: move |open| context_menu_open.set(Some(open)),
             ContextMenuTrigger {
                 article {
                     class: "{row_class}",
-                    onclick: move |event| event.stop_propagation(),
+                    onclick: move |event| {
+                        context_menu_open.set(Some(false));
+                        event.stop_propagation();
+                    },
                     div { class: "history-row-clip",
                         div { class: "history-row-content",
                             button {

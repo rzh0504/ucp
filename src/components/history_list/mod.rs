@@ -21,6 +21,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton};
+use std::rc::Rc;
 
 #[component]
 pub fn HistoryList(
@@ -45,7 +46,7 @@ pub fn HistoryList(
     let mut focused_id = use_signal(|| None::<u64>);
     let mut show_focus_highlight = use_signal(|| false);
     let deleting_ids = use_signal(Vec::<u64>::new);
-    let entry_ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    let entry_ids = Rc::new(entries.iter().map(|entry| entry.id).collect::<Vec<_>>());
     let keyboard_entry_ids = entry_ids.clone();
     let keyboard_entries = entries.clone();
     let paste_window = use_window();
@@ -225,7 +226,7 @@ pub fn HistoryList(
                         }
                         Key::Character(key) if primary && key.eq_ignore_ascii_case("a") => {
                             event.prevent_default();
-                            selected_ids.set(keyboard_entry_ids.clone());
+                            selected_ids.set(keyboard_entry_ids.to_vec());
                             selection_anchor_id.set(keyboard_entry_ids.first().copied());
                             focused_id.set(keyboard_entry_ids.last().copied());
                             show_focus_highlight.set(true);
