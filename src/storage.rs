@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[cfg(test)]
@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 const APP_DIR: &str = "UCP Clipboard";
 const DATABASE_FILE: &str = "history.ucp";
+const IMAGE_CACHE_DIR: &str = "image-cache";
 const SCHEMA_VERSION: i32 = 3;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const IMAGE_FORMAT_PNG: &str = "png";
@@ -164,6 +165,15 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
             entry.id as i64
         };
         let merge_duplicate_metadata = (database_id != entry.id as i64) as i64;
+        let cached_image_preview_url = match &entry.content {
+            ClipboardContent::Image(image) if image.has_bytes() => {
+                write_cached_image_preview(database_id as u64, image)?
+            }
+            _ => None,
+        };
+        if let Some(url) = cached_image_preview_url.as_deref() {
+            image_preview_url = Some(url);
+        }
 
         transaction.execute(
             "INSERT INTO clipboard_entries (\
@@ -219,6 +229,12 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
             }
         }
 
+        let removed_preview_urls = if database_id != entry.id as i64 {
+            image_preview_urls_for_ids(&transaction, &[entry.id])?
+        } else {
+            Vec::new()
+        };
+
         if database_id != entry.id as i64 {
             transaction.execute(
                 "DELETE FROM clipboard_entries WHERE id = ?1",
@@ -227,6 +243,7 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
         }
 
         transaction.commit()?;
+        remove_cached_previews(removed_preview_urls);
         Ok(())
     })
 }
@@ -238,6 +255,7 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
 
     with_connection(|connection| {
         let transaction = connection.transaction()?;
+        let preview_urls = image_preview_urls_for_ids(&transaction, ids)?;
 
         for id in ids {
             transaction.execute(
@@ -247,25 +265,29 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
         }
 
         transaction.commit()?;
+        remove_cached_previews(preview_urls);
         Ok(())
     })
 }
 
 pub fn clear_history() -> Result<(), StorageError> {
     with_connection(|connection| {
+        let preview_urls = all_image_preview_urls(connection)?;
         connection.execute("DELETE FROM clipboard_entries", [])?;
+        remove_cached_previews(preview_urls);
         Ok(())
     })
 }
 
 pub fn delete_entries_older_than(cutoff: DateTime<Local>) -> Result<usize, StorageError> {
     with_connection(|connection| {
-        connection
-            .execute(
-                "DELETE FROM clipboard_entries WHERE captured_at_millis < ?1",
-                params![cutoff.timestamp_millis()],
-            )
-            .map_err(StorageError::from)
+        let preview_urls = image_preview_urls_older_than(connection, cutoff)?;
+        let removed = connection.execute(
+            "DELETE FROM clipboard_entries WHERE captured_at_millis < ?1",
+            params![cutoff.timestamp_millis()],
+        )?;
+        remove_cached_previews(preview_urls);
+        Ok(removed)
     })
 }
 
@@ -273,6 +295,7 @@ pub fn compact_database() -> Result<(), StorageError> {
     with_connection(|connection| {
         ensure_current_schema_columns(connection)?;
         compress_stored_images(connection)?;
+        materialize_cached_image_previews(connection)?;
         populate_content_hashes(connection)?;
         deduplicate_entries(connection)?;
         create_content_hash_index(connection)?;
@@ -390,6 +413,173 @@ pub fn database_path() -> Result<PathBuf, StorageError> {
     Ok(directory.join(DATABASE_FILE))
 }
 
+fn image_cache_directory() -> Result<PathBuf, StorageError> {
+    let directory = data_directory().join(IMAGE_CACHE_DIR);
+    fs::create_dir_all(&directory)?;
+    Ok(directory)
+}
+
+fn cached_image_preview_path(entry_id: u64) -> Result<PathBuf, StorageError> {
+    Ok(image_cache_directory()?.join(format!("image-preview-{entry_id}.png")))
+}
+
+fn write_cached_image_preview(
+    entry_id: u64,
+    image: &ClipboardImage,
+) -> Result<Option<String>, StorageError> {
+    let Some(bytes) = image.preview_png_bytes() else {
+        return Ok(image.preview_url.clone());
+    };
+
+    let path = cached_image_preview_path(entry_id)?;
+    fs::write(&path, bytes)?;
+    Ok(Some(path_to_file_url(&path)))
+}
+
+fn image_preview_urls_for_ids(
+    connection: &Connection,
+    ids: &[u64],
+) -> Result<Vec<String>, StorageError> {
+    let mut urls = Vec::new();
+    for id in ids {
+        if let Some(url) = connection
+            .query_row(
+                "SELECT image_preview_url FROM clipboard_entries WHERE id = ?1 AND kind = 'image'",
+                params![*id as i64],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten()
+        {
+            urls.push(url);
+        }
+    }
+
+    Ok(urls)
+}
+
+fn all_image_preview_urls(connection: &Connection) -> Result<Vec<String>, StorageError> {
+    image_preview_urls_matching(
+        connection,
+        "SELECT image_preview_url FROM clipboard_entries WHERE kind = 'image' AND image_preview_url IS NOT NULL",
+        [],
+    )
+}
+
+fn image_preview_urls_older_than(
+    connection: &Connection,
+    cutoff: DateTime<Local>,
+) -> Result<Vec<String>, StorageError> {
+    image_preview_urls_matching(
+        connection,
+        "SELECT image_preview_url FROM clipboard_entries WHERE kind = 'image' AND image_preview_url IS NOT NULL AND captured_at_millis < ?1",
+        params![cutoff.timestamp_millis()],
+    )
+}
+
+fn image_preview_urls_matching<P>(
+    connection: &Connection,
+    sql: &str,
+    params: P,
+) -> Result<Vec<String>, StorageError>
+where
+    P: rusqlite::Params,
+{
+    let mut statement = connection.prepare(sql)?;
+    statement
+        .query_map(params, |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn remove_cached_previews(urls: Vec<String>) {
+    for url in urls {
+        if let Some(path) = cached_preview_path_from_url(&url) {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn cached_preview_exists(url: Option<&str>) -> bool {
+    url.and_then(cached_preview_path_from_url)
+        .is_some_and(|path| path.is_file())
+}
+
+fn cached_preview_path_from_url(url: &str) -> Option<PathBuf> {
+    let path = file_url_to_path(url)?;
+    let cache_directory = image_cache_directory().ok()?;
+    (path.parent() == Some(cache_directory.as_path())).then_some(path)
+}
+
+fn path_to_file_url(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let prefix = if path.starts_with('/') {
+        "file://"
+    } else {
+        "file:///"
+    };
+    format!("{prefix}{}", percent_encode_file_url_path(&path))
+}
+
+fn file_url_to_path(url: &str) -> Option<PathBuf> {
+    let path = url
+        .strip_prefix("file:///")
+        .or_else(|| url.strip_prefix("file://"))?;
+    let path = percent_decode_file_url_path(path)?;
+
+    #[cfg(windows)]
+    {
+        Some(PathBuf::from(path.replace('/', "\\")))
+    }
+
+    #[cfg(not(windows))]
+    {
+        Some(PathBuf::from(format!("/{path}")))
+    }
+}
+
+fn percent_encode_file_url_path(path: &str) -> String {
+    let mut encoded = String::new();
+    for byte in path.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b':' | b'/' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            byte => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn percent_decode_file_url_path(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes.get(index + 1).copied()?;
+            let low = bytes.get(index + 2).copied()?;
+            decoded.push(hex_value(high)? * 16 + hex_value(low)?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn with_connection<T>(
     operation: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
 ) -> Result<T, StorageError> {
@@ -468,6 +658,7 @@ fn migrate(connection: &Connection) -> Result<(), StorageError> {
         params![IMAGE_FORMAT_PNG],
     )?;
     compress_stored_images(connection)?;
+    materialize_cached_image_previews(connection)?;
     populate_content_hashes(connection)?;
     deduplicate_entries(connection)?;
     create_content_hash_index(connection)?;
@@ -589,7 +780,9 @@ fn deduplicate_entries(connection: &Connection) -> Result<(), StorageError> {
         )?;
 
         for (id, _, _, _) in rows.into_iter().skip(1) {
+            let preview_urls = image_preview_urls_for_ids(connection, &[id as u64])?;
             connection.execute("DELETE FROM clipboard_entries WHERE id = ?1", params![id])?;
+            remove_cached_previews(preview_urls);
         }
     }
 
@@ -602,6 +795,48 @@ fn create_content_hash_index(connection: &Connection) -> Result<(), StorageError
              ON clipboard_entries(content_hash) \
              WHERE content_hash IS NOT NULL;",
     )?;
+    Ok(())
+}
+
+fn materialize_cached_image_previews(connection: &Connection) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT id, image_width, image_height, image_blob, image_preview_url \
+         FROM clipboard_entries \
+         WHERE kind = 'image' AND image_blob IS NOT NULL",
+    )?;
+
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u64,
+                row.get::<_, Option<i64>>(1)?.unwrap_or_default().max(0) as usize,
+                row.get::<_, Option<i64>>(2)?.unwrap_or_default().max(0) as usize,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+
+    for (id, width, height, bytes, preview_url) in rows {
+        if cached_preview_exists(preview_url.as_deref()) {
+            continue;
+        }
+
+        let Some(image) = ClipboardImage::from_stored_bytes(width, height, bytes, preview_url)
+        else {
+            continue;
+        };
+        let Some(cached_url) = write_cached_image_preview(id, &image)? else {
+            continue;
+        };
+
+        connection.execute(
+            "UPDATE clipboard_entries SET image_preview_url = ?2 WHERE id = ?1",
+            params![id as i64, cached_url],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -901,6 +1136,17 @@ mod tests {
         })
         .unwrap();
         assert!(stored_image.starts_with(PNG_SIGNATURE));
+        let preview_path = match &loaded_history.entry(11).unwrap().content {
+            ClipboardContent::Image(image) => image
+                .preview_url
+                .as_deref()
+                .and_then(file_url_to_path)
+                .unwrap(),
+            _ => unreachable!(),
+        };
+        let cache_directory = directory.join(IMAGE_CACHE_DIR);
+        assert_eq!(preview_path.parent(), Some(cache_directory.as_path()));
+        assert!(preview_path.is_file());
         assert!(matches!(
             &loaded_history.entry(12).unwrap().content,
             ClipboardContent::Files(files) if files == &["C:\\tmp\\a.txt", "D:\\b.png"]
@@ -933,6 +1179,9 @@ mod tests {
 
         delete_entries(&[10]).unwrap();
         assert!(load_history(10).unwrap().entry(10).is_none());
+
+        delete_entries(&[11]).unwrap();
+        assert!(!preview_path.exists());
 
         reset_storage_for_tests();
         *test_data_directory().lock().unwrap() = None;

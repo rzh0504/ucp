@@ -171,6 +171,10 @@ impl ClipboardImage {
         encode_png(self.rgba_bytes()?, self.width, self.height)
     }
 
+    pub fn preview_png_bytes(&self) -> Option<Vec<u8>> {
+        encode_image_preview(self.rgba_bytes()?, self.width, self.height)
+    }
+
     pub fn stored_bytes(&self) -> Option<Vec<u8>> {
         self.to_png_bytes()
             .or_else(|| self.rgba_bytes().map(Vec::from))
