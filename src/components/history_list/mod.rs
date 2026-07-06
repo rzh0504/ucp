@@ -21,6 +21,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 #[component]
@@ -47,15 +48,17 @@ pub fn HistoryList(
     let mut show_focus_highlight = use_signal(|| false);
     let deleting_ids = use_signal(Vec::<u64>::new);
     let entry_ids = Rc::new(entries.iter().map(|entry| entry.id).collect::<Vec<_>>());
+    let entry_id_values = entry_ids.iter().copied().collect::<HashSet<_>>();
     let keyboard_entry_ids = entry_ids.clone();
-    let keyboard_entries = entries.clone();
     let paste_window = use_window();
     let deleting_id_values = deleting_ids.read().clone();
-    let visible_selected_ids = selected_ids
-        .read()
+    let deleting_id_set = deleting_id_values.iter().copied().collect::<HashSet<_>>();
+    let selected_id_values = selected_ids.read().clone();
+    let selected_id_set = selected_id_values.iter().copied().collect::<HashSet<_>>();
+    let visible_selected_ids = selected_id_values
         .iter()
         .copied()
-        .filter(|id| entry_ids.contains(id) && !deleting_id_values.contains(id))
+        .filter(|id| entry_id_values.contains(id) && !deleting_id_set.contains(id))
         .collect::<Vec<_>>();
     let visible_selected_count = visible_selected_ids.len();
 
@@ -187,9 +190,7 @@ pub fn HistoryList(
                             event.prevent_default();
                             if let Some(id) = focused_entry_id(&keyboard_entry_ids, focused_id()) {
                                 let should_quick_paste = quick_paste
-                                    && keyboard_entries
-                                        .iter()
-                                        .any(|entry| entry.id == id && entry.is_text());
+                                    && history.read().entry(id).is_some_and(|entry| entry.is_text());
 
                                 if should_quick_paste {
                                     if copy_entry(id, history, ignored_clipboard_write, promote_on_copy, status, language) {
@@ -261,6 +262,8 @@ pub fn HistoryList(
                             entry: entry.clone(),
                             index: index + 1,
                             entry_ids: entry_ids.clone(),
+                            is_selected: selected_id_set.contains(&entry.id),
+                            is_deleting: deleting_id_set.contains(&entry.id),
                             history,
                             ignored_clipboard_write,
                             selected_ids,

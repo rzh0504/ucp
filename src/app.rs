@@ -61,6 +61,7 @@ const NORMAL_WINDOW_MIN_WIDTH: f64 = 860.0;
 const NORMAL_WINDOW_MIN_HEIGHT: f64 = 620.0;
 const WIDGET_WINDOW_WIDTH: f64 = 420.0;
 const WIDGET_WINDOW_HEIGHT: f64 = 620.0;
+const SEARCH_DEBOUNCE_DELAY: Duration = Duration::from_millis(120);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ClipboardMonitorPauseDuration {
@@ -117,6 +118,7 @@ pub fn App() -> Element {
     let settings = use_signal(move || initial_settings);
     let history = use_signal(move || initial_history);
     let mut query = use_signal(String::new);
+    let mut debounced_query = use_signal(String::new);
     let mut active_filter = use_signal(|| ClipboardFilter::All);
     let mut active_page = use_signal(|| AppPage::History);
     let search_input = use_signal(|| None::<Rc<MountedData>>);
@@ -125,6 +127,7 @@ pub fn App() -> Element {
     let ignored_clipboard_write = use_signal(|| None::<ClipboardContent>);
     let clipboard_monitor_paused = use_signal(|| false);
     let mut status_clear_generation = use_signal(|| 0_u64);
+    let mut search_generation = use_signal(|| 0_u64);
     let mut startup_cleanup_done = use_signal(|| false);
     let mut suppress_window_control_hover = use_signal(|| false);
     let desktop = use_window();
@@ -288,6 +291,24 @@ pub fn App() -> Element {
         });
     });
 
+    use_effect(move || {
+        let next_query = query();
+        let generation = *search_generation.peek() + 1;
+        search_generation.set(generation);
+
+        if next_query.is_empty() {
+            debounced_query.set(String::new());
+            return;
+        }
+
+        spawn(async move {
+            Delay::new(SEARCH_DEBOUNCE_DELAY).await;
+            if *search_generation.peek() == generation {
+                debounced_query.set(next_query);
+            }
+        });
+    });
+
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         crate::clipboard_watcher::watch_clipboard(
             history,
@@ -329,7 +350,11 @@ pub fn App() -> Element {
         }
     });
 
-    let snapshot = use_memo(move || history.read().filtered(query().as_str(), active_filter()));
+    let snapshot = use_memo(move || {
+        history
+            .read()
+            .filtered(debounced_query().as_str(), active_filter())
+    });
     let counts = use_memo(move || history.read().counts());
     let snapshot_entries = snapshot();
     let counts_snapshot = counts();
@@ -338,7 +363,7 @@ pub fn App() -> Element {
     let clear_history_count = history_count_for_filter(counts_snapshot, active_filter_snapshot);
     let settings_snapshot = settings();
     let language = settings_snapshot.language;
-    let query_snapshot = query();
+    let query_snapshot = debounced_query();
     let background_opacity = if settings_snapshot.desktop_widget {
         settings_snapshot.background_opacity
     } else {
@@ -414,9 +439,10 @@ pub fn App() -> Element {
                     if active_page() == AppPage::Settings {
                         event.prevent_default();
                         active_page.set(AppPage::History);
-                    } else if !query.read().is_empty() {
+                    } else if !query.read().is_empty() || !debounced_query.read().is_empty() {
                         event.prevent_default();
                         query.set(String::new());
+                        debounced_query.set(String::new());
                         if let Some(element) = shell.read().clone() {
                             spawn(async move {
                                 let _ = element.set_focus(true).await;

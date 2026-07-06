@@ -21,6 +21,8 @@ pub(super) fn HistoryRow(
     entry: ClipboardEntry,
     index: usize,
     entry_ids: Rc<Vec<u64>>,
+    is_selected: bool,
+    is_deleting: bool,
     history: Signal<ClipboardHistory>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     mut selected_ids: Signal<Vec<u64>>,
@@ -41,9 +43,7 @@ pub(super) fn HistoryRow(
     let mut files_expanded = use_signal(|| false);
     let mut context_menu_open = use_signal(|| None::<bool>);
     let paste_window = use_window();
-    let is_selected = selected_ids.read().contains(&id);
     let is_focus_highlighted = show_focus_highlight() && focused_id() == Some(id);
-    let is_deleting = deleting_ids.read().contains(&id);
     let mut row_class = "history-row".to_string();
     if is_selected {
         row_class.push_str(" is-selected");
@@ -64,14 +64,15 @@ pub(super) fn HistoryRow(
         || file_paths
             .as_ref()
             .is_some_and(|files| files.iter().any(|file| !file.trim().is_empty()));
-    let entry_title = entry.title_with_language(language);
-    let entry_size = entry.size_label_with_language(language);
-    let entry_age = entry.age_label_with_language(language);
     let show_size = !entry.is_text() || show_text_length;
+    let entry_title = (!is_image).then(|| entry.title_with_language(language));
+    let entry_size = show_size.then(|| entry.size_label_with_language(language));
+    let entry_age = show_copy_time.then(|| entry.age_label_with_language(language));
     let file_display = match &entry.content {
         ClipboardContent::Files(files) => Some(FileListDisplay::new(files, language)),
         _ => None,
     };
+    let files_expanded_value = files_expanded();
     let image_to_save = match &entry.content {
         ClipboardContent::Image(image) => Some((id, image.clone())),
         _ => None,
@@ -170,12 +171,14 @@ pub(super) fn HistoryRow(
                                     }
                                 }
                                 if show_copy_time {
-                                    span { "{entry_age}" }
+                                    if let Some(entry_age) = &entry_age {
+                                        span { "{entry_age}" }
+                                    }
                                 }
                             }
                             if let Some(file_display) = &file_display {
                                 div { class: "entry-file-list",
-                                    for file in file_display.visible_files(files_expanded()).iter() {
+                                    for file in file_display.visible_files(files_expanded_value).iter() {
                                         div { class: if file.exists { "entry-file-row" } else { "entry-file-row is-missing" },
                                             if let Some(icon_url) = &file.icon_url {
                                                 img {
@@ -191,7 +194,7 @@ pub(super) fn HistoryRow(
                                             p { class: if file.exists { "entry-title" } else { "entry-title is-muted" }, "{file.name}" }
                                         }
                                     }
-                                    if file_display.hidden_count(files_expanded()) > 0 {
+                                    if file_display.hidden_count(files_expanded_value) > 0 {
                                         span {
                                             class: "entry-file-expand",
                                             role: "button",
@@ -199,9 +202,9 @@ pub(super) fn HistoryRow(
                                                 event.stop_propagation();
                                                 files_expanded.set(true);
                                             },
-                                            "{expand_more_label(language, file_display.hidden_count(files_expanded()))}"
+                                            "{expand_more_label(language, file_display.hidden_count(files_expanded_value))}"
                                         }
-                                    } else if file_display.can_collapse(files_expanded()) {
+                                    } else if file_display.can_collapse(files_expanded_value) {
                                         span {
                                             class: "entry-file-expand",
                                             role: "button",
@@ -215,9 +218,9 @@ pub(super) fn HistoryRow(
                                 }
                                 p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
                             } else if !is_image {
-                                p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title}" }
+                                p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title.as_deref().unwrap_or_default()}" }
                                 if show_size {
-                                    p { class: "entry-size", "{entry_size}" }
+                                    p { class: "entry-size", "{entry_size.as_deref().unwrap_or_default()}" }
                                 }
                             }
                         }

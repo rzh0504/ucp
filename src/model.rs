@@ -283,14 +283,6 @@ impl ClipboardContent {
         }
     }
 
-    pub fn searchable_text(&self) -> String {
-        match self {
-            Self::Text(text) => text.clone(),
-            Self::Image(image) => format!("图像 {} x {}", image.width, image.height),
-            Self::Files(files) => files.join("\n"),
-        }
-    }
-
     pub fn title_with_language(&self, language: AppLanguage) -> String {
         match self {
             Self::Text(text) => text.clone(),
@@ -517,11 +509,7 @@ impl ClipboardHistory {
                     return false;
                 }
 
-                entry
-                    .content
-                    .searchable_text()
-                    .to_lowercase()
-                    .contains(normalized_query.as_str())
+                content_matches_query(&entry.content, normalized_query.as_str())
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -662,6 +650,16 @@ fn matches_filter(entry: &ClipboardEntry, filter: ClipboardFilter) -> bool {
         ClipboardFilter::Image => entry.kind() == ClipboardKind::Image,
         ClipboardFilter::File => entry.kind() == ClipboardKind::File,
         ClipboardFilter::Favorite => entry.favorite,
+    }
+}
+
+fn content_matches_query(content: &ClipboardContent, normalized_query: &str) -> bool {
+    match content {
+        ClipboardContent::Text(text) => text.to_lowercase().contains(normalized_query),
+        ClipboardContent::Files(files) => files
+            .iter()
+            .any(|file| file.to_lowercase().contains(normalized_query)),
+        ClipboardContent::Image(_) => false,
     }
 }
 
