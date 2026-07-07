@@ -12,6 +12,7 @@ use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, Clipboard
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -58,6 +59,7 @@ impl From<rusqlite::Error> for StorageError {
 
 pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
     with_connection(|connection| {
+        let mut files_by_entry = load_all_files(connection)?;
         let mut statement = connection.prepare(
             "SELECT id, kind, text_content, image_width, image_height, image_preview_url, \
                     captured_at_millis, pinned, favorite \
@@ -85,7 +87,9 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
                         bytes: None,
                         preview_url: row.get(5)?,
                     }),
-                    "file" => ClipboardContent::Files(load_files(connection, id)?),
+                    "file" => {
+                        ClipboardContent::Files(files_by_entry.remove(&id).unwrap_or_default())
+                    }
                     _ => ClipboardContent::Text(String::new()),
                 };
 
@@ -135,31 +139,30 @@ pub fn load_image(entry_id: u64) -> Result<Option<ClipboardImage>, StorageError>
 }
 
 pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
-    with_connection(|connection| {
-        let transaction = connection.transaction()?;
+    let kind = entry.kind().key();
+    let mut text_content: Option<&str> = None;
+    let mut image_width: Option<i64> = None;
+    let mut image_height: Option<i64> = None;
+    let mut image_blob: Option<Vec<u8>> = None;
+    let mut image_format: Option<&str> = None;
+    let mut image_preview_url: Option<String> = None;
 
-        let kind = entry.kind().key();
-        let mut text_content: Option<&str> = None;
-        let mut image_width: Option<i64> = None;
-        let mut image_height: Option<i64> = None;
-        let mut image_blob: Option<Vec<u8>> = None;
-        let mut image_format: Option<&str> = None;
-        let mut image_preview_url: Option<&str> = None;
-
-        match &entry.content {
-            ClipboardContent::Text(text) => text_content = Some(text),
-            ClipboardContent::Image(image) => {
-                image_width = Some(image.width as i64);
-                image_height = Some(image.height as i64);
-                image_blob = image.stored_bytes();
-                image_format = image_blob.as_ref().map(|_| IMAGE_FORMAT_PNG);
-                image_preview_url = image.preview_url.as_deref();
-            }
-            ClipboardContent::Files(_) => {}
+    match &entry.content {
+        ClipboardContent::Text(text) => text_content = Some(text),
+        ClipboardContent::Image(image) => {
+            image_width = Some(image.width as i64);
+            image_height = Some(image.height as i64);
+            image_blob = image.stored_bytes();
+            image_format = image_blob.as_ref().map(|_| IMAGE_FORMAT_PNG);
+            image_preview_url = image.preview_url.clone();
         }
-        let content_hash = content_hash_for_entry(entry, image_blob.as_deref());
+        ClipboardContent::Files(_) => {}
+    }
+    let content_hash = content_hash_for_entry(entry, image_blob.as_deref());
+
+    with_connection(|connection| {
         let database_id = if let Some(hash) = content_hash.as_deref() {
-            transaction
+            connection
                 .query_row(
                     "SELECT id FROM clipboard_entries WHERE content_hash = ?1 AND id <> ?2",
                     params![hash, entry.id as i64],
@@ -177,10 +180,11 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
             }
             _ => None,
         };
-        if let Some(url) = cached_image_preview_url.as_deref() {
+        if let Some(url) = cached_image_preview_url {
             image_preview_url = Some(url);
         }
 
+        let transaction = connection.transaction()?;
         transaction.execute(
             "INSERT INTO clipboard_entries (\
                  id, kind, text_content, image_width, image_height, image_blob, image_format, \
@@ -212,7 +216,7 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
                 image_height,
                 image_blob.as_deref(),
                 image_format,
-                image_preview_url,
+                image_preview_url.as_deref(),
                 entry.captured_at.timestamp_millis(),
                 entry.pinned as i64,
                 entry.favorite as i64,
@@ -444,6 +448,26 @@ fn load_files(connection: &Connection, entry_id: u64) -> rusqlite::Result<Vec<St
     statement
         .query_map(params![entry_id as i64], |row| row.get(0))?
         .collect()
+}
+
+fn load_all_files(connection: &Connection) -> rusqlite::Result<HashMap<u64, Vec<String>>> {
+    let mut statement = connection.prepare(
+        "SELECT entry_id, path FROM clipboard_files ORDER BY entry_id ASC, position ASC",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?))
+    })?;
+    let mut files_by_entry = HashMap::new();
+
+    for row in rows {
+        let (entry_id, path) = row?;
+        files_by_entry
+            .entry(entry_id)
+            .or_insert_with(Vec::new)
+            .push(path);
+    }
+
+    Ok(files_by_entry)
 }
 
 fn data_directory() -> PathBuf {

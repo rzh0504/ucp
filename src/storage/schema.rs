@@ -50,16 +50,18 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StorageError> {
     )?;
 
     ensure_current_schema_columns(connection)?;
-    connection.execute(
-        "UPDATE clipboard_entries \
-         SET image_format = ?1 \
-         WHERE kind = 'image' AND image_blob IS NOT NULL AND image_format IS NULL",
-        params![IMAGE_FORMAT_PNG],
-    )?;
-    compress_stored_images(connection)?;
-    materialize_cached_image_previews(connection)?;
-    populate_content_hashes(connection)?;
-    deduplicate_entries(connection)?;
+    if user_version < SCHEMA_VERSION {
+        connection.execute(
+            "UPDATE clipboard_entries \
+             SET image_format = ?1 \
+             WHERE kind = 'image' AND image_blob IS NOT NULL AND image_format IS NULL",
+            params![IMAGE_FORMAT_PNG],
+        )?;
+        compress_stored_images(connection)?;
+        materialize_cached_image_previews(connection)?;
+        populate_content_hashes(connection)?;
+        deduplicate_entries(connection)?;
+    }
     create_content_hash_index(connection)?;
 
     connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
