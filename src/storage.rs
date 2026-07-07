@@ -21,7 +21,7 @@ use std::sync::Mutex;
 #[cfg(test)]
 use std::sync::OnceLock;
 
-const APP_DIR: &str = "UCP Clipboard";
+const APP_DIR: &str = "UCP";
 const DATABASE_FILE: &str = "history.ucp";
 const SCHEMA_VERSION: i32 = 3;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";

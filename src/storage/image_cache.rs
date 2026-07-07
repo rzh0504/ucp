@@ -3,7 +3,7 @@ use crate::model::ClipboardImage;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const IMAGE_CACHE_DIR: &str = "image-cache";
+const IMAGE_CACHE_DIR: &str = "cache";
 
 pub(super) fn write_preview(
     entry_id: u64,
@@ -126,14 +126,14 @@ mod tests {
     #[test]
     fn file_url_round_trip_handles_platform_paths() {
         #[cfg(windows)]
-        let path = PathBuf::from(r"C:\Users\Tester\UCP Clipboard\image-cache\预览 1.png");
+        let path = PathBuf::from(r"C:\Users\Tester\UCP\cache\预览 1.png");
         #[cfg(not(windows))]
-        let path = PathBuf::from("/home/tester/UCP Clipboard/image-cache/预览 1.png");
+        let path = PathBuf::from("/home/tester/UCP/cache/预览 1.png");
 
         let url = path_to_file_url(&path);
 
         assert!(url.starts_with("file://"));
-        assert!(url.contains("UCP%20Clipboard"));
+        assert!(url.contains("UCP"));
         assert_eq!(file_url_to_path(&url).as_deref(), Some(path.as_path()));
     }
 

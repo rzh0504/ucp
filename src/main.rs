@@ -13,7 +13,7 @@ use app::App;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour};
 
 const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
-const APP_DIR: &str = "UCP Clipboard";
+const APP_DIR: &str = "UCP";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
