@@ -10,7 +10,7 @@ pub use settings::{load_settings, save_settings};
 
 use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage};
 use chrono::{DateTime, Local, TimeZone};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::env;
@@ -267,12 +267,12 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
         let transaction = connection.transaction()?;
         let preview_urls = image_preview_urls_for_ids(&transaction, ids)?;
 
-        for id in ids {
-            transaction.execute(
-                "DELETE FROM clipboard_entries WHERE id = ?1",
-                params![*id as i64],
-            )?;
-        }
+        let database_ids = database_ids(ids);
+        let placeholders = sql_placeholders(database_ids.len());
+        transaction.execute(
+            &format!("DELETE FROM clipboard_entries WHERE id IN ({placeholders})"),
+            params_from_iter(database_ids),
+        )?;
 
         transaction.commit()?;
         image_cache::remove_previews(preview_urls);
@@ -324,22 +324,33 @@ fn image_preview_urls_for_ids(
     connection: &Connection,
     ids: &[u64],
 ) -> Result<Vec<String>, StorageError> {
-    let mut urls = Vec::new();
-    for id in ids {
-        if let Some(url) = connection
-            .query_row(
-                "SELECT image_preview_url FROM clipboard_entries WHERE id = ?1 AND kind = 'image'",
-                params![*id as i64],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten()
-        {
-            urls.push(url);
-        }
+    if ids.is_empty() {
+        return Ok(Vec::new());
     }
 
-    Ok(urls)
+    let database_ids = database_ids(ids);
+    let placeholders = sql_placeholders(database_ids.len());
+    image_preview_urls_matching(
+        connection,
+        &format!(
+            "SELECT image_preview_url \
+             FROM clipboard_entries \
+             WHERE kind = 'image' \
+               AND image_preview_url IS NOT NULL \
+               AND id IN ({placeholders})"
+        ),
+        params_from_iter(database_ids),
+    )
+}
+
+fn database_ids(ids: &[u64]) -> Vec<i64> {
+    ids.iter().map(|id| *id as i64).collect()
+}
+
+fn sql_placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn all_image_preview_urls(connection: &Connection) -> Result<Vec<String>, StorageError> {
