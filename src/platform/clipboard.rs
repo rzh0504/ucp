@@ -231,7 +231,7 @@ function run(argv) {
 }
 "#;
 
-    command_status(
+    unix::command_status(
         "osascript",
         &["-l", "JavaScript", "-e", script, "--"],
         &files,
@@ -373,7 +373,7 @@ pub fn listen_for_updates(
     std::thread::spawn(move || {
         let mut last_change_count = macos_pasteboard_change_count();
         while shutdown_rx
-            .recv_timeout(Duration::from_millis(650))
+            .recv_timeout(std::time::Duration::from_millis(650))
             .is_err()
         {
             let change_count = macos_pasteboard_change_count();

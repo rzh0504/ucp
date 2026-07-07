@@ -50,7 +50,7 @@ fn main() {
         platform::single_instance::SingleInstance::Unavailable => None,
     };
 
-    let mut config = Config::new()
+    let config = Config::new()
         .with_window(
             WindowBuilder::new()
                 .with_title("UCP Clipboard")
@@ -68,9 +68,7 @@ fn main() {
         .with_background_color((0, 0, 0, 0));
 
     #[cfg(windows)]
-    {
-        config = config.with_data_directory(webview_data_directory());
-    }
+    let config = config.with_data_directory(webview_data_directory());
 
     dioxus::LaunchBuilder::new().with_cfg(config).launch(App);
 }
