@@ -25,6 +25,7 @@ use std::sync::OnceLock;
 const APP_DIR: &str = "UCP";
 const DATABASE_FILE: &str = "history.ucp";
 const SCHEMA_VERSION: i32 = 3;
+const BUSY_TIMEOUT_MS: u64 = 3_000;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const IMAGE_FORMAT_PNG: &str = "png";
 static DATABASE_CONNECTION: Mutex<Option<Connection>> = Mutex::new(None);
@@ -408,6 +409,9 @@ fn with_connection<T>(
 fn open_connection() -> Result<Connection, StorageError> {
     let path = database_path()?;
     let connection = Connection::open(&path)?;
+    connection.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
+    connection.pragma_update(None, "journal_mode", "WAL")?;
+    connection.pragma_update(None, "synchronous", "NORMAL")?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     schema::migrate(&connection)?;
     Ok(connection)
