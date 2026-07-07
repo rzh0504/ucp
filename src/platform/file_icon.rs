@@ -4,9 +4,10 @@ mod imp {
     use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
     use std::collections::HashMap;
     use std::ffi::c_void;
+    use std::fs;
     use std::mem::{size_of, zeroed};
     use std::os::windows::ffi::OsStrExt;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
     use windows_sys::Win32::Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
@@ -24,6 +25,9 @@ mod imp {
 
     const EXTRA_LARGE_ICON_SIZE: i32 = 48;
     const LARGE_ICON_SIZE: i32 = 32;
+    const APP_DIR: &str = "UCP";
+    const CACHE_DIR: &str = "cache";
+    const FILE_ICON_CACHE_DIR: &str = "file-icons";
     const IID_IIMAGELIST: GUID = GUID::from_u128(0x46eb5926_582e_4017_9fdf_e8998daa0950);
     const ILD_TRANSPARENT: u32 = 1;
     static ICON_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
@@ -53,11 +57,18 @@ mod imp {
             return icon;
         }
 
+        if let Some(icon) = cached_file_icon_url(&key) {
+            cache.lock().ok()?.insert(key, Some(icon.clone()));
+            return Some(icon);
+        }
+
         let icon = icon_png(path).map(|png| {
-            format!(
-                "data:image/png;base64,{}",
-                general_purpose::STANDARD.encode(png)
-            )
+            write_cached_file_icon(&key, &png).unwrap_or_else(|| {
+                format!(
+                    "data:image/png;base64,{}",
+                    general_purpose::STANDARD.encode(png)
+                )
+            })
         });
 
         cache.lock().ok()?.insert(key, icon.clone());
@@ -70,17 +81,61 @@ mod imp {
             return None;
         }
 
-        let path_ref = Path::new(path);
-        if path_ref.is_dir() {
+        if is_directory_like_path(path) {
             return Some("dir".to_string());
         }
 
-        path_ref
+        Path::new(path)
             .extension()
             .and_then(|extension| extension.to_str())
             .filter(|extension| !extension.is_empty())
             .map(|extension| format!("ext:{}", extension.to_ascii_lowercase()))
             .or_else(|| Some(format!("path:{}", path.to_ascii_lowercase())))
+    }
+
+    fn is_directory_like_path(path: &str) -> bool {
+        path.ends_with(['\\', '/'])
+    }
+
+    fn cached_file_icon_url(key: &str) -> Option<String> {
+        let path = file_icon_cache_path(key)?;
+        fs::read(path).ok().map(data_url_from_png)
+    }
+
+    fn write_cached_file_icon(key: &str, png: &[u8]) -> Option<String> {
+        let path = file_icon_cache_path(key)?;
+        fs::create_dir_all(path.parent()?).ok()?;
+        fs::write(&path, png).ok()?;
+        Some(data_url_from_png(png.to_vec()))
+    }
+
+    fn file_icon_cache_path(key: &str) -> Option<PathBuf> {
+        Some(cache_directory()?.join(format!("{}.png", cache_file_name(key))))
+    }
+
+    fn cache_directory() -> Option<PathBuf> {
+        Some(
+            std::env::var_os("LOCALAPPDATA")
+                .or_else(|| std::env::var_os("APPDATA"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(APP_DIR)
+                .join(CACHE_DIR)
+                .join(FILE_ICON_CACHE_DIR),
+        )
+    }
+
+    fn cache_file_name(key: &str) -> String {
+        use sha2::{Digest, Sha256};
+
+        format!("{:x}", Sha256::digest(key.as_bytes()))
+    }
+
+    fn data_url_from_png(png: Vec<u8>) -> String {
+        format!(
+            "data:image/png;base64,{}",
+            general_purpose::STANDARD.encode(png)
+        )
     }
 
     fn icon_png(path: &str) -> Option<Vec<u8>> {

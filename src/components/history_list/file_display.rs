@@ -1,9 +1,13 @@
 use crate::i18n;
 use crate::model::AppLanguage;
 use crate::platform;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 const COLLAPSED_FILE_LIMIT: usize = 3;
+static FILE_DISPLAY_CACHE: OnceLock<Mutex<HashMap<(String, &'static str), FileDisplay>>> =
+    OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub(super) struct FileListDisplay {
@@ -72,8 +76,25 @@ pub(super) struct FileDisplay {
 
 impl FileDisplay {
     fn new(path: &str, language: AppLanguage) -> Self {
+        let path = path.trim().to_string();
+        let key = (path.clone(), language.key());
+        let cache = FILE_DISPLAY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(cache) = cache.lock()
+            && let Some(display) = cache.get(&key)
+        {
+            return display.clone();
+        }
+
+        let display = Self::from_path(&path, language);
+        if let Ok(mut cache) = cache.lock() {
+            cache.insert(key, display.clone());
+        }
+
+        display
+    }
+
+    fn from_path(path: &str, language: AppLanguage) -> Self {
         let copy = i18n::tr(language);
-        let path = path.trim();
         let path_ref = Path::new(path);
         let metadata = if path.is_empty() {
             None
