@@ -1,4 +1,5 @@
 .history-list {
+    counter-reset: history-entry;
     min-height: 0;
     overflow-y: auto;
     scrollbar-color: var(--app-border-strong) transparent;
@@ -30,6 +31,7 @@
 }
 
 .history-row {
+    counter-increment: history-entry;
     display: grid;
     grid-template-rows: 1fr;
     border-bottom: 1px solid var(--app-separator);
@@ -79,6 +81,7 @@
 }
 
 .history-row.is-deleting {
+    counter-increment: none;
     grid-template-rows: 0fr;
     border-bottom-color: transparent;
     pointer-events: none;
@@ -144,41 +147,12 @@
     line-height: 16px;
 }
 
-.entry-index-value {
-    grid-area: 1 / 1;
-    line-height: 16px;
+.entry-index::before {
+    content: counter(history-entry);
 }
 
-.entry-index.is-changing .entry-index-value.is-old {
-    animation: entry-index-old-out 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.entry-index.is-changing .entry-index-value.is-new {
-    animation: entry-index-new-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes entry-index-old-out {
-    from {
-        opacity: 0.82;
-        transform: translate3d(0, 0, 0);
-    }
-
-    to {
-        opacity: 0;
-        transform: translate3d(0, -75%, 0);
-    }
-}
-
-@keyframes entry-index-new-in {
-    from {
-        opacity: 0;
-        transform: translate3d(0, 75%, 0);
-    }
-
-    to {
-        opacity: 1;
-        transform: translate3d(0, 0, 0);
-    }
+.history-row.is-deleting .entry-index::before {
+    content: "";
 }
 
 .entry-content {
@@ -457,12 +431,4 @@
         transform: none;
     }
 
-    .entry-index.is-changing .entry-index-value.is-old,
-    .entry-index.is-changing .entry-index-value.is-new {
-        animation: none;
-    }
-
-    .entry-index.is-changing .entry-index-value.is-old {
-        display: none;
-    }
 }

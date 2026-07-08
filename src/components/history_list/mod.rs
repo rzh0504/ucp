@@ -256,11 +256,10 @@ pub fn HistoryList(
                     direction: ScrollDirection::Vertical,
                     tabindex: "0",
                     aria_label: i18n::tr(language).clipboard_history_list,
-                    for (index, entry) in entries.iter().enumerate() {
+                    for entry in entries {
                         HistoryRow {
                             key: "{entry.id}",
                             entry: entry.clone(),
-                            index: index + 1,
                             entry_ids: entry_ids.clone(),
                             is_selected: selected_id_set.contains(&entry.id),
                             is_deleting: deleting_id_set.contains(&entry.id),
