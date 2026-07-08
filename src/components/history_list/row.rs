@@ -14,7 +14,11 @@ use dioxus_primitives::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton, ToolbarSeparator};
+use futures_timer::Delay;
 use std::rc::Rc;
+use std::time::Duration;
+
+const INDEX_CHANGE_ANIMATION_DELAY: Duration = Duration::from_millis(220);
 
 #[component]
 pub(super) fn HistoryRow(
@@ -42,6 +46,10 @@ pub(super) fn HistoryRow(
     let mut button_ref = use_signal(|| None::<Rc<MountedData>>);
     let mut files_expanded = use_signal(|| false);
     let mut context_menu_open = use_signal(|| None::<bool>);
+    let mut previous_index = use_signal(|| index);
+    let mut visible_index = use_signal(|| index);
+    let mut index_is_changing = use_signal(|| false);
+    let mut index_animation_generation = use_signal(|| 0_u64);
     let paste_window = use_window();
     let is_focus_highlighted = show_focus_highlight() && focused_id() == Some(id);
     let mut row_class = "history-row".to_string();
@@ -99,6 +107,33 @@ pub(super) fn HistoryRow(
             });
         }
     });
+    use_effect(move || {
+        let current_index = *visible_index.peek();
+        if current_index == index {
+            return;
+        }
+
+        let generation = *index_animation_generation.peek() + 1;
+        previous_index.set(current_index);
+        visible_index.set(index);
+        index_is_changing.set(true);
+        index_animation_generation.set(generation);
+
+        spawn(async move {
+            Delay::new(INDEX_CHANGE_ANIMATION_DELAY).await;
+            if *index_animation_generation.peek() == generation {
+                index_is_changing.set(false);
+                previous_index.set(index);
+            }
+        });
+    });
+
+    let visible_index_value = visible_index();
+    let index_class = if index_is_changing() {
+        "entry-index is-changing"
+    } else {
+        "entry-index"
+    };
 
     rsx! {
         ContextMenu {
@@ -151,7 +186,12 @@ pub(super) fn HistoryRow(
                                 hide_window_after_copy(&paste_window);
                             }
                         },
-                        div { class: "entry-index", "{index}" }
+                        div { class: "{index_class}", aria_label: "{visible_index_value}",
+                            if index_is_changing() {
+                                span { class: "entry-index-value is-old", aria_hidden: "true", "{previous_index()}" }
+                            }
+                            span { class: "entry-index-value is-new", "{visible_index_value}" }
+                        }
                         if is_image {
                             if let Some(preview_url) = &image_preview_url {
                                 img {
