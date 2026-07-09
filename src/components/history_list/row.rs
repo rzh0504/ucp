@@ -217,7 +217,7 @@ pub(super) fn HistoryRow(
                                 }
                                 p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
                             } else if !is_image {
-                                p { class: if entry.is_text() { "entry-title" } else { "entry-title is-rich" }, "{entry_title.as_deref().unwrap_or_default()}" }
+                                p { class: if entry.is_text() { "entry-title is-text" } else { "entry-title is-rich" }, "{entry_title.as_deref().unwrap_or_default()}" }
                                 if show_size {
                                     p { class: "entry-size", "{entry_size.as_deref().unwrap_or_default()}" }
                                 }

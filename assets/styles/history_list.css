@@ -216,6 +216,11 @@
     color: var(--app-subtle);
 }
 
+.entry-title.is-text {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
 .entry-title.is-rich {
     color: var(--app-text-secondary);
 }

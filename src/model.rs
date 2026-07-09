@@ -184,7 +184,7 @@ impl ClipboardContent {
 
     pub fn normalized(self) -> Self {
         match self {
-            Self::Text(text) => Self::Text(text.trim().to_string()),
+            Self::Text(text) => Self::Text(text),
             Self::Files(files) => Self::Files(
                 files
                     .into_iter()
@@ -622,11 +622,11 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn duplicate_text_is_normalized_and_not_duplicated() {
+    fn duplicate_text_is_not_duplicated() {
         let mut history = ClipboardHistory::new(10);
 
         let first = history.push(ClipboardContent::Text("hello".to_string()));
-        let duplicate = history.push(ClipboardContent::Text("  hello  ".to_string()));
+        let duplicate = history.push(ClipboardContent::Text("hello".to_string()));
 
         assert!(first.changed);
         assert!(!duplicate.changed);
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn text_content_is_preserved_before_saving_to_history() {
         let mut history = ClipboardHistory::new(10);
-        let text = format!("{}tail", "a".repeat(TEXT_CONTENT_CHAR_LIMIT));
+        let text = format!("\n  {}tail  \n", "a".repeat(TEXT_CONTENT_CHAR_LIMIT));
 
         let entry = history
             .push(ClipboardContent::Text(text.clone()))
