@@ -65,6 +65,7 @@ pub(super) fn HistoryRow(
             .is_some_and(|files| files.iter().any(|file| !file.trim().is_empty()));
     let show_size = !entry.is_text() || show_text_length;
     let entry_title = (!is_image).then(|| entry.title_with_language(language));
+    let entry_title_class = entry_title_class(&entry.content);
     let entry_size = show_size.then(|| entry.size_label_with_language(language));
     let entry_age = show_copy_time.then(|| entry.age_label_with_language(language));
     let file_display = match &entry.content {
@@ -217,7 +218,7 @@ pub(super) fn HistoryRow(
                                 }
                                 p { class: if file_display.missing_count > 0 { "entry-size is-warning" } else { "entry-size" }, "{file_display.stats}" }
                             } else if !is_image {
-                                p { class: if entry.is_text() { "entry-title is-text" } else { "entry-title is-rich" }, "{entry_title.as_deref().unwrap_or_default()}" }
+                                p { class: "{entry_title_class}", "{entry_title.as_deref().unwrap_or_default()}" }
                                 if show_size {
                                     p { class: "entry-size", "{entry_size.as_deref().unwrap_or_default()}" }
                                 }
@@ -305,4 +306,55 @@ fn expand_more_label(language: AppLanguage, count: usize) -> String {
         AppLanguage::Chinese => format!("展开另外 {count} 项"),
         AppLanguage::English => format!("Show {count} more"),
     }
+}
+
+fn entry_title_class(content: &ClipboardContent) -> &'static str {
+    match content {
+        ClipboardContent::Text(text) if should_expand_text_preview(text) => {
+            "entry-title is-text is-structured"
+        }
+        ClipboardContent::Text(_) => "entry-title is-text",
+        _ => "entry-title is-rich",
+    }
+}
+
+fn should_expand_text_preview(text: &str) -> bool {
+    let mut non_empty_lines = 0;
+    let mut short_lines = 0;
+    let mut structure_score = 0;
+
+    for line in text.lines().take(16) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        non_empty_lines += 1;
+        if trimmed.chars().count() <= 120 {
+            short_lines += 1;
+        }
+        if is_structured_line(line, trimmed) {
+            structure_score += 1;
+        }
+    }
+
+    non_empty_lines >= 3 && (structure_score >= 2 || short_lines >= 5)
+}
+
+fn is_structured_line(line: &str, trimmed: &str) -> bool {
+    const STRUCTURED_PREFIXES: [&str; 12] = [
+        "/*", "*", "//", "#", "-", "+", ">", "{", "}", "[", "]", "<",
+    ];
+
+    line.starts_with(char::is_whitespace)
+        || STRUCTURED_PREFIXES
+            .iter()
+            .any(|prefix| trimmed.starts_with(prefix))
+        || trimmed
+            .chars()
+            .last()
+            .is_some_and(|character| matches!(character, '{' | '}' | ';' | ','))
+        || trimmed.contains("=>")
+        || trimmed.contains(" = ")
+        || trimmed.contains(": ")
 }

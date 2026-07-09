@@ -210,6 +210,7 @@
     line-height: 1.35;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
 }
 
 .entry-title.is-muted {
@@ -219,6 +220,11 @@
 .entry-title.is-text {
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+
+.entry-title.is-text.is-structured {
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
 }
 
 .entry-title.is-rich {
@@ -245,6 +251,7 @@
 .entry-file-row .entry-title {
     min-width: 0;
     -webkit-line-clamp: 1;
+    line-clamp: 1;
 }
 
 .entry-file-app-icon {
