@@ -8,9 +8,11 @@ pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const DEFAULT_BACKGROUND_OPACITY: u8 = 100;
 pub const DEFAULT_GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
 pub const MIN_BACKGROUND_OPACITY: u8 = 45;
-pub const TEXT_CONTENT_CHAR_LIMIT: usize = 50_000;
+pub const TEXT_CONTENT_CHAR_LIMIT: usize = 200_000;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
+
+const TEXT_LIST_PREVIEW_CHAR_LIMIT: usize = 500;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppLanguage {
@@ -182,7 +184,7 @@ impl ClipboardContent {
 
     pub fn normalized(self) -> Self {
         match self {
-            Self::Text(text) => Self::Text(limit_text_content(text.trim())),
+            Self::Text(text) => Self::Text(text.trim().to_string()),
             Self::Files(files) => Self::Files(
                 files
                     .into_iter()
@@ -196,7 +198,7 @@ impl ClipboardContent {
 
     pub fn title_with_language(&self, language: AppLanguage) -> String {
         match self {
-            Self::Text(text) => text.clone(),
+            Self::Text(text) => text_title(text),
             Self::Image(_) => crate::i18n::tr(language).image.to_string(),
             Self::Files(files) => {
                 if files.len() == 1 {
@@ -584,12 +586,21 @@ fn sort_entries(entries: &mut [ClipboardEntry]) {
     });
 }
 
-fn limit_text_content(text: &str) -> String {
-    let Some((cutoff, _)) = text.char_indices().nth(TEXT_CONTENT_CHAR_LIMIT) else {
+fn text_title(text: &str) -> String {
+    let (preview, is_oversized) = text_prefix(text, TEXT_LIST_PREVIEW_CHAR_LIMIT);
+    if !is_oversized {
         return text.to_string();
+    }
+
+    format!("{preview}...")
+}
+
+fn text_prefix(text: &str, char_limit: usize) -> (&str, bool) {
+    let Some((cutoff, _)) = text.char_indices().nth(char_limit) else {
+        return (text, false);
     };
 
-    text[..cutoff].to_string()
+    (&text[..cutoff], true)
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -625,31 +636,51 @@ mod tests {
     }
 
     #[test]
-    fn text_content_is_limited_before_saving_to_history() {
+    fn text_content_is_preserved_before_saving_to_history() {
         let mut history = ClipboardHistory::new(10);
         let text = format!("{}tail", "a".repeat(TEXT_CONTENT_CHAR_LIMIT));
 
-        let entry = history.push(ClipboardContent::Text(text)).entry.unwrap();
+        let entry = history
+            .push(ClipboardContent::Text(text.clone()))
+            .entry
+            .unwrap();
 
         assert!(matches!(
             entry.content,
-            ClipboardContent::Text(text) if text.chars().count() == TEXT_CONTENT_CHAR_LIMIT
-                && text.chars().all(|character| character == 'a')
+            ClipboardContent::Text(saved_text) if saved_text == text
         ));
     }
 
     #[test]
-    fn text_content_limit_preserves_character_boundaries() {
-        let mut history = ClipboardHistory::new(10);
+    fn oversized_text_title_is_shortened_for_list_rendering() {
+        let text = format!("{}tail", "a".repeat(TEXT_CONTENT_CHAR_LIMIT));
+        let title = ClipboardContent::Text(text).title_with_language(AppLanguage::English);
+
+        assert_eq!(
+            title.chars().count(),
+            TEXT_LIST_PREVIEW_CHAR_LIMIT + "...".chars().count()
+        );
+        assert!(title.ends_with("..."));
+        assert!(title
+            .trim_end_matches("...")
+            .chars()
+            .all(|character| character == 'a'));
+    }
+
+    #[test]
+    fn oversized_text_title_preserves_character_boundaries() {
         let text = format!("{}界外", "好".repeat(TEXT_CONTENT_CHAR_LIMIT));
+        let title = ClipboardContent::Text(text).title_with_language(AppLanguage::Chinese);
 
-        let entry = history.push(ClipboardContent::Text(text)).entry.unwrap();
-
-        assert!(matches!(
-            entry.content,
-            ClipboardContent::Text(text) if text.chars().count() == TEXT_CONTENT_CHAR_LIMIT
-                && text.chars().all(|character| character == '好')
-        ));
+        assert_eq!(
+            title.chars().count(),
+            TEXT_LIST_PREVIEW_CHAR_LIMIT + "...".chars().count()
+        );
+        assert!(title.ends_with("..."));
+        assert!(title
+            .trim_end_matches("...")
+            .chars()
+            .all(|character| character == '好'));
     }
 
     #[test]
