@@ -16,6 +16,7 @@ use crate::model::{
     AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
 };
 use dioxus::desktop::use_window;
+use dioxus::events::ScrollEvent;
 use dioxus::html::Key;
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
@@ -23,6 +24,11 @@ use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton};
 use std::collections::HashSet;
 use std::rc::Rc;
+
+/// Number of rows rendered initially and appended per batch when scrolling.
+const RENDER_BATCH_SIZE: usize = 40;
+/// Distance (px) from the bottom of the scroll area at which more rows load.
+const LOAD_MORE_THRESHOLD_PX: f64 = 600.0;
 
 #[component]
 pub fn HistoryList(
@@ -47,9 +53,24 @@ pub fn HistoryList(
     let mut focused_id = use_signal(|| None::<u64>);
     let mut show_focus_highlight = use_signal(|| false);
     let deleting_ids = use_signal(Vec::<u64>::new);
+    let mut visible_count = use_signal(|| RENDER_BATCH_SIZE);
+
+    // Reset the render window whenever the tab (filter) or search query changes so
+    // that switching to a large tab does not carry over a huge previously-expanded
+    // window and re-mount everything at once.
+    let reset_key = query.clone();
+    use_effect(use_reactive!(|(reset_key, active_filter)| {
+        let _ = (reset_key, active_filter());
+        visible_count.set(RENDER_BATCH_SIZE);
+    }));
+
     let entry_ids = Rc::new(entries.iter().map(|entry| entry.id).collect::<Vec<_>>());
     let entry_id_values = entry_ids.iter().copied().collect::<HashSet<_>>();
     let keyboard_entry_ids = entry_ids.clone();
+    let total_entries = entries.len();
+    // Clamp the render window to the current entry count. Only these rows are
+    // actually mounted; scrolling near the bottom appends more.
+    let render_limit = visible_count().min(total_entries).max(1);
     let paste_window = use_window();
     let deleting_id_values = deleting_ids.read().clone();
     let deleting_id_set = deleting_id_values.iter().copied().collect::<HashSet<_>>();
@@ -250,13 +271,34 @@ pub fn HistoryList(
                         }
                         _ => {}
                     }
+
+                    // Keyboard navigation (End, Ctrl+A, ArrowDown, ...) can move
+                    // focus to a row that is not rendered yet. Expand the window so
+                    // the focused row exists and the focus effect can run.
+                    if let Some(focused) = focused_id()
+                        && let Some(index) = keyboard_entry_ids
+                            .iter()
+                            .position(|entry_id| *entry_id == focused)
+                        && index >= visible_count()
+                    {
+                        visible_count.set((index + 1 + RENDER_BATCH_SIZE).min(keyboard_entry_ids.len()));
+                    }
                 },
                 ScrollArea {
                     class: "history-list",
                     direction: ScrollDirection::Vertical,
                     tabindex: "0",
                     aria_label: i18n::tr(language).clipboard_history_list,
-                    for entry in entries {
+                    onscroll: move |event: ScrollEvent| {
+                        let data = event.data();
+                        let remaining = f64::from(data.scroll_height())
+                            - data.scroll_top()
+                            - f64::from(data.client_height());
+                        if remaining <= LOAD_MORE_THRESHOLD_PX && visible_count() < total_entries {
+                            visible_count.set((visible_count() + RENDER_BATCH_SIZE).min(total_entries));
+                        }
+                    },
+                    for entry in entries.iter().take(render_limit).cloned() {
                         HistoryRow {
                             key: "{entry.id}",
                             entry: entry.clone(),

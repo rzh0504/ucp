@@ -1,5 +1,6 @@
 //! Defines the [`ScrollArea`] component for creating scrollable areas with customizable scrollbars.
 
+use dioxus::events::ScrollEvent;
 use dioxus::prelude::*;
 
 /// The props for the [`ScrollArea`] component.
@@ -16,6 +17,10 @@ pub struct ScrollAreaProps {
     /// The scroll type.
     #[props(default)]
     pub scroll_type: ReadSignal<ScrollType>,
+
+    /// Optional handler invoked when the scroll area is scrolled.
+    #[props(default)]
+    pub onscroll: Option<EventHandler<ScrollEvent>>,
 
     /// Additional attributes to apply to the scroll area element.
     #[props(extends = GlobalAttributes)]
@@ -88,6 +93,7 @@ pub fn ScrollArea(props: ScrollAreaProps) -> Element {
     let direction = props.direction;
     let scroll_type = props.scroll_type;
     let always_show = props.always_show_scrollbars;
+    let onscroll = props.onscroll;
 
     let (overflow_x, overflow_y, scrollbar_width) = match scroll_type() {
         ScrollType::Auto => match direction() {
@@ -125,6 +131,11 @@ pub fn ScrollArea(props: ScrollAreaProps) -> Element {
                 ScrollDirection::Vertical => "vertical",
                 ScrollDirection::Horizontal => "horizontal",
                 ScrollDirection::Both => "both",
+            },
+            onscroll: move |event| {
+                if let Some(handler) = onscroll {
+                    handler.call(event);
+                }
             },
             ..props.attributes,
 
