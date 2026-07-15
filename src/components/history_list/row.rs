@@ -34,6 +34,7 @@ pub(super) fn HistoryRow(
     hide_after_copy: bool,
     show_copy_time: bool,
     show_text_length: bool,
+    preserve_favorites_on_delete: bool,
     language: AppLanguage,
     mut status: Signal<String>,
 ) -> Element {
@@ -258,6 +259,7 @@ pub(super) fn HistoryRow(
                                     status,
                                     language,
                                     i18n::tr(language).history_deleted,
+                                    preserve_favorites_on_delete,
                                 );
                             },
                             Icon { icon: AppIcon::Delete }
@@ -342,9 +344,8 @@ fn should_expand_text_preview(text: &str) -> bool {
 }
 
 fn is_structured_line(line: &str, trimmed: &str) -> bool {
-    const STRUCTURED_PREFIXES: [&str; 12] = [
-        "/*", "*", "//", "#", "-", "+", ">", "{", "}", "[", "]", "<",
-    ];
+    const STRUCTURED_PREFIXES: [&str; 12] =
+        ["/*", "*", "//", "#", "-", "+", ">", "{", "}", "[", "]", "<"];
 
     line.starts_with(char::is_whitespace)
         || STRUCTURED_PREFIXES

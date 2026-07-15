@@ -1,6 +1,6 @@
 use crate::components::{AppIcon, AppPage, Icon};
 use crate::i18n;
-use crate::model::{AppLanguage, ClipboardFilter, ClipboardHistory, HistoryCounts};
+use crate::model::{AppLanguage, ClipboardFilter, ClipboardHistory};
 use crate::storage;
 use dioxus::prelude::*;
 use dioxus_primitives::alert_dialog::{
@@ -248,6 +248,7 @@ pub(super) fn ClearHistoryButton(
     history: Signal<ClipboardHistory>,
     filter: ClipboardFilter,
     history_count: usize,
+    preserve_favorites_on_delete: bool,
     language: AppLanguage,
     mut status: Signal<String>,
 ) -> Element {
@@ -261,7 +262,8 @@ pub(super) fn ClearHistoryButton(
         clear_label
     };
     let dialog_title = i18n::clear_history_title(language, filter);
-    let dialog_description = i18n::clear_history_description(language, filter);
+    let dialog_description =
+        i18n::clear_history_description(language, filter, preserve_favorites_on_delete);
 
     rsx! {
         button {
@@ -287,9 +289,17 @@ pub(super) fn ClearHistoryButton(
                     AlertDialogAction {
                         class: "alert-dialog-button is-danger",
                         on_click: move |_| {
-                            match clear_history_for_filter(history, filter) {
+                            match clear_history_for_filter(
+                                history,
+                                filter,
+                                preserve_favorites_on_delete,
+                            ) {
                                 Ok(()) => {
-                                    status.set(i18n::history_cleared_message(language, filter));
+                                    status.set(i18n::history_cleared_message(
+                                        language,
+                                        filter,
+                                        preserve_favorites_on_delete,
+                                    ));
                                 }
                                 Err(error) => status.set(match language {
                                     AppLanguage::Chinese => format!("历史清空失败：{error}"),
@@ -305,27 +315,20 @@ pub(super) fn ClearHistoryButton(
     }
 }
 
-pub(super) fn history_count_for_filter(counts: HistoryCounts, filter: ClipboardFilter) -> usize {
-    match filter {
-        ClipboardFilter::All => counts.total,
-        ClipboardFilter::Text => counts.text,
-        ClipboardFilter::Image => counts.image,
-        ClipboardFilter::File => counts.file,
-        ClipboardFilter::Favorite => counts.favorite,
-    }
-}
-
 fn clear_history_for_filter(
     mut history: Signal<ClipboardHistory>,
     filter: ClipboardFilter,
+    preserve_favorites: bool,
 ) -> Result<(), storage::StorageError> {
-    if filter == ClipboardFilter::All {
+    if filter == ClipboardFilter::All && !preserve_favorites {
         storage::clear_history()?;
         history.write().clear();
         return Ok(());
     }
 
-    let ids = history.read().ids_for_filter(filter);
+    let ids = history
+        .read()
+        .deletable_ids_for_filter(filter, preserve_favorites);
     if ids.is_empty() {
         return Ok(());
     }

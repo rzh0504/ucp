@@ -188,7 +188,11 @@ pub fn SettingsPage(
                                 if update_settings(settings, status, |next| next.auto_cleanup_days = days)
                                     && let Some(days) = days
                                 {
-                                    match apply_auto_cleanup(history, days) {
+                                    match apply_auto_cleanup(
+                                        history,
+                                        days,
+                                        settings_snapshot.preserve_favorites_on_delete,
+                                    ) {
                                         Ok(removed) if removed > 0 => {
                                             let mut status = status;
                                             status.set(match language {
@@ -208,6 +212,14 @@ pub fn SettingsPage(
                                 }
                             },
                         }
+                    }
+                    SettingSwitchRow {
+                        label: copy.preserve_favorites_on_delete,
+                        hint: copy.preserve_favorites_on_delete_hint,
+                        checked: settings_snapshot.preserve_favorites_on_delete,
+                        on_change: move |checked| {
+                            update_settings(settings, status, |next| next.preserve_favorites_on_delete = checked);
+                        },
                     }
                 }
 
@@ -845,8 +857,11 @@ fn update_settings(
 fn apply_auto_cleanup(
     mut history: Signal<ClipboardHistory>,
     days: u16,
+    preserve_favorites: bool,
 ) -> Result<usize, storage::StorageError> {
     let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
-    storage::delete_entries_older_than(cutoff)?;
-    Ok(history.write().remove_older_than_days(days))
+    storage::delete_entries_older_than(cutoff, preserve_favorites)?;
+    Ok(history
+        .write()
+        .remove_older_than_days(days, preserve_favorites))
 }

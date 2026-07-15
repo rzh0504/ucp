@@ -17,6 +17,7 @@ struct PersistCaptureJob {
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
+    preserve_favorites_on_delete: bool,
     language: AppLanguage,
     reply: oneshot::Sender<Result<(), String>>,
 }
@@ -138,12 +139,15 @@ async fn capture_clipboard(
 
             let result = history.write().push(content);
             let mut auto_cleanup_cutoff = None;
+            let preserve_favorites_on_delete = settings.peek().preserve_favorites_on_delete;
 
             if result.changed
                 && let Some(days) = settings.peek().auto_cleanup_days
             {
                 auto_cleanup_cutoff = Some(Local::now() - ChronoDuration::days(i64::from(days)));
-                history.write().remove_older_than_days(days);
+                history
+                    .write()
+                    .remove_older_than_days(days, preserve_favorites_on_delete);
             }
 
             if result.entry.is_none()
@@ -157,6 +161,7 @@ async fn capture_clipboard(
                 result.entry,
                 result.removed_ids,
                 auto_cleanup_cutoff,
+                preserve_favorites_on_delete,
                 language,
             )
             .await
@@ -199,6 +204,7 @@ async fn persist_capture_result(
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
+    preserve_favorites_on_delete: bool,
     language: AppLanguage,
 ) -> Result<(), String> {
     let (reply, receiver) = oneshot::channel();
@@ -206,6 +212,7 @@ async fn persist_capture_result(
         entry,
         removed_ids,
         auto_cleanup_cutoff,
+        preserve_favorites_on_delete,
         language,
         reply,
     };
@@ -242,6 +249,7 @@ fn storage_persist_worker() -> &'static std_mpsc::Sender<PersistCaptureJob> {
                     job.entry,
                     job.removed_ids,
                     job.auto_cleanup_cutoff,
+                    job.preserve_favorites_on_delete,
                     job.language,
                 );
                 let _ = job.reply.send(result);
@@ -255,6 +263,7 @@ fn persist_capture_result_blocking(
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
+    preserve_favorites_on_delete: bool,
     language: AppLanguage,
 ) -> Result<(), String> {
     if let Some(entry) = &entry
@@ -274,7 +283,7 @@ fn persist_capture_result_blocking(
     }
 
     if let Some(cutoff) = auto_cleanup_cutoff
-        && let Err(error) = storage::delete_entries_older_than(cutoff)
+        && let Err(error) = storage::delete_entries_older_than(cutoff, preserve_favorites_on_delete)
     {
         return Err(match language {
             AppLanguage::Chinese => format!("自动清理历史失败：{error}"),
@@ -302,8 +311,11 @@ fn save_task_interrupted(language: AppLanguage) -> String {
 pub(crate) fn prune_history_by_age(
     mut history: Signal<ClipboardHistory>,
     days: u16,
+    preserve_favorites: bool,
 ) -> Result<usize, storage::StorageError> {
     let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
-    storage::delete_entries_older_than(cutoff)?;
-    Ok(history.write().remove_older_than_days(days))
+    storage::delete_entries_older_than(cutoff, preserve_favorites)?;
+    Ok(history
+        .write()
+        .remove_older_than_days(days, preserve_favorites))
 }

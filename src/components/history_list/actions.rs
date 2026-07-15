@@ -221,7 +221,16 @@ pub(super) fn delete_entries_with_animation(
     mut status: Signal<String>,
     language: AppLanguage,
     success_message: &'static str,
+    preserve_favorites_on_delete: bool,
 ) {
+    let requested_count = ids.len();
+    ids = history
+        .read()
+        .deletable_ids(&ids, preserve_favorites_on_delete);
+    if requested_count > 0 && ids.is_empty() && preserve_favorites_on_delete {
+        status.set(i18n::tr(language).favorite_preserved.to_string());
+        return;
+    }
     let current_deleting_ids = deleting_ids.read().clone();
     ids.retain(|id| !current_deleting_ids.contains(id));
     if ids.is_empty() {
@@ -342,6 +351,7 @@ pub(super) fn delete_focused_or_selected(
     history: Signal<ClipboardHistory>,
     status: Signal<String>,
     language: AppLanguage,
+    preserve_favorites_on_delete: bool,
 ) {
     let mut ids = selected_ids
         .read()
@@ -368,6 +378,7 @@ pub(super) fn delete_focused_or_selected(
         status,
         language,
         success_message,
+        preserve_favorites_on_delete,
     );
 
     selected_ids.set(Vec::new());

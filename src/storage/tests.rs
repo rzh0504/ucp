@@ -17,6 +17,7 @@ fn storage_round_trips_settings_and_clipboard_entries() {
     let settings = AppSettings {
         history_limit: 50,
         auto_cleanup_days: Some(30),
+        preserve_favorites_on_delete: true,
         language: AppLanguage::English,
         theme: AppTheme::Dark,
         launch_at_startup: true,
@@ -147,6 +148,38 @@ fn storage_round_trips_settings_and_clipboard_entries() {
 
     delete_entries(&[11]).unwrap();
     assert!(!image_cache::exists(Some(preview_url.as_str())));
+
+    reset_storage_for_tests();
+    *test_data_directory().lock().unwrap() = None;
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn age_cleanup_preserves_favorites_when_enabled() {
+    let _guard = storage_test_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = unique_test_directory();
+    reset_storage_for_tests();
+    *test_data_directory().lock().unwrap() = Some(directory.clone());
+
+    let captured_at = Local::now() - chrono::Duration::days(31);
+    let mut regular = ClipboardEntry::new(20, ClipboardContent::Text("regular".to_string()));
+    regular.captured_at = captured_at;
+    save_entry(&regular).unwrap();
+
+    let mut favorite = ClipboardEntry::new(21, ClipboardContent::Text("favorite".to_string()));
+    favorite.captured_at = captured_at;
+    favorite.favorite = true;
+    save_entry(&favorite).unwrap();
+
+    let removed =
+        delete_entries_older_than(Local::now() - chrono::Duration::days(30), true).unwrap();
+    let history = load_history(10).unwrap();
+
+    assert_eq!(removed, 1);
+    assert!(history.entry(20).is_none());
+    assert!(history.entry(21).is_some());
 
     reset_storage_for_tests();
     *test_data_directory().lock().unwrap() = None;

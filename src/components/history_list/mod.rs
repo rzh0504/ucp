@@ -45,6 +45,7 @@ pub fn HistoryList(
     hide_after_copy: bool,
     show_copy_time: bool,
     show_text_length: bool,
+    preserve_favorites_on_delete: bool,
     language: AppLanguage,
     mut status: Signal<String>,
 ) -> Element {
@@ -107,6 +108,7 @@ pub fn HistoryList(
                                     status,
                                     language,
                                     i18n::tr(language).selected_history_deleted,
+                                    preserve_favorites_on_delete,
                                 );
                                 selected_ids.set(Vec::new());
                                 selection_anchor_id.set(None);
@@ -236,6 +238,7 @@ pub fn HistoryList(
                                 history,
                                 status,
                                 language,
+                                preserve_favorites_on_delete,
                             );
                         }
                         Key::Escape => {
@@ -317,6 +320,7 @@ pub fn HistoryList(
                             hide_after_copy,
                             show_copy_time,
                             show_text_length,
+                            preserve_favorites_on_delete,
                             language,
                             status,
                         }

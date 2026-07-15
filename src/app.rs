@@ -1,8 +1,6 @@
 mod status_bar;
 
-use self::status_bar::{
-    ClearHistoryButton, ClipboardMonitorButton, StatusSettingsButton, history_count_for_filter,
-};
+use self::status_bar::{ClearHistoryButton, ClipboardMonitorButton, StatusSettingsButton};
 use crate::components::{AppPage, HistoryList, SettingsPage, TopBar};
 use crate::i18n;
 use crate::model::{
@@ -297,7 +295,11 @@ pub fn App() -> Element {
         startup_cleanup_done.set(true);
         if let Some(days) = settings.peek().auto_cleanup_days {
             let language = settings.peek().language;
-            match crate::clipboard_watcher::prune_history_by_age(history, days) {
+            match crate::clipboard_watcher::prune_history_by_age(
+                history,
+                days,
+                settings.peek().preserve_favorites_on_delete,
+            ) {
                 Ok(removed) if removed > 0 => {
                     let mut status = status;
                     status.set(match language {
@@ -329,8 +331,14 @@ pub fn App() -> Element {
     let counts_snapshot = counts();
     let entry_count = snapshot_entries.len();
     let active_filter_snapshot = active_filter();
-    let clear_history_count = history_count_for_filter(counts_snapshot, active_filter_snapshot);
     let settings_snapshot = settings();
+    let clear_history_count = history
+        .read()
+        .deletable_ids_for_filter(
+            active_filter_snapshot,
+            settings_snapshot.preserve_favorites_on_delete,
+        )
+        .len();
     let language = settings_snapshot.language;
     let query_snapshot = debounced_query();
     let background_opacity = if settings_snapshot.desktop_widget {
@@ -466,6 +474,7 @@ pub fn App() -> Element {
                         hide_after_copy: settings_snapshot.hide_after_copy && !settings_snapshot.desktop_widget,
                         show_copy_time: settings_snapshot.show_copy_time,
                         show_text_length: settings_snapshot.show_text_length,
+                        preserve_favorites_on_delete: settings_snapshot.preserve_favorites_on_delete,
                         language,
                         status,
                     }
@@ -486,6 +495,7 @@ pub fn App() -> Element {
                     history,
                     filter: active_filter_snapshot,
                     history_count: clear_history_count,
+                    preserve_favorites_on_delete: settings_snapshot.preserve_favorites_on_delete,
                     language,
                     status,
                 }

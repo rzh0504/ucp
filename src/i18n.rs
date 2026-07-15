@@ -15,6 +15,8 @@ pub struct Translations {
     pub history_limit_hint: &'static str,
     pub auto_cleanup: &'static str,
     pub auto_cleanup_hint: &'static str,
+    pub preserve_favorites_on_delete: &'static str,
+    pub preserve_favorites_on_delete_hint: &'static str,
     pub shortcuts_interaction: &'static str,
     pub copy_behavior: &'static str,
     pub keyboard_shortcuts: &'static str,
@@ -100,6 +102,7 @@ pub struct Translations {
     pub file_missing: &'static str,
     pub history_deleted: &'static str,
     pub selected_history_deleted: &'static str,
+    pub favorite_preserved: &'static str,
     pub favorite_status_updated: &'static str,
     pub pin_status_updated: &'static str,
     pub history_cleared: &'static str,
@@ -133,6 +136,8 @@ static ZH: Translations = Translations {
     history_limit_hint: "超过上限时会自动清理较旧且未固定、未收藏的记录。",
     auto_cleanup: "按时间自动清理",
     auto_cleanup_hint: "只保留所选天数内的复制项；选择不自动清理则不会按时间删除。",
+    preserve_favorites_on_delete: "删除时始终保留收藏项",
+    preserve_favorites_on_delete_hint: "单项删除、批量删除、清空历史和自动清理都不会删除已收藏的记录。",
     shortcuts_interaction: "快捷与交互",
     copy_behavior: "复制行为",
     keyboard_shortcuts: "键盘快捷键",
@@ -218,6 +223,7 @@ static ZH: Translations = Translations {
     file_missing: "文件已不存在",
     history_deleted: "历史已删除",
     selected_history_deleted: "已删除所选历史",
+    favorite_preserved: "收藏项已保留",
     favorite_status_updated: "收藏状态已更新",
     pin_status_updated: "置顶状态已更新",
     history_cleared: "历史已清空",
@@ -251,6 +257,8 @@ static EN: Translations = Translations {
     history_limit_hint: "Older unpinned and non-favorite records are removed when the limit is exceeded.",
     auto_cleanup: "Auto cleanup by age",
     auto_cleanup_hint: "Keep copied items within the selected age only; choose no cleanup to keep them by count only.",
+    preserve_favorites_on_delete: "Always preserve favorites when deleting",
+    preserve_favorites_on_delete_hint: "Keep favorite records during individual or batch deletion, history clearing, and automatic cleanup.",
     shortcuts_interaction: "Shortcuts and interaction",
     copy_behavior: "Copy behavior",
     keyboard_shortcuts: "Keyboard shortcuts",
@@ -336,6 +344,7 @@ static EN: Translations = Translations {
     file_missing: "File no longer exists",
     history_deleted: "History deleted",
     selected_history_deleted: "Selected history deleted",
+    favorite_preserved: "Favorite item was kept",
     favorite_status_updated: "Favorite status updated",
     pin_status_updated: "Pin status updated",
     history_cleared: "History cleared",
@@ -401,8 +410,12 @@ pub fn clear_history_title(language: AppLanguage, filter: ClipboardFilter) -> St
     }
 }
 
-pub fn clear_history_description(language: AppLanguage, filter: ClipboardFilter) -> String {
-    match filter {
+pub fn clear_history_description(
+    language: AppLanguage,
+    filter: ClipboardFilter,
+    preserve_favorites: bool,
+) -> String {
+    let description = match filter {
         ClipboardFilter::All => tr(language).clear_all_history_description.to_string(),
         _ => match language {
             AppLanguage::Chinese => format!(
@@ -414,10 +427,30 @@ pub fn clear_history_description(language: AppLanguage, filter: ClipboardFilter)
                 filter_label(language, filter)
             ),
         },
+    };
+
+    if preserve_favorites {
+        match language {
+            AppLanguage::Chinese => format!("{description} 已收藏的记录会保留。"),
+            AppLanguage::English => format!("{description} Favorite records will be kept."),
+        }
+    } else {
+        description
     }
 }
 
-pub fn history_cleared_message(language: AppLanguage, filter: ClipboardFilter) -> String {
+pub fn history_cleared_message(
+    language: AppLanguage,
+    filter: ClipboardFilter,
+    preserve_favorites: bool,
+) -> String {
+    if preserve_favorites {
+        return match language {
+            AppLanguage::Chinese => "历史已清空，收藏项已保留".to_string(),
+            AppLanguage::English => "History cleared; favorites were kept".to_string(),
+        };
+    }
+
     match (language, filter) {
         (_, ClipboardFilter::All) => tr(language).history_cleared.to_string(),
         (AppLanguage::Chinese, ClipboardFilter::Text) => "文本历史已清空".to_string(),

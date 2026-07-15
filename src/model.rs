@@ -100,6 +100,7 @@ pub enum ClipboardContent {
 pub struct AppSettings {
     pub history_limit: usize,
     pub auto_cleanup_days: Option<u16>,
+    pub preserve_favorites_on_delete: bool,
     pub language: AppLanguage,
     pub theme: AppTheme,
     pub launch_at_startup: bool,
@@ -121,6 +122,7 @@ impl Default for AppSettings {
         Self {
             history_limit: DEFAULT_HISTORY_LIMIT,
             auto_cleanup_days: None,
+            preserve_favorites_on_delete: false,
             language: AppLanguage::Chinese,
             theme: AppTheme::System,
             launch_at_startup: false,
@@ -430,10 +432,24 @@ impl ClipboardHistory {
         entries
     }
 
-    pub fn ids_for_filter(&self, filter: ClipboardFilter) -> Vec<u64> {
+    pub fn deletable_ids(&self, ids: &[u64], preserve_favorites: bool) -> Vec<u64> {
         self.entries
             .iter()
-            .filter(|entry| matches_filter(*entry, filter))
+            .filter(|entry| ids.contains(&entry.id) && (!preserve_favorites || !entry.favorite))
+            .map(|entry| entry.id)
+            .collect()
+    }
+
+    pub fn deletable_ids_for_filter(
+        &self,
+        filter: ClipboardFilter,
+        preserve_favorites: bool,
+    ) -> Vec<u64> {
+        self.entries
+            .iter()
+            .filter(|entry| {
+                matches_filter(entry, filter) && (!preserve_favorites || !entry.favorite)
+            })
             .map(|entry| entry.id)
             .collect()
     }
@@ -516,10 +532,11 @@ impl ClipboardHistory {
         self.entries.clear();
     }
 
-    pub fn remove_older_than_days(&mut self, days: u16) -> usize {
+    pub fn remove_older_than_days(&mut self, days: u16, preserve_favorites: bool) -> usize {
         let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
         let before = self.entries.len();
-        self.entries.retain(|entry| entry.captured_at >= cutoff);
+        self.entries
+            .retain(|entry| entry.captured_at >= cutoff || (preserve_favorites && entry.favorite));
         before - self.entries.len()
     }
 
@@ -662,10 +679,12 @@ mod tests {
             TEXT_LIST_PREVIEW_CHAR_LIMIT + "...".chars().count()
         );
         assert!(title.ends_with("..."));
-        assert!(title
-            .trim_end_matches("...")
-            .chars()
-            .all(|character| character == 'a'));
+        assert!(
+            title
+                .trim_end_matches("...")
+                .chars()
+                .all(|character| character == 'a')
+        );
     }
 
     #[test]
@@ -678,10 +697,12 @@ mod tests {
             TEXT_LIST_PREVIEW_CHAR_LIMIT + "...".chars().count()
         );
         assert!(title.ends_with("..."));
-        assert!(title
-            .trim_end_matches("...")
-            .chars()
-            .all(|character| character == '好'));
+        assert!(
+            title
+                .trim_end_matches("...")
+                .chars()
+                .all(|character| character == '好')
+        );
     }
 
     #[test]
@@ -735,6 +756,36 @@ mod tests {
         assert!(history.entry(old_id).is_none());
         assert!(history.entry(pinned_id).is_some());
         assert!(history.entry(latest_id).is_some());
+    }
+
+    #[test]
+    fn age_cleanup_can_preserve_favorite_entries() {
+        let mut history = ClipboardHistory::new(10);
+        let regular_id = history
+            .push(ClipboardContent::Text("regular".to_string()))
+            .entry
+            .unwrap()
+            .id;
+        let favorite_id = history
+            .push(ClipboardContent::Text("favorite".to_string()))
+            .entry
+            .unwrap()
+            .id;
+
+        history.toggle_favorite(favorite_id);
+        assert_eq!(
+            history.deletable_ids(&[regular_id, favorite_id], true),
+            vec![regular_id]
+        );
+        for entry in &mut history.entries {
+            entry.captured_at = Local::now() - ChronoDuration::days(31);
+        }
+
+        let removed = history.remove_older_than_days(30, true);
+
+        assert_eq!(removed, 1);
+        assert!(history.entry(regular_id).is_none());
+        assert!(history.entry(favorite_id).is_some());
     }
 
     #[test]

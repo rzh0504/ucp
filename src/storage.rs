@@ -290,12 +290,16 @@ pub fn clear_history() -> Result<(), StorageError> {
     })
 }
 
-pub fn delete_entries_older_than(cutoff: DateTime<Local>) -> Result<usize, StorageError> {
+pub fn delete_entries_older_than(
+    cutoff: DateTime<Local>,
+    preserve_favorites: bool,
+) -> Result<usize, StorageError> {
     with_connection(|connection| {
-        let preview_urls = image_preview_urls_older_than(connection, cutoff)?;
+        let preview_urls = image_preview_urls_older_than(connection, cutoff, preserve_favorites)?;
         let removed = connection.execute(
-            "DELETE FROM clipboard_entries WHERE captured_at_millis < ?1",
-            params![cutoff.timestamp_millis()],
+            "DELETE FROM clipboard_entries \
+             WHERE captured_at_millis < ?1 AND (?2 = 0 OR favorite = 0)",
+            params![cutoff.timestamp_millis(), preserve_favorites as i64],
         )?;
         image_cache::remove_previews(preview_urls);
         Ok(removed)
@@ -365,11 +369,14 @@ fn all_image_preview_urls(connection: &Connection) -> Result<Vec<String>, Storag
 fn image_preview_urls_older_than(
     connection: &Connection,
     cutoff: DateTime<Local>,
+    preserve_favorites: bool,
 ) -> Result<Vec<String>, StorageError> {
     image_preview_urls_matching(
         connection,
-        "SELECT image_preview_url FROM clipboard_entries WHERE kind = 'image' AND image_preview_url IS NOT NULL AND captured_at_millis < ?1",
-        params![cutoff.timestamp_millis()],
+        "SELECT image_preview_url FROM clipboard_entries \
+         WHERE kind = 'image' AND image_preview_url IS NOT NULL \
+           AND captured_at_millis < ?1 AND (?2 = 0 OR favorite = 0)",
+        params![cutoff.timestamp_millis(), preserve_favorites as i64],
     )
 }
 
