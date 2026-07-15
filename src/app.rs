@@ -326,8 +326,18 @@ pub fn App() -> Element {
             .read()
             .filtered(debounced_query().as_str(), active_filter())
     });
+    let snapshot_entry_ids = use_memo(move || {
+        Rc::new(
+            snapshot
+                .read()
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+        )
+    });
     let counts = use_memo(move || history.read().counts());
     let snapshot_entries = snapshot();
+    let snapshot_entry_ids = snapshot_entry_ids();
     let counts_snapshot = counts();
     let entry_count = snapshot_entries.len();
     let active_filter_snapshot = active_filter();
@@ -462,6 +472,7 @@ pub fn App() -> Element {
                 } else {
                     HistoryList {
                         entries: snapshot_entries,
+                        entry_ids: snapshot_entry_ids,
                         history,
                         ignored_clipboard_write,
                         query: query_snapshot,

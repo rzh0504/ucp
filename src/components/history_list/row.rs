@@ -21,6 +21,8 @@ pub(super) fn HistoryRow(
     entry: ClipboardEntry,
     entry_ids: Rc<Vec<u64>>,
     is_selected: bool,
+    is_focus_highlighted: bool,
+    should_focus: bool,
     is_deleting: bool,
     history: Signal<ClipboardHistory>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
@@ -43,7 +45,6 @@ pub(super) fn HistoryRow(
     let mut files_expanded = use_signal(|| false);
     let mut context_menu_open = use_signal(|| None::<bool>);
     let paste_window = use_window();
-    let is_focus_highlighted = show_focus_highlight() && focused_id() == Some(id);
     let mut row_class = "history-row".to_string();
     if is_selected {
         row_class.push_str(" is-selected");
@@ -91,23 +92,23 @@ pub(super) fn HistoryRow(
     } else {
         "history-row-main"
     };
-    use_effect(move || {
-        if focused_id() == Some(id)
-            && let Some(element) = button_ref()
-        {
+    use_effect(use_reactive!(|(should_focus,)| {
+        if should_focus && let Some(element) = button_ref() {
             spawn(async move {
                 let _ = element.set_focus(true).await;
             });
         }
-    });
+    }));
 
     rsx! {
         ContextMenu {
+            class: "history-row-menu",
             tabindex: "-1",
             disabled: !has_context_menu,
             open: context_menu_open,
             on_open_change: move |open| context_menu_open.set(Some(open)),
             ContextMenuTrigger {
+                class: "history-row-trigger",
                 article {
                     class: "{row_class}",
                     onclick: move |event| {

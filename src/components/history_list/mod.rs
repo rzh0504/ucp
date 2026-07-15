@@ -16,8 +16,8 @@ use crate::model::{
     AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
 };
 use dioxus::desktop::use_window;
-use dioxus::events::ScrollEvent;
-use dioxus::html::Key;
+use dioxus::events::{MountedData, MountedEvent, ScrollEvent};
+use dioxus::html::{Key, ScrollBehavior, geometry::PixelsVector2D};
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
@@ -33,6 +33,7 @@ const LOAD_MORE_THRESHOLD_PX: f64 = 600.0;
 #[component]
 pub fn HistoryList(
     entries: Vec<ClipboardEntry>,
+    entry_ids: Rc<Vec<u64>>,
     history: Signal<ClipboardHistory>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
     query: String,
@@ -55,6 +56,7 @@ pub fn HistoryList(
     let mut show_focus_highlight = use_signal(|| false);
     let deleting_ids = use_signal(Vec::<u64>::new);
     let mut visible_count = use_signal(|| RENDER_BATCH_SIZE);
+    let mut scroll_area_ref = use_signal(|| None::<Rc<MountedData>>);
 
     // Reset the render window whenever the tab (filter) or search query changes so
     // that switching to a large tab does not carry over a huge previously-expanded
@@ -63,9 +65,15 @@ pub fn HistoryList(
     use_effect(use_reactive!(|(reset_key, active_filter)| {
         let _ = (reset_key, active_filter());
         visible_count.set(RENDER_BATCH_SIZE);
+        if let Some(element) = scroll_area_ref.peek().clone() {
+            spawn(async move {
+                let _ = element
+                    .scroll(PixelsVector2D::new(0.0, 0.0), ScrollBehavior::Instant)
+                    .await;
+            });
+        }
     }));
 
-    let entry_ids = Rc::new(entries.iter().map(|entry| entry.id).collect::<Vec<_>>());
     let entry_id_values = entry_ids.iter().copied().collect::<HashSet<_>>();
     let keyboard_entry_ids = entry_ids.clone();
     let total_entries = entries.len();
@@ -77,6 +85,8 @@ pub fn HistoryList(
     let deleting_id_set = deleting_id_values.iter().copied().collect::<HashSet<_>>();
     let selected_id_values = selected_ids.read().clone();
     let selected_id_set = selected_id_values.iter().copied().collect::<HashSet<_>>();
+    let focused_id_value = focused_id();
+    let show_focus_highlight_value = show_focus_highlight();
     let visible_selected_ids = selected_id_values
         .iter()
         .copied()
@@ -292,6 +302,9 @@ pub fn HistoryList(
                     direction: ScrollDirection::Vertical,
                     tabindex: "0",
                     aria_label: i18n::tr(language).clipboard_history_list,
+                    onmounted: move |event: MountedEvent| {
+                        scroll_area_ref.set(Some(event.data()));
+                    },
                     onscroll: move |event: ScrollEvent| {
                         let data = event.data();
                         let remaining = f64::from(data.scroll_height())
@@ -307,6 +320,9 @@ pub fn HistoryList(
                             entry: entry.clone(),
                             entry_ids: entry_ids.clone(),
                             is_selected: selected_id_set.contains(&entry.id),
+                            is_focus_highlighted: show_focus_highlight_value
+                                && focused_id_value == Some(entry.id),
+                            should_focus: focused_id_value == Some(entry.id),
                             is_deleting: deleting_id_set.contains(&entry.id),
                             history,
                             ignored_clipboard_write,

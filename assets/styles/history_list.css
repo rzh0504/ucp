@@ -67,7 +67,7 @@
     background: var(--app-row-selected);
 }
 
-.history-list > .history-row:last-child {
+.history-list > .history-row-menu:nth-last-child(2) .history-row {
     border-bottom: 0;
 }
 

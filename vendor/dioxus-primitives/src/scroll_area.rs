@@ -22,6 +22,10 @@ pub struct ScrollAreaProps {
     #[props(default)]
     pub onscroll: Option<EventHandler<ScrollEvent>>,
 
+    /// Optional handler invoked when the scroll area element is mounted.
+    #[props(default)]
+    pub onmounted: Option<EventHandler<MountedEvent>>,
+
     /// Additional attributes to apply to the scroll area element.
     #[props(extends = GlobalAttributes)]
     pub attributes: Vec<Attribute>,
@@ -94,6 +98,7 @@ pub fn ScrollArea(props: ScrollAreaProps) -> Element {
     let scroll_type = props.scroll_type;
     let always_show = props.always_show_scrollbars;
     let onscroll = props.onscroll;
+    let onmounted = props.onmounted;
 
     let (overflow_x, overflow_y, scrollbar_width) = match scroll_type() {
         ScrollType::Auto => match direction() {
@@ -134,6 +139,11 @@ pub fn ScrollArea(props: ScrollAreaProps) -> Element {
             },
             onscroll: move |event| {
                 if let Some(handler) = onscroll {
+                    handler.call(event);
+                }
+            },
+            onmounted: move |event| {
+                if let Some(handler) = onmounted {
                     handler.call(event);
                 }
             },

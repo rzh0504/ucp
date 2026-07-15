@@ -6,10 +6,15 @@ pub(super) fn focused_entry_id(entry_ids: &[u64], focused_id: Option<u64>) -> Op
         .or_else(|| entry_ids.first().copied())
 }
 
-fn focused_index(entry_ids: &[u64], focused_id: Option<u64>) -> Option<usize> {
+fn next_focus_index(entry_ids: &[u64], focused_id: Option<u64>, offset: isize) -> Option<usize> {
+    if entry_ids.is_empty() {
+        return None;
+    }
+
     focused_id
         .and_then(|id| entry_ids.iter().position(|entry_id| *entry_id == id))
-        .or(if entry_ids.is_empty() { None } else { Some(0) })
+        .map(|index| index.saturating_add_signed(offset).min(entry_ids.len() - 1))
+        .or_else(|| Some(if offset < 0 { entry_ids.len() - 1 } else { 0 }))
 }
 
 pub(super) fn move_focus(
@@ -21,12 +26,9 @@ pub(super) fn move_focus(
     shift: bool,
     preserve_selection: bool,
 ) {
-    let Some(index) = focused_index(entry_ids, *focused_id.read()) else {
+    let Some(next_index) = next_focus_index(entry_ids, *focused_id.read(), offset) else {
         return;
     };
-    let next_index = index
-        .saturating_add_signed(offset)
-        .min(entry_ids.len().saturating_sub(1));
 
     focus_index(
         entry_ids,
@@ -139,4 +141,29 @@ pub(super) fn update_selection(
     }
 
     *anchor_id = Some(id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_focus_index;
+
+    #[test]
+    fn first_arrow_move_starts_at_the_nearest_list_edge() {
+        let ids = [10, 20, 30];
+
+        assert_eq!(next_focus_index(&ids, None, 1), Some(0));
+        assert_eq!(next_focus_index(&ids, Some(99), 1), Some(0));
+        assert_eq!(next_focus_index(&ids, None, -1), Some(2));
+    }
+
+    #[test]
+    fn arrow_move_clamps_at_the_list_edges() {
+        let ids = [10, 20, 30];
+
+        assert_eq!(next_focus_index(&ids, Some(20), 1), Some(2));
+        assert_eq!(next_focus_index(&ids, Some(20), -1), Some(0));
+        assert_eq!(next_focus_index(&ids, Some(10), -1), Some(0));
+        assert_eq!(next_focus_index(&ids, Some(30), 1), Some(2));
+        assert_eq!(next_focus_index(&[], None, 1), None);
+    }
 }
