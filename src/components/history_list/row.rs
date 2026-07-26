@@ -6,7 +6,7 @@ use super::file_display::FileListDisplay;
 use super::selection::update_selection;
 use crate::components::icons::{AppIcon, Icon};
 use crate::i18n;
-use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardHistory};
+use crate::model::{AppLanguage, ClipboardContent, ClipboardHistory, RcClipboardEntry};
 use dioxus::desktop::use_window;
 use dioxus::events::MountedData;
 use dioxus::prelude::*;
@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 #[component]
 pub(super) fn HistoryRow(
-    entry: ClipboardEntry,
+    entry: RcClipboardEntry,
     entry_ids: Rc<Vec<u64>>,
     is_selected: bool,
     is_focus_highlighted: bool,

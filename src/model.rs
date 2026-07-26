@@ -255,6 +255,8 @@ impl ClipboardFilter {
     }
 }
 
+use std::rc::Rc;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClipboardEntry {
     pub id: u64,
@@ -263,6 +265,9 @@ pub struct ClipboardEntry {
     pub pinned: bool,
     pub favorite: bool,
 }
+
+// Rc-wrapped version for efficient sharing in UI
+pub type RcClipboardEntry = Rc<ClipboardEntry>;
 
 impl ClipboardEntry {
     pub fn new(id: u64, content: ClipboardContent) -> Self {
@@ -408,7 +413,7 @@ impl ClipboardHistory {
             .is_none_or(|position| self.should_promote_position(position))
     }
 
-    pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<ClipboardEntry> {
+    pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<Rc<ClipboardEntry>> {
         let normalized_query = query.trim().to_lowercase();
         let mut entries = self
             .entries
@@ -425,10 +430,10 @@ impl ClipboardHistory {
 
                 content_matches_query(&entry.content, normalized_query.as_str())
             })
-            .cloned()
+            .map(|entry| Rc::new(entry.clone()))
             .collect::<Vec<_>>();
 
-        sort_entries(&mut entries);
+        sort_rc_entries(&mut entries);
         entries
     }
 
@@ -593,6 +598,16 @@ fn content_matches_query(content: &ClipboardContent, normalized_query: &str) -> 
 }
 
 fn sort_entries(entries: &mut [ClipboardEntry]) {
+    entries.sort_by(|left, right| {
+        right
+            .pinned
+            .cmp(&left.pinned)
+            .then_with(|| right.captured_at.cmp(&left.captured_at))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+}
+
+fn sort_rc_entries(entries: &mut [Rc<ClipboardEntry>]) {
     entries.sort_by(|left, right| {
         right
             .pinned

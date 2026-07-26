@@ -60,12 +60,14 @@ impl From<rusqlite::Error> for StorageError {
 
 pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
     with_connection(|connection| {
-        let mut files_by_entry = load_all_files(connection)?;
         let mut statement = connection.prepare(
-            "SELECT id, kind, text_content, image_width, image_height, image_preview_url, \
-                    captured_at_millis, pinned, favorite \
-             FROM clipboard_entries \
-             ORDER BY pinned DESC, captured_at_millis DESC, id DESC",
+            "SELECT e.id, e.kind, e.text_content, e.image_width, e.image_height, e.image_preview_url, \
+                    e.captured_at_millis, e.pinned, e.favorite, \
+                    GROUP_CONCAT(f.path, '\x1F') as file_paths \
+             FROM clipboard_entries e \
+             LEFT JOIN clipboard_files f ON e.id = f.entry_id \
+             GROUP BY e.id \
+             ORDER BY e.pinned DESC, e.captured_at_millis DESC, e.id DESC",
         )?;
 
         let entries = statement
@@ -89,7 +91,10 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
                         preview_url: row.get(5)?,
                     }),
                     "file" => {
-                        ClipboardContent::Files(files_by_entry.remove(&id).unwrap_or_default())
+                        let file_paths = row.get::<_, Option<String>>(9)?
+                            .map(|paths| paths.split('\x1F').map(String::from).collect())
+                            .unwrap_or_default();
+                        ClipboardContent::Files(file_paths)
                     }
                     _ => ClipboardContent::Text(String::new()),
                 };
@@ -322,7 +327,19 @@ pub fn compact_database() -> Result<(), StorageError> {
 pub fn database_path() -> Result<PathBuf, StorageError> {
     let directory = data_directory();
     fs::create_dir_all(&directory)?;
-    Ok(directory.join(DATABASE_FILE))
+    let db_path = directory.join(DATABASE_FILE);
+    
+    // Set restrictive permissions on the database file (Unix only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if db_path.exists() {
+            let permissions = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&db_path, permissions)?;
+        }
+    }
+    
+    Ok(db_path)
 }
 
 fn image_preview_urls_for_ids(
@@ -409,7 +426,7 @@ fn with_connection<T>(
     operation(
         connection
             .as_mut()
-            .expect("database connection initialized"),
+            .ok_or_else(|| StorageError::Database("数据库连接未初始化".to_string()))?,
     )
 }
 
@@ -472,6 +489,8 @@ fn load_files(connection: &Connection, entry_id: u64) -> rusqlite::Result<Vec<St
         .collect()
 }
 
+// Deprecated: N+1 query pattern, use JOIN in load_history instead
+#[allow(dead_code)]
 fn load_all_files(connection: &Connection) -> rusqlite::Result<HashMap<u64, Vec<String>>> {
     let mut statement = connection.prepare(
         "SELECT entry_id, path FROM clipboard_files ORDER BY entry_id ASC, position ASC",

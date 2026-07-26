@@ -623,8 +623,9 @@ fn use_app_tray(
             MenuItem::with_id(TRAY_OPEN_WIDGET_ID, copy.open_desktop_widget, true, None);
         let separator = PredefinedMenuItem::separator();
         let quit = MenuItem::with_id(TRAY_QUIT_ID, copy.quit, true, None);
-        menu.append_items(&[&show_window, &open_widget, &separator, &quit])
-            .expect("tray menu creation failed");
+        if let Err(e) = menu.append_items(&[&show_window, &open_widget, &separator, &quit]) {
+            eprintln!("Failed to create tray menu: {:?}", e);
+        }
 
         let tray_icon: Option<desktop::trayicon::DioxusTrayIcon> =
             desktop::icon_from_memory(APP_ICON_BYTES).ok();
@@ -856,9 +857,15 @@ fn restore_desktop_window(desktop: &DesktopContext) {
 
     let hwnd = desktop.window.hwnd() as _;
     unsafe {
-        ShowWindow(hwnd, SW_SHOW);
-        ShowWindow(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd);
+        if ShowWindow(hwnd, SW_SHOW) == 0 {
+            eprintln!("ShowWindow(SW_SHOW) failed");
+        }
+        if ShowWindow(hwnd, SW_RESTORE) == 0 {
+            eprintln!("ShowWindow(SW_RESTORE) failed");
+        }
+        if SetForegroundWindow(hwnd) == 0 {
+            eprintln!("SetForegroundWindow failed");
+        }
     }
 }
 

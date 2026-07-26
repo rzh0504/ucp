@@ -13,7 +13,8 @@ use super::filter_tabs::FilterTabs;
 use super::icons::{AppIcon, Icon};
 use crate::i18n;
 use crate::model::{
-    AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, ClipboardHistory, HistoryCounts,
+    AppLanguage, ClipboardContent, ClipboardFilter, ClipboardHistory, HistoryCounts,
+    RcClipboardEntry,
 };
 use dioxus::desktop::use_window;
 use dioxus::events::{MountedData, MountedEvent, ScrollEvent};
@@ -32,7 +33,7 @@ const LOAD_MORE_THRESHOLD_PX: f64 = 600.0;
 
 #[component]
 pub fn HistoryList(
-    entries: Vec<ClipboardEntry>,
+    entries: Vec<RcClipboardEntry>,
     entry_ids: Rc<Vec<u64>>,
     history: Signal<ClipboardHistory>,
     ignored_clipboard_write: Signal<Option<ClipboardContent>>,
@@ -314,7 +315,7 @@ pub fn HistoryList(
                             visible_count.set((visible_count() + RENDER_BATCH_SIZE).min(total_entries));
                         }
                     },
-                    for entry in entries.iter().take(render_limit).cloned() {
+                    for entry in entries.iter().take(render_limit) {
                         HistoryRow {
                             key: "{entry.id}",
                             entry: entry.clone(),

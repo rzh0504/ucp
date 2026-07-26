@@ -139,8 +139,18 @@ pub(super) fn open_file_location(
 
 #[cfg(windows)]
 fn open_path_location(path: &Path, language: AppLanguage) -> Result<(), String> {
+    // Validate path doesn't contain dangerous characters
+    let path_str = path.to_string_lossy();
+    if path_str.contains('\0') {
+        return Err(match language {
+            AppLanguage::Chinese => "文件路径包含非法字符".to_string(),
+            AppLanguage::English => "File path contains invalid characters".to_string(),
+        });
+    }
+    
     std::process::Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
+        .arg("/select,")
+        .arg(path.as_os_str())
         .spawn()
         .map(|_| ())
         .map_err(|error| match language {
