@@ -325,7 +325,7 @@ pub struct HistoryCounts {
 pub struct ClipboardHistory {
     capacity: usize,
     next_id: u64,
-    entries: Vec<ClipboardEntry>,
+    entries: Vec<Rc<ClipboardEntry>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -355,7 +355,7 @@ impl ClipboardHistory {
         let mut history = Self {
             capacity,
             next_id,
-            entries,
+            entries: entries.into_iter().map(Rc::new).collect(),
         };
         history.sort_entries();
         history.truncate();
@@ -377,10 +377,11 @@ impl ClipboardHistory {
                 return PushResult::default();
             }
 
-            let mut entry = self.entries.remove(position);
+            let rc_entry = self.entries.remove(position);
+            let mut entry = Rc::unwrap_or_clone(rc_entry);
             entry.captured_at = Local::now();
             let updated_entry = entry.clone();
-            self.entries.insert(0, entry);
+            self.entries.insert(0, Rc::new(entry));
             return PushResult {
                 changed: true,
                 entry: Some(updated_entry),
@@ -391,7 +392,7 @@ impl ClipboardHistory {
         let entry = ClipboardEntry::new(self.next_id, content);
         let inserted_entry = entry.clone();
         self.next_id += 1;
-        self.entries.insert(0, entry);
+        self.entries.insert(0, Rc::new(entry));
         let removed_ids = self.truncate();
 
         PushResult {
@@ -418,7 +419,7 @@ impl ClipboardHistory {
         let mut entries = self
             .entries
             .iter()
-            .filter(|entry| matches_filter(*entry, filter))
+            .filter(|entry| matches_filter(entry, filter))
             .filter(|entry| {
                 if normalized_query.is_empty() {
                     return true;
@@ -430,7 +431,7 @@ impl ClipboardHistory {
 
                 content_matches_query(&entry.content, normalized_query.as_str())
             })
-            .map(|entry| Rc::new(entry.clone()))
+            .cloned()
             .collect::<Vec<_>>();
 
         sort_rc_entries(&mut entries);
@@ -480,8 +481,11 @@ impl ClipboardHistory {
         counts
     }
 
-    pub fn entry(&self, id: u64) -> Option<&ClipboardEntry> {
-        self.entries.iter().find(|entry| entry.id == id)
+    pub fn entry(&self, id: u64) -> Option<Rc<ClipboardEntry>> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
     }
 
     pub fn should_promote(&self, id: u64) -> bool {
@@ -497,10 +501,11 @@ impl ClipboardHistory {
                 return None;
             }
 
-            let mut entry = self.entries.remove(position);
+            let rc_entry = self.entries.remove(position);
+            let mut entry = Rc::unwrap_or_clone(rc_entry);
             entry.captured_at = Local::now();
             let updated_entry = entry.clone();
-            self.entries.insert(0, entry);
+            self.entries.insert(0, Rc::new(entry));
             Some(updated_entry)
         } else {
             None
@@ -508,23 +513,29 @@ impl ClipboardHistory {
     }
 
     pub fn toggle_favorite(&mut self, id: u64) -> Option<ClipboardEntry> {
-        self.entries
-            .iter_mut()
-            .find(|entry| entry.id == id)
-            .map(|entry| {
-                entry.favorite = !entry.favorite;
-                entry.clone()
-            })
+        if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
+            let rc_entry = self.entries.remove(position);
+            let mut entry = Rc::unwrap_or_clone(rc_entry);
+            entry.favorite = !entry.favorite;
+            let updated_entry = entry.clone();
+            self.entries.insert(position, Rc::new(entry));
+            Some(updated_entry)
+        } else {
+            None
+        }
     }
 
     pub fn toggle_pin(&mut self, id: u64) -> Option<ClipboardEntry> {
-        self.entries
-            .iter_mut()
-            .find(|entry| entry.id == id)
-            .map(|entry| {
-                entry.pinned = !entry.pinned;
-                entry.clone()
-            })
+        if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
+            let rc_entry = self.entries.remove(position);
+            let mut entry = Rc::unwrap_or_clone(rc_entry);
+            entry.pinned = !entry.pinned;
+            let updated_entry = entry.clone();
+            self.entries.insert(position, Rc::new(entry));
+            Some(updated_entry)
+        } else {
+            None
+        }
     }
 
     pub fn remove(&mut self, id: u64) -> bool {
@@ -597,7 +608,7 @@ fn content_matches_query(content: &ClipboardContent, normalized_query: &str) -> 
     }
 }
 
-fn sort_entries(entries: &mut [ClipboardEntry]) {
+fn sort_entries(entries: &mut [Rc<ClipboardEntry>]) {
     entries.sort_by(|left, right| {
         right
             .pinned

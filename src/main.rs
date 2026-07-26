@@ -6,6 +6,7 @@ mod components;
 mod i18n;
 mod model;
 mod platform;
+mod services;
 mod storage;
 mod updater;
 
