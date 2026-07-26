@@ -77,7 +77,9 @@ impl ClipboardService {
     /// 保存条目到存储
     #[allow(dead_code)]
     pub fn save_entry(entry: &ClipboardEntry) -> Result<(), ClipboardError> {
-        storage::save_entry(entry).map_err(|e| ClipboardError::StorageError(e.to_string()))
+        storage::save_entry(entry)
+            .map(|_| ())
+            .map_err(|e| ClipboardError::StorageError(e.to_string()))
     }
 
     /// 验证文件是否存在

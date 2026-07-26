@@ -23,6 +23,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::{ScrollArea, ScrollDirection};
 use dioxus_primitives::separator::Separator;
 use dioxus_primitives::toolbar::{Toolbar, ToolbarButton};
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -58,21 +59,48 @@ pub fn HistoryList(
     let deleting_ids = use_signal(Vec::<u64>::new);
     let mut visible_count = use_signal(|| RENDER_BATCH_SIZE);
     let mut scroll_area_ref = use_signal(|| None::<Rc<MountedData>>);
+    let last_window_key = use_hook(|| Rc::new(RefCell::new(None::<(String, ClipboardFilter)>)));
+    let suppress_load_more = use_hook(|| Rc::new(Cell::new(false)));
 
-    // Reset the render window whenever the tab (filter) or search query changes so
-    // that switching to a large tab does not carry over a huge previously-expanded
-    // window and re-mount everything at once.
+    // Detect tab (filter) or search query changes during render so the very first
+    // frame after a switch already renders a small window. Waiting for the effect
+    // below would render one frame with the previous tab's expanded window and
+    // mount far more rows than needed.
+    let window_key = (query.clone(), active_filter());
+    let window_key_changed = last_window_key.borrow().as_ref() != Some(&window_key);
+    if window_key_changed {
+        *last_window_key.borrow_mut() = Some(window_key);
+        // Swapping in a shorter list clamps the webview scroll position, firing
+        // scroll events that look like "reached the bottom". Mute load-more until
+        // the scroll-to-top below has completed.
+        suppress_load_more.set(true);
+    }
+
+    let effect_suppress_load_more = suppress_load_more.clone();
     let reset_key = query.clone();
     use_effect(use_reactive!(|(reset_key, active_filter)| {
         let _ = (reset_key, active_filter());
-        visible_count.set(RENDER_BATCH_SIZE);
-        if let Some(element) = scroll_area_ref.peek().clone() {
-            spawn(async move {
+        if *visible_count.peek() != RENDER_BATCH_SIZE {
+            visible_count.set(RENDER_BATCH_SIZE);
+        }
+        // Drop the focus marker so a previously focused row does not steal focus
+        // (and scroll itself into view) when it remounts in the new tab.
+        if focused_id.peek().is_some() {
+            focused_id.set(None);
+        }
+        if *show_focus_highlight.peek() {
+            show_focus_highlight.set(false);
+        }
+        let element = scroll_area_ref.peek().clone();
+        let release_load_more = effect_suppress_load_more.clone();
+        spawn(async move {
+            if let Some(element) = element {
                 let _ = element
                     .scroll(PixelsVector2D::new(0.0, 0.0), ScrollBehavior::Instant)
                     .await;
-            });
-        }
+            }
+            release_load_more.set(false);
+        });
     }));
 
     let entry_id_values = entry_ids.iter().copied().collect::<HashSet<_>>();
@@ -80,7 +108,15 @@ pub fn HistoryList(
     let total_entries = entries.len();
     // Clamp the render window to the current entry count. Only these rows are
     // actually mounted; scrolling near the bottom appends more.
-    let render_limit = visible_count().min(total_entries).max(1);
+    let expanded_count = visible_count();
+    let render_limit = if window_key_changed {
+        RENDER_BATCH_SIZE
+    } else {
+        expanded_count
+    }
+    .min(total_entries)
+    .max(1);
+    let scroll_suppress_load_more = suppress_load_more.clone();
     let paste_window = use_window();
     let deleting_id_values = deleting_ids.read().clone();
     let deleting_id_set = deleting_id_values.iter().copied().collect::<HashSet<_>>();
@@ -307,6 +343,9 @@ pub fn HistoryList(
                         scroll_area_ref.set(Some(event.data()));
                     },
                     onscroll: move |event: ScrollEvent| {
+                        if scroll_suppress_load_more.get() {
+                            return;
+                        }
                         let data = event.data();
                         let remaining = f64::from(data.scroll_height())
                             - data.scroll_top()

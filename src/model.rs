@@ -257,7 +257,9 @@ impl ClipboardFilter {
 
 use std::rc::Rc;
 
-#[derive(Clone, Debug, PartialEq)]
+// Eq lets Rc<ClipboardEntry> comparisons take the pointer-equality fast path,
+// which keeps component memoization cheap for large text/image entries.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClipboardEntry {
     pub id: u64,
     pub content: ClipboardContent,
@@ -510,6 +512,28 @@ impl ClipboardHistory {
         } else {
             None
         }
+    }
+
+    /// Replaces the preview URL of an image entry in place (keeping its
+    /// position and capture time), e.g. to swap a freshly captured base64
+    /// `data:` preview for the persisted `file://` cache URL.
+    pub fn set_image_preview_url(&mut self, id: u64, preview_url: String) -> bool {
+        let Some(position) = self.entries.iter().position(|entry| entry.id == id) else {
+            return false;
+        };
+        let ClipboardContent::Image(image) = &self.entries[position].content else {
+            return false;
+        };
+        if image.preview_url.as_deref() == Some(preview_url.as_str()) {
+            return false;
+        }
+
+        let mut entry = Rc::unwrap_or_clone(self.entries.remove(position));
+        if let ClipboardContent::Image(image) = &mut entry.content {
+            image.preview_url = Some(preview_url);
+        }
+        self.entries.insert(position, Rc::new(entry));
+        true
     }
 
     pub fn toggle_favorite(&mut self, id: u64) -> Option<ClipboardEntry> {
@@ -804,7 +828,7 @@ mod tests {
             vec![regular_id]
         );
         for entry in &mut history.entries {
-            entry.captured_at = Local::now() - ChronoDuration::days(31);
+            Rc::make_mut(entry).captured_at = Local::now() - ChronoDuration::days(31);
         }
 
         let removed = history.remove_older_than_days(30, true);

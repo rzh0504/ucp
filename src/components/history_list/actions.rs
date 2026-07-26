@@ -164,7 +164,7 @@ pub(super) fn save_entry_with_status(
     language: AppLanguage,
 ) {
     match storage::save_entry(entry) {
-        Ok(()) => status.set(success.to_string()),
+        Ok(_) => status.set(success.to_string()),
         Err(error) => status.set(match language {
             AppLanguage::Chinese => format!("历史保存失败：{error}"),
             AppLanguage::English => format!("Failed to save history: {error}"),

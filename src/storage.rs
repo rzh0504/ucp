@@ -144,7 +144,10 @@ pub fn load_image(entry_id: u64) -> Result<Option<ClipboardImage>, StorageError>
     })
 }
 
-pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
+/// Saves the entry and returns the cached `file://` preview URL when an image
+/// preview was written to the on-disk cache, so callers can swap the in-memory
+/// base64 `data:` preview for the much cheaper file URL.
+pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError> {
     let kind = entry.kind().key();
     let mut text_content: Option<&str> = None;
     let mut image_width: Option<i64> = None;
@@ -186,7 +189,7 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
             }
             _ => None,
         };
-        if let Some(url) = cached_image_preview_url {
+        if let Some(url) = cached_image_preview_url.clone() {
             image_preview_url = Some(url);
         }
 
@@ -260,7 +263,7 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<(), StorageError> {
 
         transaction.commit()?;
         image_cache::remove_previews(removed_preview_urls);
-        Ok(())
+        Ok(cached_image_preview_url)
     })
 }
 
