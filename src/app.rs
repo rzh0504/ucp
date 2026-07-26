@@ -1,4 +1,8 @@
+mod clipboard_effects;
+mod keyboard;
+mod state_effects;
 mod status_bar;
+mod window_effects;
 
 use self::status_bar::{ClearHistoryButton, ClipboardMonitorButton, StatusSettingsButton};
 use crate::components::{AppPage, HistoryList, SettingsPage, TopBar};
@@ -9,7 +13,7 @@ use crate::model::{
 };
 use crate::storage;
 use dioxus::desktop::{
-    self, DesktopContext, HotKeyState, LogicalSize, ShortcutHandle, ShortcutRegistryError,
+    self, DesktopContext, LogicalSize, ShortcutHandle, ShortcutRegistryError,
     WindowCloseBehaviour, use_window,
 };
 use dioxus::events::MountedData;
@@ -17,9 +21,7 @@ use dioxus::html::Key;
 use dioxus::prelude::*;
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_timer::Delay;
-use global_hotkey::hotkey::HotKey;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::time::Duration;
 
 const STYLES: Asset = asset!("/assets/app.css");
@@ -84,24 +86,24 @@ pub fn App() -> Element {
     let initial_status = initial_storage.status.clone();
     let settings = use_signal(move || initial_settings);
     let history = use_signal(move || initial_history);
-    let mut query = use_signal(String::new);
-    let mut debounced_query = use_signal(String::new);
-    let mut active_filter = use_signal(|| ClipboardFilter::All);
-    let mut active_page = use_signal(|| AppPage::History);
+    let query = use_signal(String::new);
+    let debounced_query = use_signal(String::new);
+    let active_filter = use_signal(|| ClipboardFilter::All);
+    let active_page = use_signal(|| AppPage::History);
     let search_input = use_signal(|| None::<Rc<MountedData>>);
     let mut shell = use_signal(|| None::<Rc<MountedData>>);
     let status = use_signal(move || initial_status);
     let ignored_clipboard_write = use_signal(|| None::<ClipboardContent>);
     let clipboard_monitor_paused = use_signal(|| false);
-    let mut status_clear_generation = use_signal(|| 0_u64);
-    let mut search_generation = use_signal(|| 0_u64);
-    let mut startup_cleanup_done = use_signal(|| false);
+    let status_clear_generation = use_signal(|| 0_u32);
+    let search_generation = use_signal(|| 0_u32);
+    let startup_cleanup_done = use_signal(|| false);
     let mut suppress_window_control_hover = use_signal(|| false);
     let desktop = use_window();
-    let mut global_shortcut_handle = use_signal(|| None::<ShortcutHandle>);
-    let mut applied_global_shortcut = use_signal(String::new);
-    let mut applied_widget_mode = use_signal(|| None::<(bool, bool)>);
-    let mut applied_window_opacity = use_signal(|| None::<u8>);
+    let global_shortcut_handle = use_signal(|| None::<ShortcutHandle>);
+    let applied_global_shortcut = use_signal(String::new);
+    let applied_widget_mode = use_signal(|| None::<(bool, bool)>);
+    let applied_window_opacity = use_signal(|| None::<u8>);
 
     let _startup_command_sync = use_hook({
         let settings = settings;
@@ -150,131 +152,30 @@ pub fn App() -> Element {
         settings.peek().language,
     );
 
-    use_effect({
-        let desktop = desktop.clone();
-        move || {
-            let settings_snapshot = settings();
-            let widget_mode = settings_snapshot.desktop_widget;
-            let topmost = settings_snapshot.desktop_widget_topmost;
-            if *applied_widget_mode.peek() == Some((widget_mode, topmost)) {
-                return;
-            }
+    window_effects::use_window_mode_effect(
+        desktop.clone(),
+        settings,
+        applied_widget_mode,
+        applied_window_opacity,
+    );
 
-            applied_widget_mode.set(Some((widget_mode, topmost)));
-            apply_window_mode(&desktop, widget_mode, topmost);
+    window_effects::use_window_opacity_effect(
+        desktop.clone(),
+        settings,
+        applied_window_opacity,
+    );
 
-            let opacity = if widget_mode {
-                settings_snapshot.background_opacity
-            } else {
-                DEFAULT_BACKGROUND_OPACITY
-            };
-            applied_window_opacity.set(Some(opacity));
-            apply_window_opacity(&desktop, opacity);
-        }
-    });
+    window_effects::use_global_shortcut_effect(
+        desktop.clone(),
+        settings,
+        status,
+        applied_global_shortcut,
+        global_shortcut_handle,
+    );
 
-    use_effect({
-        let desktop = desktop.clone();
-        move || {
-            let settings_snapshot = settings();
-            let opacity = if settings_snapshot.desktop_widget {
-                settings_snapshot.background_opacity
-            } else {
-                DEFAULT_BACKGROUND_OPACITY
-            };
+    state_effects::use_status_auto_clear_effect(status, status_clear_generation);
 
-            if *applied_window_opacity.peek() == Some(opacity) {
-                return;
-            }
-
-            applied_window_opacity.set(Some(opacity));
-            apply_window_opacity(&desktop, opacity);
-        }
-    });
-
-    use_effect({
-        let desktop = desktop.clone();
-        move || {
-            let settings_snapshot = settings();
-            let shortcut = settings_snapshot.global_show_shortcut.trim().to_string();
-            if applied_global_shortcut.peek().as_str() == shortcut.as_str() {
-                return;
-            }
-
-            if let Some(handle) = global_shortcut_handle.write().take() {
-                handle.remove();
-            }
-            applied_global_shortcut.set(shortcut.clone());
-
-            let hotkey = match HotKey::from_str(&shortcut) {
-                Ok(hotkey) => hotkey,
-                Err(_) => {
-                    let mut status = status;
-                    status.set(invalid_shortcut_message(
-                        &shortcut,
-                        settings_snapshot.language,
-                    ));
-                    return;
-                }
-            };
-
-            let shortcut_desktop = desktop.clone();
-            match desktop.create_shortcut(hotkey, move |state| {
-                if state == HotKeyState::Pressed {
-                    show_desktop_window(&shortcut_desktop);
-                }
-            }) {
-                Ok(handle) => {
-                    global_shortcut_handle.set(Some(handle));
-                }
-                Err(error) => {
-                    let mut status = status;
-                    status.set(shortcut_error_message(
-                        &error,
-                        &shortcut,
-                        settings_snapshot.language,
-                    ));
-                }
-            }
-        }
-    });
-
-    use_effect(move || {
-        let message = status();
-        if message.is_empty() {
-            return;
-        }
-
-        let generation = *status_clear_generation.peek() + 1;
-        status_clear_generation.set(generation);
-        spawn(async move {
-            Delay::new(STATUS_AUTO_CLEAR_DELAY).await;
-            if *status_clear_generation.peek() == generation
-                && status.peek().as_str() == message.as_str()
-            {
-                let mut status = status;
-                status.set(String::new());
-            }
-        });
-    });
-
-    use_effect(move || {
-        let next_query = query();
-        let generation = *search_generation.peek() + 1;
-        search_generation.set(generation);
-
-        if next_query.is_empty() {
-            debounced_query.set(String::new());
-            return;
-        }
-
-        spawn(async move {
-            Delay::new(SEARCH_DEBOUNCE_DELAY).await;
-            if *search_generation.peek() == generation {
-                debounced_query.set(next_query);
-            }
-        });
-    });
+    state_effects::use_search_debounce_effect(query, debounced_query, search_generation);
 
     let _watcher = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         crate::clipboard_watcher::watch_clipboard(
@@ -287,39 +188,7 @@ pub fn App() -> Element {
         .await;
     });
 
-    use_effect(move || {
-        if startup_cleanup_done() {
-            return;
-        }
-
-        startup_cleanup_done.set(true);
-        if let Some(days) = settings.peek().auto_cleanup_days {
-            let language = settings.peek().language;
-            match crate::clipboard_watcher::prune_history_by_age(
-                history,
-                days,
-                settings.peek().preserve_favorites_on_delete,
-            ) {
-                Ok(removed) if removed > 0 => {
-                    let mut status = status;
-                    status.set(match language {
-                        AppLanguage::Chinese => format!("已自动清理 {removed} 项过期历史"),
-                        AppLanguage::English => {
-                            format!("Automatically cleaned up {removed} expired history items")
-                        }
-                    });
-                }
-                Err(error) => {
-                    let mut status = status;
-                    status.set(match language {
-                        AppLanguage::Chinese => format!("自动清理历史失败：{error}"),
-                        AppLanguage::English => format!("Failed to auto-clean history: {error}"),
-                    });
-                }
-                _ => {}
-            }
-        }
-    });
+    clipboard_effects::use_startup_cleanup_effect(history, settings, status, startup_cleanup_done);
 
     let snapshot = use_memo(move || {
         history
@@ -388,54 +257,22 @@ pub fn App() -> Element {
             onkeydown: move |event| {
                 let data = event.data();
                 let modifiers = data.modifiers();
-                let primary = modifiers.ctrl() || modifiers.meta();
-
-                if !settings.read().keyboard_shortcuts {
-                    return;
-                }
-
-                if primary && matches!(data.key(), Key::Character(key) if key.eq_ignore_ascii_case("f")) {
+                
+                let should_prevent = keyboard::handle_keyboard_shortcuts(
+                    &data.key(),
+                    modifiers.ctrl(),
+                    modifiers.meta(),
+                    settings.read().keyboard_shortcuts,
+                    active_page,
+                    active_filter,
+                    query,
+                    debounced_query,
+                    search_input,
+                    shell,
+                );
+                
+                if should_prevent {
                     event.prevent_default();
-                    active_page.set(AppPage::History);
-                    if let Some(input) = search_input.read().clone() {
-                        spawn(async move {
-                            let _ = input.set_focus(true).await;
-                        });
-                    }
-                    return;
-                }
-
-                if primary && matches!(data.key(), Key::Character(key) if key == ",") {
-                    event.prevent_default();
-                    active_page.set(if active_page() == AppPage::Settings {
-                        AppPage::History
-                    } else {
-                        AppPage::Settings
-                    });
-                    return;
-                }
-
-                if primary && let Some(filter) = filter_shortcut(&data.key()) {
-                    event.prevent_default();
-                    active_page.set(AppPage::History);
-                    active_filter.set(filter);
-                    return;
-                }
-
-                if data.key() == Key::Escape {
-                    if active_page() == AppPage::Settings {
-                        event.prevent_default();
-                        active_page.set(AppPage::History);
-                    } else if !query.read().is_empty() || !debounced_query.read().is_empty() {
-                        event.prevent_default();
-                        query.set(String::new());
-                        debounced_query.set(String::new());
-                        if let Some(element) = shell.read().clone() {
-                            spawn(async move {
-                                let _ = element.set_focus(true).await;
-                            });
-                        }
-                    }
                 }
             },
             TopBar {
@@ -623,8 +460,9 @@ fn use_app_tray(
             MenuItem::with_id(TRAY_OPEN_WIDGET_ID, copy.open_desktop_widget, true, None);
         let separator = PredefinedMenuItem::separator();
         let quit = MenuItem::with_id(TRAY_QUIT_ID, copy.quit, true, None);
-        menu.append_items(&[&show_window, &open_widget, &separator, &quit])
-            .expect("tray menu creation failed");
+        if let Err(e) = menu.append_items(&[&show_window, &open_widget, &separator, &quit]) {
+            eprintln!("Failed to create tray menu: {:?}", e);
+        }
 
         let tray_icon: Option<desktop::trayicon::DioxusTrayIcon> =
             desktop::icon_from_memory(APP_ICON_BYTES).ok();
@@ -856,9 +694,15 @@ fn restore_desktop_window(desktop: &DesktopContext) {
 
     let hwnd = desktop.window.hwnd() as _;
     unsafe {
-        ShowWindow(hwnd, SW_SHOW);
-        ShowWindow(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd);
+        if ShowWindow(hwnd, SW_SHOW) == 0 {
+            eprintln!("ShowWindow(SW_SHOW) failed");
+        }
+        if ShowWindow(hwnd, SW_RESTORE) == 0 {
+            eprintln!("ShowWindow(SW_RESTORE) failed");
+        }
+        if SetForegroundWindow(hwnd) == 0 {
+            eprintln!("SetForegroundWindow failed");
+        }
     }
 }
 

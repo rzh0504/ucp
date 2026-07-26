@@ -3,6 +3,7 @@ use crate::model::{
     AppLanguage, AppSettings, AppTheme, ClipboardContent, ClipboardEntry, ClipboardImage,
     DEFAULT_BACKGROUND_OPACITY,
 };
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -118,7 +119,7 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         ClipboardContent::Files(files) if files == &["C:\\tmp\\a.txt", "D:\\b.png"]
     ));
 
-    let mut metadata_only_image = loaded_history.entry(11).unwrap().clone();
+    let mut metadata_only_image = Rc::unwrap_or_clone(loaded_history.entry(11).unwrap());
     metadata_only_image.favorite = true;
     save_entry(&metadata_only_image).unwrap();
     assert!(matches!(

@@ -13,13 +13,17 @@ use std::time::Duration;
 const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(650);
 type ClipboardReadReply = oneshot::Sender<Result<Option<ClipboardContent>, ClipboardError>>;
 
+/// On success the persist reply carries the (entry id, cached `file://`
+/// preview URL) pair when an image preview was written to disk.
+type PersistCaptureReply = Result<Option<(u64, String)>, String>;
+
 struct PersistCaptureJob {
     entry: Option<ClipboardEntry>,
     removed_ids: Vec<u64>,
     auto_cleanup_cutoff: Option<DateTime<Local>>,
     preserve_favorites_on_delete: bool,
     language: AppLanguage,
-    reply: oneshot::Sender<Result<(), String>>,
+    reply: oneshot::Sender<PersistCaptureReply>,
 }
 
 pub(crate) async fn watch_clipboard(
@@ -157,7 +161,7 @@ async fn capture_clipboard(
                 return;
             }
 
-            if let Err(message) = persist_capture_result(
+            match persist_capture_result(
                 result.entry,
                 result.removed_ids,
                 auto_cleanup_cutoff,
@@ -166,7 +170,23 @@ async fn capture_clipboard(
             )
             .await
             {
-                status.set(message);
+                Ok(Some((entry_id, preview_url))) => {
+                    // Swap the freshly captured image's base64 data: preview for
+                    // the persisted file:// URL so later re-renders stop shipping
+                    // the full base64 payload to the webview.
+                    let needs_update = history.peek().entry(entry_id).is_some_and(|entry| {
+                        matches!(
+                            &entry.content,
+                            ClipboardContent::Image(image)
+                                if image.preview_url.as_deref() != Some(preview_url.as_str())
+                        )
+                    });
+                    if needs_update {
+                        history.write().set_image_preview_url(entry_id, preview_url);
+                    }
+                }
+                Ok(None) => {}
+                Err(message) => status.set(message),
             }
         }
         Ok(None) => {}
@@ -206,7 +226,7 @@ async fn persist_capture_result(
     auto_cleanup_cutoff: Option<DateTime<Local>>,
     preserve_favorites_on_delete: bool,
     language: AppLanguage,
-) -> Result<(), String> {
+) -> PersistCaptureReply {
     let (reply, receiver) = oneshot::channel();
     let job = PersistCaptureJob {
         entry,
@@ -265,14 +285,21 @@ fn persist_capture_result_blocking(
     auto_cleanup_cutoff: Option<DateTime<Local>>,
     preserve_favorites_on_delete: bool,
     language: AppLanguage,
-) -> Result<(), String> {
-    if let Some(entry) = &entry
-        && let Err(error) = storage::save_entry(entry)
-    {
-        return Err(match language {
-            AppLanguage::Chinese => format!("历史保存失败：{error}"),
-            AppLanguage::English => format!("Failed to save history: {error}"),
-        });
+) -> PersistCaptureReply {
+    let mut preview_update = None;
+
+    if let Some(entry) = &entry {
+        match storage::save_entry(entry) {
+            Ok(preview_url) => {
+                preview_update = preview_url.map(|url| (entry.id, url));
+            }
+            Err(error) => {
+                return Err(match language {
+                    AppLanguage::Chinese => format!("历史保存失败：{error}"),
+                    AppLanguage::English => format!("Failed to save history: {error}"),
+                });
+            }
+        }
     }
 
     if let Err(error) = storage::delete_entries(&removed_ids) {
@@ -291,7 +318,7 @@ fn persist_capture_result_blocking(
         });
     }
 
-    Ok(())
+    Ok(preview_update)
 }
 
 fn read_task_interrupted(language: AppLanguage) -> String {

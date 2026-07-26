@@ -1,9 +1,8 @@
 use super::selection::focused_entry_id;
 use crate::i18n;
-use crate::model::{
-    AppLanguage, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage,
-};
+use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage};
 use crate::platform;
+use crate::services::ClipboardService;
 use crate::storage;
 use dioxus::desktop::DesktopContext;
 use dioxus::prelude::*;
@@ -22,47 +21,36 @@ pub(super) fn copy_entry(
     mut status: Signal<String>,
     language: AppLanguage,
 ) -> bool {
-    let Some(mut content) = history.read().entry(id).map(|entry| entry.content.clone()) else {
-        return false;
-    };
-
-    if let ClipboardContent::Image(image) = &content
-        && !image.has_bytes()
-    {
-        let Some(image) = load_image_for_action(id, status, language) else {
-            return false;
-        };
-        content = ClipboardContent::Image(image);
-    }
-
-    if let ClipboardContent::Files(files) = &content
-        && let Err(error) = validate_files_for_copy(files, language)
-    {
-        status.set(copy_failed(language, &error));
-        return false;
-    }
-
-    if let Err(error) = platform::clipboard::write_content(&content) {
-        status.set(copy_failed(language, &error.to_string()));
-        return false;
-    }
-
-    if !promote_on_copy {
-        ignored_clipboard_write.set(Some(content.clone()));
-    }
-
-    let copied_to_clipboard = i18n::tr(language).copied_to_clipboard;
-    if promote_on_copy && history.peek().should_promote(id) {
-        if let Some(entry) = history.write().promote(id) {
-            save_entry_with_status(&entry, status, copied_to_clipboard, language);
-        } else {
-            status.set(copied_to_clipboard.to_string());
+    // Use service layer for business logic
+    let result = ClipboardService::copy_entry(&history.read(), id, promote_on_copy);
+    
+    match result {
+        Ok(copy_result) => {
+            if !promote_on_copy {
+                if let Some(content) = copy_result.content {
+                    ignored_clipboard_write.set(Some(content));
+                }
+            }
+            
+            let copied_to_clipboard = i18n::tr(language).copied_to_clipboard;
+            
+            if copy_result.should_promote {
+                if let Some(entry) = ClipboardService::promote_entry(&mut history.write(), id).ok() {
+                    save_entry_with_status(&entry, status, copied_to_clipboard, language);
+                } else {
+                    status.set(copied_to_clipboard.to_string());
+                }
+            } else {
+                status.set(copied_to_clipboard.to_string());
+            }
+            
+            true
         }
-    } else {
-        status.set(copied_to_clipboard.to_string());
+        Err(error) => {
+            status.set(error.to_localized_string(language));
+            false
+        }
     }
-
-    true
 }
 
 pub(super) fn run_quick_paste_shortcut(mut status: Signal<String>, language: AppLanguage) {
@@ -139,8 +127,18 @@ pub(super) fn open_file_location(
 
 #[cfg(windows)]
 fn open_path_location(path: &Path, language: AppLanguage) -> Result<(), String> {
+    // Validate path doesn't contain dangerous characters
+    let path_str = path.to_string_lossy();
+    if path_str.contains('\0') {
+        return Err(match language {
+            AppLanguage::Chinese => "文件路径包含非法字符".to_string(),
+            AppLanguage::English => "File path contains invalid characters".to_string(),
+        });
+    }
+    
     std::process::Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
+        .arg("/select,")
+        .arg(path.as_os_str())
         .spawn()
         .map(|_| ())
         .map_err(|error| match language {
@@ -159,46 +157,6 @@ fn open_path_location(_path: &Path, language: AppLanguage) -> Result<(), String>
     })
 }
 
-fn validate_files_for_copy(files: &[String], language: AppLanguage) -> Result<(), String> {
-    if files.is_empty() {
-        return Err(match language {
-            AppLanguage::Chinese => "文件列表为空".to_string(),
-            AppLanguage::English => "File list is empty".to_string(),
-        });
-    }
-
-    let mut missing_files = Vec::new();
-    for file in files {
-        let file = file.trim();
-        if file.is_empty() {
-            return Err(i18n::tr(language).empty_file_path.to_string());
-        }
-
-        match Path::new(file).try_exists() {
-            Ok(true) => {}
-            Ok(false) => missing_files.push(file.to_string()),
-            Err(error) => {
-                return Err(match language {
-                    AppLanguage::Chinese => format!("无法访问文件：{file}（{error}）"),
-                    AppLanguage::English => format!("Cannot access file: {file} ({error})"),
-                });
-            }
-        }
-    }
-
-    match missing_files.as_slice() {
-        [] => Ok(()),
-        [file] => Err(match language {
-            AppLanguage::Chinese => format!("文件已不存在：{file}"),
-            AppLanguage::English => format!("File no longer exists: {file}"),
-        }),
-        files => Err(match language {
-            AppLanguage::Chinese => format!("{} 个文件已不存在", files.len()),
-            AppLanguage::English => format!("{} files no longer exist", files.len()),
-        }),
-    }
-}
-
 pub(super) fn save_entry_with_status(
     entry: &ClipboardEntry,
     mut status: Signal<String>,
@@ -206,7 +164,7 @@ pub(super) fn save_entry_with_status(
     language: AppLanguage,
 ) {
     match storage::save_entry(entry) {
-        Ok(()) => status.set(success.to_string()),
+        Ok(_) => status.set(success.to_string()),
         Err(error) => status.set(match language {
             AppLanguage::Chinese => format!("历史保存失败：{error}"),
             AppLanguage::English => format!("Failed to save history: {error}"),
@@ -244,28 +202,26 @@ pub(super) fn delete_entries_with_animation(
     spawn(async move {
         Delay::new(DELETE_EXIT_DELAY).await;
 
-        let removed_ids = {
-            let mut history = history.write();
-            ids.iter()
-                .copied()
-                .filter(|id| history.remove(*id))
-                .collect::<Vec<_>>()
-        };
-
-        deleting_ids
-            .write()
-            .retain(|id| !ids.iter().any(|removed_id| removed_id == id));
-
-        if removed_ids.is_empty() {
-            return;
-        }
-
-        match storage::delete_entries(&removed_ids) {
-            Ok(()) => status.set(success_message.to_string()),
-            Err(error) => status.set(match language {
-                AppLanguage::Chinese => format!("历史删除失败：{error}"),
-                AppLanguage::English => format!("Failed to delete history: {error}"),
-            }),
+        // Use service layer for deletion
+        match ClipboardService::delete_entries(&mut history.write(), &ids, preserve_favorites_on_delete) {
+            Ok(removed_ids) if !removed_ids.is_empty() => {
+                deleting_ids
+                    .write()
+                    .retain(|id| !removed_ids.contains(id));
+                status.set(success_message.to_string());
+            }
+            Ok(_) => {
+                // No entries were deleted
+                deleting_ids
+                    .write()
+                    .retain(|id| !ids.contains(id));
+            }
+            Err(error) => {
+                deleting_ids
+                    .write()
+                    .retain(|id| !ids.contains(id));
+                status.set(error.to_localized_string(language));
+            }
         }
     });
 }
@@ -383,11 +339,4 @@ pub(super) fn delete_focused_or_selected(
 
     selected_ids.set(Vec::new());
     selection_anchor_id.set(None);
-}
-
-fn copy_failed(language: AppLanguage, error: &str) -> String {
-    match language {
-        AppLanguage::Chinese => format!("复制失败：{error}"),
-        AppLanguage::English => format!("Copy failed: {error}"),
-    }
 }
