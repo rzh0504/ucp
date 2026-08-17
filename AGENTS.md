@@ -4,7 +4,7 @@ UCP is a native clipboard history application built with Rust, GPUI, and GPUI Co
 
 ## Project Structure
 
-- `src/gpui_app.rs`: GPUI application state, views, and clipboard monitor.
+- `src/app.rs` and `src/app/`: application state, views, and clipboard monitor.
 - `src/model.rs`: clipboard entries, filters, settings, and history behavior.
 - `src/storage.rs`: SQLite persistence and image preview cache.
 - `src/platform/`: platform clipboard, startup, and single-instance integrations.

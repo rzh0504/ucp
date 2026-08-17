@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod gpui_app;
+mod app;
 mod i18n;
 mod model;
 mod platform;
@@ -42,5 +42,5 @@ fn main() {
         platform::single_instance::SingleInstance::Unavailable => None,
     };
 
-    gpui_app::run(!silent_startup);
+    app::run(!silent_startup);
 }
