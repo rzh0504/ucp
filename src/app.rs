@@ -72,6 +72,7 @@ impl ClipboardApp {
             ThemeMode::Light
         };
         Theme::change(theme_mode, Some(window), cx);
+        Self::apply_palette(cx);
         let history = storage::load_history(settings.history_limit)
             .unwrap_or_else(|_| ClipboardHistory::new(settings.history_limit));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史..."));
@@ -112,6 +113,61 @@ impl ClipboardApp {
         };
         app.start_clipboard_monitor(update_rx, cx);
         app
+    }
+
+    fn apply_palette(cx: &mut App) {
+        let theme = Theme::global_mut(cx);
+        if theme.is_dark() {
+            theme.background = rgb(0x181a1d).into();
+            theme.foreground = rgb(0xe7e9ec).into();
+            theme.muted = rgb(0x25282d).into();
+            theme.muted_foreground = rgb(0x9ba1aa).into();
+            theme.secondary = rgb(0x272a2f).into();
+            theme.secondary_hover = rgb(0x30343a).into();
+            theme.accent = rgb(0x2d3137).into();
+            theme.border = rgb(0x34383f).into();
+            theme.input = rgb(0x3b4048).into();
+            theme.colors.list = rgb(0x1d1f23).into();
+            theme.tab_bar_segmented = rgb(0x23262a).into();
+            theme.tab_active = rgb(0x34383f).into();
+            theme.title_bar = rgb(0x202226).into();
+            theme.title_bar_border = rgb(0x34383f).into();
+            theme.status_bar = rgb(0x202226).into();
+            theme.status_bar_border = rgb(0x34383f).into();
+        } else {
+            theme.background = rgb(0xf7f8fa).into();
+            theme.foreground = rgb(0x20242a).into();
+            theme.muted = rgb(0xeff1f4).into();
+            theme.muted_foreground = rgb(0x68707c).into();
+            theme.secondary = rgb(0xf0f2f5).into();
+            theme.secondary_hover = rgb(0xe7eaf0).into();
+            theme.accent = rgb(0xe9edf2).into();
+            theme.border = rgb(0xdde1e7).into();
+            theme.input = rgb(0xcfd5dd).into();
+            theme.colors.list = rgb(0xffffff).into();
+            theme.tab_bar_segmented = rgb(0xeff1f4).into();
+            theme.tab_active = rgb(0xffffff).into();
+            theme.title_bar = rgb(0xf1f3f6).into();
+            theme.title_bar_border = rgb(0xdde1e7).into();
+            theme.status_bar = rgb(0xf1f3f6).into();
+            theme.status_bar_border = rgb(0xdde1e7).into();
+        }
+
+        theme.tokens.background = theme.background.into();
+        theme.tokens.muted = theme.muted.into();
+        theme.tokens.secondary = theme.secondary.into();
+        theme.tokens.accent = theme.accent.into();
+        theme.tokens.status_bar = theme.status_bar.into();
+    }
+
+    fn apply_theme(theme: crate::model::AppTheme, cx: &mut App) {
+        let mode = if matches!(theme, crate::model::AppTheme::Dark) {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        };
+        Theme::change(mode, None, cx);
+        Self::apply_palette(cx);
     }
 
     fn start_clipboard_monitor(

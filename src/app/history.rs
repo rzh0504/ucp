@@ -16,6 +16,8 @@ use std::rc::Rc;
 impl ClipboardApp {
     pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let language = self.settings.language;
+        let show_copy_time = self.settings.show_copy_time;
+        let show_text_length = self.settings.show_text_length;
         let counts = self.history.counts();
         let filters = TabBar::new("filters")
             .segmented()
@@ -67,7 +69,15 @@ impl ClipboardApp {
                         this.visible_entries.get(index).cloned().map(|entry| {
                             let selected = this.selected_entry_id == Some(entry.id);
                             let expanded = this.expanded_image_id == Some(entry.id);
-                            Self::render_entry(entry, index + 1, language, selected, expanded, cx)
+                            Self::render_entry(
+                                entry,
+                                index + 1,
+                                language,
+                                selected,
+                                expanded,
+                                (show_copy_time, show_text_length),
+                                cx,
+                            )
                         })
                     })
                     .collect()
@@ -103,12 +113,14 @@ impl ClipboardApp {
 
         v_flex()
             .size_full()
+            .bg(cx.theme().colors.list)
             .child(
                 h_flex()
                     .px_4()
                     .py_2()
                     .gap_4()
                     .items_center()
+                    .bg(cx.theme().background)
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(filters)
@@ -139,14 +151,17 @@ impl ClipboardApp {
         language: AppLanguage,
         selected: bool,
         expanded: bool,
+        display_options: (bool, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let (show_copy_time, show_text_length) = display_options;
         let id = entry.id;
         let is_image = matches!(entry.content, ClipboardContent::Image(_));
         let title = entry.title_with_language(language);
         let meta = match &entry.content {
-            ClipboardContent::Image(image) => format!("{} x {}", image.width, image.height),
-            _ => entry.size_label_with_language(language),
+            ClipboardContent::Text(_) if !show_text_length => None,
+            ClipboardContent::Image(image) => Some(format!("{} x {}", image.width, image.height)),
+            _ => Some(entry.size_label_with_language(language)),
         };
         let copy_time = crate::i18n::relative_time(language, entry.captured_at);
         let favorite = entry.favorite;
@@ -199,6 +214,7 @@ impl ClipboardApp {
                                         .when(!expanded, |this| this.w(px(180.)).h(px(100.)))
                                         .when(expanded, |this| this.size_full())
                                         .overflow_hidden()
+                                        .bg(cx.theme().background)
                                         .child(preview),
                                 ),
                         )
@@ -208,11 +224,17 @@ impl ClipboardApp {
                                 .flex_none()
                                 .text_size(px(11.))
                                 .text_color(muted_foreground)
-                                .child(copy_time.clone())
+                                .when(show_copy_time, |this| this.child(copy_time.clone()))
                                 .child(div().flex_1())
                                 .child(
                                     h_flex()
+                                        .id(ElementId::NamedInteger("image-expand".into(), id))
                                         .gap_1()
+                                        .px_2()
+                                        .py_1()
+                                        .rounded_sm()
+                                        .cursor_pointer()
+                                        .hover(|style| style.bg(cx.theme().secondary_hover))
                                         .child(
                                             Icon::new(if expanded {
                                                 IconName::ChevronUp
@@ -221,10 +243,15 @@ impl ClipboardApp {
                                             })
                                             .xsmall(),
                                         )
-                                        .child(if expanded { "收起" } else { "展开" }),
+                                        .child(if expanded { "收起" } else { "展开" })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.selected_entry_id = Some(id);
+                                            this.toggle_image_expansion(id, cx);
+                                        })),
                                 )
                                 .child(div().flex_1())
-                                .child(meta.clone())
+                                .when_some(meta.clone(), |this, meta| this.child(meta))
                                 .child(div().w(px(20.)).text_right().child(position.to_string())),
                         ),
                 )
@@ -240,9 +267,9 @@ impl ClipboardApp {
                 h_flex()
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground)
-                    .child(copy_time)
+                    .when(show_copy_time, |this| this.child(copy_time))
                     .child(div().flex_1())
-                    .child(meta),
+                    .when_some(meta, |this, meta| this.child(meta)),
             );
 
         h_flex()
@@ -251,18 +278,22 @@ impl ClipboardApp {
             .h(px(row_height))
             .overflow_hidden()
             .gap_2()
-            .px_4()
+            .pl_4()
+            .pr_12()
             .border_b_1()
             .border_color(cx.theme().border)
-            .when(selected, |this| this.bg(cx.theme().secondary))
-            .hover(|style| style.bg(cx.theme().secondary_hover))
+            .when(selected, |this| {
+                this.bg(cx.theme().blue.opacity(0.12))
+                    .border_2()
+                    .border_color(cx.theme().blue.opacity(0.78))
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.selected_entry_id = Some(id);
-                if is_image {
-                    this.toggle_image_expansion(id, cx);
+                this.selected_entry_id = if this.selected_entry_id == Some(id) {
+                    None
                 } else {
-                    cx.notify();
-                }
+                    Some(id)
+                };
+                cx.notify();
             }))
             .when_some(image_content, |this, image| this.child(image))
             .when(!is_image, |this| {
@@ -278,7 +309,13 @@ impl ClipboardApp {
                 .child(div().w(px(4.)).flex_none())
                 .child(content)
             })
-            .context_menu(move |menu, _, _| {
+            .context_menu(move |menu, _, cx| {
+                if let Some(app) = app.upgrade() {
+                    app.update(cx, |this, cx| {
+                        this.selected_entry_id = Some(id);
+                        cx.notify();
+                    });
+                }
                 let copy_app = app.clone();
                 let favorite_app = app.clone();
                 let delete_app = app.clone();
