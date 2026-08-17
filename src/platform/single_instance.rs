@@ -102,16 +102,6 @@ fn send_activation_request(request: u8) {
 }
 
 #[cfg(windows)]
-pub fn activation_count() -> u64 {
-    ACTIVATION_REQUESTS.load(std::sync::atomic::Ordering::Acquire)
-}
-
-#[cfg(windows)]
-pub fn quit_count() -> u64 {
-    QUIT_REQUESTS.load(std::sync::atomic::Ordering::Acquire)
-}
-
-#[cfg(windows)]
 fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }

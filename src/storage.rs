@@ -91,7 +91,8 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
                         preview_url: row.get(5)?,
                     }),
                     "file" => {
-                        let file_paths = row.get::<_, Option<String>>(9)?
+                        let file_paths = row
+                            .get::<_, Option<String>>(9)?
                             .map(|paths| paths.split('\x1F').map(String::from).collect())
                             .unwrap_or_default();
                         ClipboardContent::Files(file_paths)
@@ -331,7 +332,7 @@ pub fn database_path() -> Result<PathBuf, StorageError> {
     let directory = data_directory();
     fs::create_dir_all(&directory)?;
     let db_path = directory.join(DATABASE_FILE);
-    
+
     // Set restrictive permissions on the database file (Unix only)
     #[cfg(unix)]
     {
@@ -341,7 +342,7 @@ pub fn database_path() -> Result<PathBuf, StorageError> {
             fs::set_permissions(&db_path, permissions)?;
         }
     }
-    
+
     Ok(db_path)
 }
 

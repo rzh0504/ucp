@@ -1,20 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
-mod clipboard_watcher;
-mod components;
+mod gpui_app;
 mod i18n;
 mod model;
 mod platform;
 mod services;
 mod storage;
-mod updater;
-
-use app::App;
-use dioxus::desktop::{Config, LogicalSize, WindowBuilder, WindowCloseBehaviour};
-
-const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/Ucp.png");
-const APP_DIR: &str = "UCP";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -51,35 +42,5 @@ fn main() {
         platform::single_instance::SingleInstance::Unavailable => None,
     };
 
-    let config = Config::new()
-        .with_window(
-            WindowBuilder::new()
-                .with_title("UCP Clipboard")
-                .with_window_icon(dioxus::desktop::icon_from_memory(APP_ICON_BYTES).ok())
-                .with_decorations(false)
-                .with_transparent(true)
-                .with_visible(!silent_startup)
-                .with_inner_size(LogicalSize::new(900.0, 660.0))
-                .with_min_inner_size(LogicalSize::new(860.0, 620.0)),
-        )
-        .with_menu(None)
-        .with_close_behaviour(WindowCloseBehaviour::WindowHides)
-        .with_disable_context_menu(true)
-        .with_custom_head(app::style_head())
-        .with_background_color((0, 0, 0, 0));
-
-    #[cfg(windows)]
-    let config = config.with_data_directory(webview_data_directory());
-
-    dioxus::LaunchBuilder::new().with_cfg(config).launch(App);
-}
-
-#[cfg(windows)]
-fn webview_data_directory() -> std::path::PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("APPDATA"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(APP_DIR)
-        .join("WebView2")
+    gpui_app::run(!silent_startup);
 }

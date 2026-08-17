@@ -2,25 +2,20 @@
 name = "ucp"
 version = "0.2.0"
 edition = "2024"
-description = "A desktop clipboard history app built with Dioxus."
+description = "A desktop clipboard history app built with GPUI."
 license = "MIT"
 
 [dependencies]
 arboard = "3"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-dioxus = { version = "0.7", features = ["desktop"] }
-dioxus-primitives = { path = "vendor/dioxus-primitives", default-features = false }
-futures-channel = "0.3"
-futures-timer = "3"
-futures-util = "0.3"
-global-hotkey = "0.7"
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+smol = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-rfd = { version = "0.17", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
-semver = "1"
-serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
@@ -34,3 +29,12 @@ debug = true
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+[package.metadata.bundle]
+name = "UCP Clipboard"
+identifier = "dev.ucp.clipboard"
+publisher = "UCP"
+icon = ["assets/icons/app.ico", "assets/icons/app.icns", "assets/icons/Ucp.png"]
+category = "Utility"
+short_description = "Desktop clipboard history manager"
+long_description = "A cross-platform desktop clipboard history manager built with GPUI."

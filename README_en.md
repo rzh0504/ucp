@@ -6,7 +6,7 @@
 
 [简体中文](README.md)
 
-Cross-platform desktop clipboard history app built with Dioxus 0.7. Windows is the primary tested target; macOS and Linux support is implemented on a best-effort basis and should be treated as experimental until release builds are verified on real machines.
+Cross-platform desktop clipboard history app built with GPUI and GPUI Component. Windows is the primary tested target; macOS and Linux support remains experimental.
 
 ## Features
 
@@ -72,19 +72,11 @@ On macOS and Linux, the close button minimizes the window instead of hiding it c
 
 ## Development
 
-Install the Dioxus CLI if it is not available:
+Run a debug build:
 
 ```powershell
-cargo install dioxus-cli
+cargo run
 ```
-
-Run debug builds with hot reload enabled:
-
-```powershell
-dx serve --platform desktop
-```
-
-`dx serve` enables RSX hot reload and Subsecond hot patching in debug mode. Use `cargo run` only when hot reload is not needed.
 
 Run tests and lint checks:
 
