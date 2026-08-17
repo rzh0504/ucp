@@ -3,7 +3,7 @@ name = "ucp"
 version = "0.3.0"
 edition = "2024"
 description = "A desktop clipboard history app built with GPUI."
-license = "MIT"
+license-file = "LICENSE"
 
 [dependencies]
 arboard = "3"

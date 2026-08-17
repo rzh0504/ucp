@@ -151,7 +151,7 @@ jobs:
           }
 
           foreach ($file in $files) {
-            $destination = Join-Path "release-assets" "$artifactName-$($file.Name)"
+            $destination = Join-Path "release-assets" "$artifactName$($file.Extension)"
             Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
           }
 
