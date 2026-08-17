@@ -5,8 +5,9 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode,
-    TitleBar,
-    button::{Button, ButtonVariants as _},
+    TitleBar, WindowExt as _,
+    button::{Button, ButtonVariant, ButtonVariants as _},
+    dialog::DialogButtonProps,
     h_flex,
     input::{InputEvent, InputState},
     status_bar::StatusBar,
@@ -52,8 +53,10 @@ struct ClipboardApp {
     page: AppPage,
     status: String,
     monitor_paused: bool,
+    selected_entry_id: Option<u64>,
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
     search: Entity<InputState>,
+    initial_focus: FocusHandle,
     _clipboard_listener: Option<platform::clipboard::ClipboardUpdateListener>,
     _subscriptions: Vec<Subscription>,
 }
@@ -70,6 +73,8 @@ impl ClipboardApp {
         let history = storage::load_history(settings.history_limit)
             .unwrap_or_else(|_| ClipboardHistory::new(settings.history_limit));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史..."));
+        let initial_focus = cx.focus_handle();
+        initial_focus.focus(window, cx);
         let subscriptions = vec![cx.subscribe_in(&search, window, {
             let search = search.clone();
             move |this, _, event: &InputEvent, _, cx| {
@@ -94,8 +99,10 @@ impl ClipboardApp {
             page: AppPage::History,
             status: String::new(),
             monitor_paused: false,
+            selected_entry_id: None,
             visible_entries: Vec::new(),
             search,
+            initial_focus,
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
@@ -161,9 +168,11 @@ impl ClipboardApp {
 }
 
 impl Render for ClipboardApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page;
+        let dialog_layer = Root::render_dialog_layer(window, cx);
         v_flex()
+            .track_focus(&self.initial_focus)
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -221,19 +230,73 @@ impl Render for ClipboardApp {
                                     })),
                             )
                             .when(page == AppPage::History, |this| {
+                                let app = cx.entity().downgrade();
+                                let filter = self.filter;
+                                let (title, description, confirm_text) = match filter {
+                                    ClipboardFilter::All => (
+                                        "清空全部历史记录？",
+                                        "此操作将永久删除全部剪贴板历史，且无法撤销。",
+                                        "清空全部",
+                                    ),
+                                    ClipboardFilter::Text => (
+                                        "清空全部文本记录？",
+                                        "此操作将永久删除全部文本记录，且无法撤销。",
+                                        "清空文本",
+                                    ),
+                                    ClipboardFilter::Image => (
+                                        "清空全部图片记录？",
+                                        "此操作将永久删除全部图片记录，且无法撤销。",
+                                        "清空图片",
+                                    ),
+                                    ClipboardFilter::File => (
+                                        "清空全部文件记录？",
+                                        "此操作将永久删除全部文件记录，且无法撤销。",
+                                        "清空文件",
+                                    ),
+                                    ClipboardFilter::Favorite => (
+                                        "清空全部收藏记录？",
+                                        "此操作将永久删除全部收藏记录，且无法撤销。",
+                                        "清空收藏",
+                                    ),
+                                };
                                 this.child(
                                     Button::new("status-clear")
-                                        .danger()
-                                        .text()
+                                        .ghost()
                                         .large()
-                                        .child(Icon::new(IconName::Delete).small())
+                                        .child(
+                                            Icon::new(IconName::Delete)
+                                                .small()
+                                                .text_color(cx.theme().danger),
+                                        )
                                         .tooltip("清空历史")
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.clear_history(cx);
-                                        })),
+                                        .on_click(move |_, window, cx| {
+                                            let app = app.clone();
+                                            window.open_alert_dialog(cx, move |alert, _, _| {
+                                                let app = app.clone();
+                                                alert
+                                                    .title(title)
+                                                    .description(description)
+                                                    .button_props(
+                                                        DialogButtonProps::default()
+                                                            .ok_variant(ButtonVariant::Danger)
+                                                            .ok_text(confirm_text)
+                                                            .cancel_text("取消")
+                                                            .show_cancel(true),
+                                                    )
+                                                    .on_ok(move |_, _, cx| {
+                                                        if let Some(app) = app.upgrade() {
+                                                            app.update(cx, |this, cx| {
+                                                                this.clear_current_filter(cx);
+                                                            });
+                                                        }
+                                                        true
+                                                    })
+                                            });
+                                        }),
                                 )
                             }),
                     ),
             )
+            .children(dialog_layer)
     }
 }

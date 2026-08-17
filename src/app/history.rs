@@ -2,7 +2,7 @@ use super::ClipboardApp;
 use crate::model::{AppLanguage, ClipboardEntry, ClipboardFilter};
 use crate::services::ClipboardService;
 use crate::storage;
-use gpui::*;
+use gpui::{prelude::FluentBuilder as _, *};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
@@ -51,10 +51,10 @@ impl ClipboardApp {
             move |this, range, _window, cx| {
                 range
                     .filter_map(|index| {
-                        this.visible_entries
-                            .get(index)
-                            .cloned()
-                            .map(|entry| Self::render_entry(entry, language, cx))
+                        this.visible_entries.get(index).cloned().map(|entry| {
+                            let selected = this.selected_entry_id == Some(entry.id);
+                            Self::render_entry(entry, language, selected, cx)
+                        })
                     })
                     .collect()
             },
@@ -115,12 +115,14 @@ impl ClipboardApp {
     fn render_entry(
         entry: Rc<ClipboardEntry>,
         language: AppLanguage,
+        selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = entry.id;
         let title = entry.title_with_language(language);
         let meta = entry.size_label_with_language(language);
         let favorite = entry.favorite;
+        let hover_group = SharedString::from(format!("entry-{id}"));
         let content = v_flex()
             .flex_1()
             .min_w_0()
@@ -155,19 +157,33 @@ impl ClipboardApp {
             .child(Icon::new(IconName::Delete).small())
             .on_click(cx.listener(move |this, _, _, cx| this.delete_entry(id, cx)));
 
+        let actions = h_flex()
+            .gap_1()
+            .when(!selected, |this| {
+                this.invisible()
+                    .group_hover(hover_group.clone(), |style| style.visible())
+            })
+            .child(copy)
+            .child(favorite_button)
+            .child(delete);
+
         h_flex()
             .id(ElementId::NamedInteger("entry".into(), id))
+            .group(hover_group)
             .w_full()
             .h(px(64.))
             .gap_2()
             .px_4()
             .border_b_1()
             .border_color(cx.theme().border)
+            .when(selected, |this| this.bg(cx.theme().secondary))
             .hover(|style| style.bg(cx.theme().secondary_hover))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_entry_id = Some(id);
+                cx.notify();
+            }))
             .child(content)
-            .child(copy)
-            .child(favorite_button)
-            .child(delete)
+            .child(actions)
             .into_any_element()
     }
 
@@ -217,6 +233,9 @@ impl ClipboardApp {
 
     fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.history.remove(id) {
+            if self.selected_entry_id == Some(id) {
+                self.selected_entry_id = None;
+            }
             cx.background_spawn(async move {
                 let _ = storage::delete_entries(&[id]);
             })
@@ -226,13 +245,33 @@ impl ClipboardApp {
         }
     }
 
-    pub(super) fn clear_history(&mut self, cx: &mut Context<Self>) {
-        self.history.clear();
-        cx.background_spawn(async {
-            let _ = storage::clear_history();
+    pub(super) fn clear_current_filter(&mut self, cx: &mut Context<Self>) {
+        let filter = self.filter;
+        let ids = self.history.deletable_ids_for_filter(filter, false);
+        if filter == ClipboardFilter::All {
+            self.history.clear();
+        } else {
+            for id in &ids {
+                self.history.remove(*id);
+            }
+        }
+        self.selected_entry_id = None;
+        cx.background_spawn(async move {
+            if filter == ClipboardFilter::All {
+                let _ = storage::clear_history();
+            } else {
+                let _ = storage::delete_entries(&ids);
+            }
         })
         .detach();
-        self.status = "历史已清空".into();
+        self.status = match filter {
+            ClipboardFilter::All => "全部历史已清空",
+            ClipboardFilter::Text => "文本记录已清空",
+            ClipboardFilter::Image => "图片记录已清空",
+            ClipboardFilter::File => "文件记录已清空",
+            ClipboardFilter::Favorite => "收藏记录已清空",
+        }
+        .into();
         cx.notify();
     }
 }
