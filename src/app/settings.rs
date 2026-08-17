@@ -160,16 +160,39 @@ impl ClipboardApp {
                     let app = app.clone();
                     move |cx| app.read(cx).settings.quick_paste
                 },
-                move |checked, cx| {
-                    app.update(cx, |this, cx| {
-                        this.settings.quick_paste = checked;
-                        this.save_settings();
-                        cx.notify();
-                    });
+                {
+                    let app = app.clone();
+                    move |checked, cx| {
+                        app.update(cx, |this, cx| {
+                            this.settings.quick_paste = checked;
+                            this.save_settings();
+                            cx.notify();
+                        });
+                    }
                 },
             ),
         )
-        .description("允许使用快捷键快速打开剪贴板历史。");
+        .description("复制文本记录后，自动粘贴到当前光标所在的输入框。");
+        let double_click_copy = SettingItem::new(
+            "双击快速复制",
+            SettingField::switch(
+                {
+                    let app = app.clone();
+                    move |cx| app.read(cx).settings.double_click_copy
+                },
+                {
+                    let app = app.clone();
+                    move |checked, cx| {
+                        app.update(cx, |this, cx| {
+                            this.settings.double_click_copy = checked;
+                            this.save_settings();
+                            cx.notify();
+                        });
+                    }
+                },
+            ),
+        )
+        .description("双击历史记录时立即将其复制到剪贴板。");
 
         let update_app = cx.entity().clone();
         let about = SettingItem::render(move |_, _, cx| {
@@ -287,6 +310,7 @@ impl ClipboardApp {
                         SettingGroup::new().title("剪贴板").items(vec![
                             monitor,
                             promote,
+                            double_click_copy,
                             show_copy_time,
                             show_text_length,
                         ]),

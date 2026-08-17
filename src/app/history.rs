@@ -18,6 +18,8 @@ impl ClipboardApp {
         let language = self.settings.language;
         let show_copy_time = self.settings.show_copy_time;
         let show_text_length = self.settings.show_text_length;
+        let double_click_copy = self.settings.double_click_copy;
+        let quick_paste = self.settings.quick_paste;
         let counts = self.history.counts();
         let filters = TabBar::new("filters")
             .segmented()
@@ -75,7 +77,12 @@ impl ClipboardApp {
                                 language,
                                 selected,
                                 expanded,
-                                (show_copy_time, show_text_length),
+                                (
+                                    show_copy_time,
+                                    show_text_length,
+                                    double_click_copy,
+                                    quick_paste,
+                                ),
                                 cx,
                             )
                         })
@@ -151,10 +158,10 @@ impl ClipboardApp {
         language: AppLanguage,
         selected: bool,
         expanded: bool,
-        display_options: (bool, bool),
+        options: (bool, bool, bool, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (show_copy_time, show_text_length) = display_options;
+        let (show_copy_time, show_text_length, double_click_copy, quick_paste) = options;
         let id = entry.id;
         let is_image = matches!(entry.content, ClipboardContent::Image(_));
         let title = entry.title_with_language(language);
@@ -299,7 +306,12 @@ impl ClipboardApp {
                         .bg(cx.theme().border),
                 )
             })
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if (double_click_copy || quick_paste) && event.click_count() == 2 {
+                    this.selected_entry_id = None;
+                    this.copy_entry(id, quick_paste, Some(window.window_handle()), cx);
+                    return;
+                }
                 this.selected_entry_id = if this.selected_entry_id == Some(id) {
                     None
                 } else {
@@ -351,7 +363,7 @@ impl ClipboardApp {
                 menu.item(PopupMenuItem::new("复制").icon(IconName::Copy).on_click(
                     move |_, _, cx| {
                         if let Some(app) = copy_app.upgrade() {
-                            app.update(cx, |this, cx| this.copy_entry(id, cx));
+                            app.update(cx, |this, cx| this.copy_entry(id, false, None, cx));
                         }
                     },
                 ))
@@ -408,19 +420,30 @@ impl ClipboardApp {
         cx.notify();
     }
 
-    fn copy_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+    fn copy_entry(
+        &mut self,
+        id: u64,
+        allow_quick_paste: bool,
+        window: Option<AnyWindowHandle>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(entry) = self.history.entry(id) else {
             return;
         };
         let content = entry.content.clone();
+        let should_quick_paste = allow_quick_paste
+            && self.settings.quick_paste
+            && matches!(&content, ClipboardContent::Text(_));
         let should_promote =
             self.settings.promote_copied_entries && self.history.should_promote(id);
         let language = self.settings.language;
         self.status = "复制中...".into();
+        cx.notify();
         cx.spawn(async move |entity, cx| {
             let result = cx
                 .background_spawn(async move { ClipboardService::copy_content(id, content) })
                 .await;
+            let copied = result.is_ok();
             entity
                 .update(cx, |this, cx| {
                     match result {
@@ -431,13 +454,40 @@ impl ClipboardApp {
                                 })
                                 .detach();
                             }
-                            this.status = "已复制".into();
+                            if should_quick_paste {
+                                if let Some(window) = window {
+                                    window
+                                        .update(cx, |_, window, _| window.minimize_window())
+                                        .ok();
+                                }
+                                this.status = "正在切换窗口并粘贴...".into();
+                            } else {
+                                this.status = "已复制".into();
+                            }
                         }
                         Err(error) => this.status = error.to_localized_string(language),
                     }
                     cx.notify();
                 })
                 .ok();
+
+            if copied && should_quick_paste {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(260))
+                    .await;
+                let result = cx
+                    .background_spawn(async { crate::platform::clipboard::paste_shortcut() })
+                    .await;
+                entity
+                    .update(cx, |this, cx| {
+                        this.status = match result {
+                            Ok(()) => "已快捷粘贴".into(),
+                            Err(error) => format!("快捷粘贴失败：{error}"),
+                        };
+                        cx.notify();
+                    })
+                    .ok();
+            }
         })
         .detach();
     }

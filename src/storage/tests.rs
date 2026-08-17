@@ -7,6 +7,16 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn double_click_copy_is_enabled_by_default() {
+    assert!(AppSettings::default().double_click_copy);
+}
+
+#[test]
+fn quick_paste_is_disabled_by_default() {
+    assert!(!AppSettings::default().quick_paste);
+}
+
+#[test]
 fn storage_round_trips_settings_and_clipboard_entries() {
     let _guard = storage_test_lock()
         .lock()
@@ -29,6 +39,7 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         auto_focus_history: false,
         promote_copied_entries: false,
         quick_paste: true,
+        double_click_copy: false,
         hide_after_copy: true,
         show_copy_time: false,
         show_text_length: false,

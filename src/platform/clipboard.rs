@@ -252,6 +252,49 @@ pub struct ClipboardUpdateListener {
     _shutdown: clipboard_win::monitor::Shutdown,
 }
 
+#[cfg(windows)]
+pub fn paste_shortcut() -> Result<(), ClipboardError> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_KEYBOARD, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_V,
+    };
+
+    unsafe {
+        let mut inputs = [INPUT::default(); 4];
+        inputs[0].r#type = INPUT_KEYBOARD;
+        inputs[0].Anonymous.ki.wVk = VK_CONTROL;
+
+        inputs[1].r#type = INPUT_KEYBOARD;
+        inputs[1].Anonymous.ki.wVk = VK_V;
+
+        inputs[2].r#type = INPUT_KEYBOARD;
+        inputs[2].Anonymous.ki.wVk = VK_V;
+        inputs[2].Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+
+        inputs[3].r#type = INPUT_KEYBOARD;
+        inputs[3].Anonymous.ki.wVk = VK_CONTROL;
+        inputs[3].Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+
+        let sent = SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+
+        if sent == inputs.len() as u32 {
+            Ok(())
+        } else {
+            Err(ClipboardError::Unavailable(
+                "发送粘贴快捷键失败".to_string(),
+            ))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn paste_shortcut() -> Result<(), ClipboardError> {
+    platform_paste_shortcut()
+}
+
 #[cfg(target_os = "macos")]
 pub struct ClipboardUpdateListener {
     shutdown: Option<std::sync::mpsc::Sender<()>>,
@@ -380,6 +423,47 @@ fn image_data_is_unreadable(error: &ArboardError) -> bool {
         error,
         ArboardError::Unknown { description } if description == "failed to read clipboard image data"
     )
+}
+
+#[cfg(target_os = "macos")]
+fn platform_paste_shortcut() -> Result<(), ClipboardError> {
+    unix::command_status(
+        "osascript",
+        &[
+            "-e",
+            "tell application \"System Events\" to keystroke \"v\" using command down",
+        ],
+        &[],
+    )
+    .map_err(|message| ClipboardError::Unavailable(format!("发送 macOS 粘贴快捷键失败：{message}")))
+}
+
+#[cfg(target_os = "linux")]
+fn platform_paste_shortcut() -> Result<(), ClipboardError> {
+    let attempts: [(&str, &[&str]); 2] = [
+        ("wtype", &["-M", "ctrl", "v", "-m", "ctrl"]),
+        ("xdotool", &["key", "--clearmodifiers", "ctrl+v"]),
+    ];
+    let mut errors = Vec::new();
+
+    for (command, args) in attempts {
+        match unix::command_status(command, args, &[]) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(format!("{command}: {error}")),
+        }
+    }
+
+    Err(ClipboardError::Unavailable(format!(
+        "发送 Linux 粘贴快捷键失败，请安装 wtype 或 xdotool：{}",
+        errors.join("; ")
+    )))
+}
+
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
+fn platform_paste_shortcut() -> Result<(), ClipboardError> {
+    Err(ClipboardError::Unavailable(
+        "当前平台暂不支持快捷粘贴".to_string(),
+    ))
 }
 
 #[cfg(target_os = "macos")]
