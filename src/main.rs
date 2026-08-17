@@ -6,6 +6,7 @@ mod model;
 mod platform;
 mod services;
 mod storage;
+mod updater;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

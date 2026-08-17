@@ -1,11 +1,18 @@
-use super::ClipboardApp;
+use super::{ClipboardApp, UpdateCheckState};
 use crate::model::AppTheme;
 use crate::platform;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
     ActiveTheme as _, IconName, Sizable as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    label::Label,
+    link::Link,
     setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings},
+    v_flex,
 };
+use std::sync::Arc;
 
 impl ClipboardApp {
     pub(super) fn render_settings(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -164,6 +171,113 @@ impl ClipboardApp {
         )
         .description("允许使用快捷键快速打开剪贴板历史。");
 
+        let update_app = cx.entity().clone();
+        let about = SettingItem::render(move |_, _, cx| {
+            let update_state = update_app.read(cx).update_check.clone();
+            let checking = matches!(update_state, UpdateCheckState::Checking);
+            let status = match &update_state {
+                UpdateCheckState::Idle => {
+                    format!("当前是最新版本 {}。", env!("CARGO_PKG_VERSION"))
+                }
+                UpdateCheckState::Checking => "正在检查更新...".to_string(),
+                UpdateCheckState::UpToDate(version) => {
+                    format!("当前是最新版本 {version}。")
+                }
+                UpdateCheckState::Available(info) => {
+                    format!("发现新版本 {}。", info.version)
+                }
+                UpdateCheckState::Failed(error) => format!("检查更新失败：{error}"),
+            };
+            let download = match &update_state {
+                UpdateCheckState::Available(info) => Some((
+                    info.download_url.clone(),
+                    if info.asset_name.is_some() {
+                        "下载更新"
+                    } else {
+                        "查看发布页"
+                    },
+                )),
+                _ => None,
+            };
+            let check_label = if matches!(update_state, UpdateCheckState::Available(_)) {
+                "重新检查"
+            } else {
+                "检查更新"
+            };
+            let check_app = update_app.clone();
+
+            v_flex()
+                .w_full()
+                .items_center()
+                .gap_3()
+                .py_2()
+                .text_center()
+                .child(
+                    img(Arc::new(Image::from_bytes(
+                        ImageFormat::Png,
+                        include_bytes!("../../assets/icons/Ucp.png").to_vec(),
+                    )))
+                    .size(px(64.))
+                    .object_fit(ObjectFit::Contain),
+                )
+                .child(Label::new("UCP Clipboard").text_lg())
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(status),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("check-for-updates")
+                                .icon(IconName::Redo)
+                                .label(check_label)
+                                .outline()
+                                .loading(checking)
+                                .on_click(move |_, _, cx| {
+                                    check_app.update(cx, |this, cx| {
+                                        this.start_update_check(cx);
+                                    });
+                                }),
+                        )
+                        .when_some(download, |this, (url, label)| {
+                            this.child(
+                                Button::new("download-update")
+                                    .icon(IconName::ExternalLink)
+                                    .label(label)
+                                    .primary()
+                                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                            )
+                        }),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("跨平台桌面剪贴板历史应用"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("基于 Rust、GPUI 和 GPUI Component 构建"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("MIT License"),
+                )
+                .child(
+                    Link::new("ucp-repository")
+                        .href("https://github.com/rzh0504/ucp")
+                        .text_sm()
+                        .child("https://github.com/rzh0504/ucp"),
+                )
+        });
+
         div().size_full().bg(cx.theme().colors.list).child(
             Settings::new("clipboard-settings").large().pages(vec![
                 SettingPage::new("常规")
@@ -181,6 +295,10 @@ impl ClipboardApp {
                             .title("系统")
                             .items(vec![startup, quick_paste]),
                     ]),
+                SettingPage::new("关于")
+                    .icon(IconName::Info)
+                    .resettable(false)
+                    .groups(vec![SettingGroup::new().items(vec![about])]),
             ]),
         )
     }

@@ -1,6 +1,7 @@
 use crate::model::{AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::storage;
+use crate::updater::{self, UpdateCheck, UpdateInfo};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
@@ -22,6 +23,15 @@ mod settings;
 enum AppPage {
     History,
     Settings,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum UpdateCheckState {
+    Idle,
+    Checking,
+    UpToDate(String),
+    Available(UpdateInfo),
+    Failed(String),
 }
 
 pub fn run(visible: bool) {
@@ -118,6 +128,7 @@ struct ClipboardApp {
     page: AppPage,
     status: String,
     monitor_paused: bool,
+    update_check: UpdateCheckState,
     selected_entry_id: Option<u64>,
     expanded_image_id: Option<u64>,
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
@@ -166,6 +177,7 @@ impl ClipboardApp {
             page: AppPage::History,
             status: String::new(),
             monitor_paused: false,
+            update_check: UpdateCheckState::Idle,
             selected_entry_id: None,
             expanded_image_id: None,
             visible_entries: Vec::new(),
@@ -298,6 +310,33 @@ impl ClipboardApp {
         })
         .detach();
         cx.notify();
+    }
+
+    fn start_update_check(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.update_check, UpdateCheckState::Checking) {
+            return;
+        }
+
+        self.update_check = UpdateCheckState::Checking;
+        cx.notify();
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_spawn(async { updater::check_for_updates() })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    this.update_check = match result {
+                        Ok(UpdateCheck::Available(info)) => UpdateCheckState::Available(info),
+                        Ok(UpdateCheck::UpToDate { latest_version }) => {
+                            UpdateCheckState::UpToDate(latest_version)
+                        }
+                        Err(error) => UpdateCheckState::Failed(error),
+                    };
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
     }
 
     fn save_settings(&mut self) {
