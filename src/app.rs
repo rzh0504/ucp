@@ -4,8 +4,8 @@ use crate::storage;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode,
-    TitleBar, WindowExt as _,
+    ActiveTheme as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode, TitleBar,
+    WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
@@ -88,7 +88,6 @@ impl ClipboardApp {
             }
         })];
         let (update_tx, update_rx) = async_channel::unbounded();
-        let _ = update_tx.try_send(());
         let event_tx = update_tx.clone();
         let clipboard_listener = platform::clipboard::listen_for_updates(move || {
             let _ = event_tx.send_blocking(());
@@ -255,14 +254,7 @@ impl Render for ClipboardApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(
-                TitleBar::new().child(
-                    h_flex()
-                        .w_full()
-                        .items_center()
-                        .child(div().font_semibold().child("UCP")),
-                ),
-            )
+            .child(TitleBar::new())
             .child(
                 div()
                     .flex_1()

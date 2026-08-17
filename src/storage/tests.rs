@@ -146,6 +146,8 @@ fn storage_round_trips_settings_and_clipboard_entries() {
 
     delete_entries(&[10]).unwrap();
     assert!(load_history(10).unwrap().entry(10).is_none());
+    save_entry(&text_entry).unwrap();
+    assert!(load_history(10).unwrap().entry(10).is_none());
 
     delete_entries(&[11]).unwrap();
     assert!(!image_cache::exists(Some(preview_url.as_str())));

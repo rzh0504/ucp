@@ -12,12 +12,12 @@ use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, Clipboard
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 #[cfg(test)]
 use std::sync::OnceLock;
@@ -29,6 +29,8 @@ const BUSY_TIMEOUT_MS: u64 = 3_000;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const IMAGE_FORMAT_PNG: &str = "png";
 static DATABASE_CONNECTION: Mutex<Option<Connection>> = Mutex::new(None);
+static DELETED_ENTRY_IDS: LazyLock<Mutex<HashSet<u64>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -152,6 +154,14 @@ pub fn image_preview_path(preview_url: Option<&str>) -> Option<PathBuf> {
 /// Saves the entry and returns the cached `file://` preview URL when an image
 /// preview was written to the on-disk cache.
 pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError> {
+    if DELETED_ENTRY_IDS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains(&entry.id)
+    {
+        return Ok(None);
+    }
+
     let kind = entry.kind().key();
     let mut text_content: Option<&str> = None;
     let mut image_width: Option<i64> = None;
@@ -174,6 +184,14 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError
     let content_hash = content_hash_for_entry(entry, image_blob.as_deref());
 
     with_connection(|connection| {
+        if DELETED_ENTRY_IDS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&entry.id)
+        {
+            return Ok(None);
+        }
+
         let database_id = if let Some(hash) = content_hash.as_deref() {
             connection
                 .query_row(
@@ -271,11 +289,28 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError
     })
 }
 
+pub fn suppress_entry_saves(ids: &[u64]) {
+    DELETED_ENTRY_IDS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .extend(ids.iter().copied());
+}
+
+pub fn allow_entry_saves(ids: &[u64]) {
+    let mut deleted_ids = DELETED_ENTRY_IDS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    for id in ids {
+        deleted_ids.remove(id);
+    }
+}
+
 pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
     if ids.is_empty() {
         return Ok(());
     }
 
+    suppress_entry_saves(ids);
     with_connection(|connection| {
         let transaction = connection.transaction()?;
         let preview_urls = image_preview_urls_for_ids(&transaction, ids)?;
@@ -562,6 +597,10 @@ fn test_data_directory() -> &'static Mutex<Option<PathBuf>> {
 #[cfg(test)]
 fn reset_storage_for_tests() {
     *DATABASE_CONNECTION.lock().unwrap() = None;
+    DELETED_ENTRY_IDS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clear();
 }
 
 #[cfg(test)]

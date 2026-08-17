@@ -262,7 +262,7 @@ impl ClipboardApp {
             .flex_1()
             .min_w_0()
             .justify_center()
-            .child(div().truncate().child(title))
+            .child(div().text_size(px(14.)).line_clamp(2).child(title))
             .child(
                 h_flex()
                     .text_size(px(11.))
@@ -276,16 +276,28 @@ impl ClipboardApp {
             .id(ElementId::NamedInteger("entry".into(), id))
             .w_full()
             .h(px(row_height))
+            .relative()
             .overflow_hidden()
             .gap_2()
             .pl_4()
-            .pr_12()
-            .border_b_1()
-            .border_color(cx.theme().border)
+            .pr(px(52.))
+            .border_2()
+            .border_color(cx.theme().border.opacity(0.))
+            .rounded_sm()
             .when(selected, |this| {
                 this.bg(cx.theme().blue.opacity(0.12))
-                    .border_2()
                     .border_color(cx.theme().blue.opacity(0.78))
+            })
+            .when(!selected, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .h(px(1.))
+                        .bg(cx.theme().border),
+                )
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.selected_entry_id = if this.selected_entry_id == Some(id) {
@@ -308,6 +320,22 @@ impl ClipboardApp {
                 )
                 .child(div().w(px(4.)).flex_none())
                 .child(content)
+            })
+            .when(favorite, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_8()
+                        .flex()
+                        .items_center()
+                        .child(
+                            Icon::new(IconName::Heart)
+                                .small()
+                                .text_color(cx.theme().danger),
+                        ),
+                )
             })
             .context_menu(move |menu, _, cx| {
                 if let Some(app) = app.upgrade() {
@@ -425,50 +453,91 @@ impl ClipboardApp {
     }
 
     fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
-        if self.history.remove(id) {
-            if self.selected_entry_id == Some(id) {
-                self.selected_entry_id = None;
-            }
-            if self.expanded_image_id == Some(id) {
-                self.expanded_image_id = None;
-            }
-            cx.background_spawn(async move {
-                let _ = storage::delete_entries(&[id]);
-            })
-            .detach();
-            self.status = "已删除".into();
-            cx.notify();
+        if self.history.entry(id).is_none() {
+            return;
         }
+
+        storage::suppress_entry_saves(&[id]);
+        self.status = "删除中...".into();
+        cx.notify();
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_spawn(async move { storage::delete_entries(&[id]) })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    match result {
+                        Ok(()) => {
+                            this.history.remove(id);
+                            if this.selected_entry_id == Some(id) {
+                                this.selected_entry_id = None;
+                            }
+                            if this.expanded_image_id == Some(id) {
+                                this.expanded_image_id = None;
+                            }
+                            this.status = "已删除".into();
+                        }
+                        Err(error) => {
+                            storage::allow_entry_saves(&[id]);
+                            this.status = format!("删除失败：{error}");
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
     }
 
     pub(super) fn clear_current_filter(&mut self, cx: &mut Context<Self>) {
         let filter = self.filter;
         let ids = self.history.deletable_ids_for_filter(filter, false);
-        if filter == ClipboardFilter::All {
-            self.history.clear();
-        } else {
-            for id in &ids {
-                self.history.remove(*id);
-            }
-        }
-        self.selected_entry_id = None;
-        self.expanded_image_id = None;
-        cx.background_spawn(async move {
-            if filter == ClipboardFilter::All {
-                let _ = storage::clear_history();
-            } else {
-                let _ = storage::delete_entries(&ids);
-            }
+        storage::suppress_entry_saves(&ids);
+        self.status = "清空中...".into();
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_spawn({
+                    let ids = ids.clone();
+                    async move {
+                        if filter == ClipboardFilter::All {
+                            storage::clear_history()
+                        } else {
+                            storage::delete_entries(&ids)
+                        }
+                    }
+                })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    if let Err(error) = result {
+                        storage::allow_entry_saves(&ids);
+                        this.status = format!("清空失败：{error}");
+                        cx.notify();
+                        return;
+                    }
+
+                    if filter == ClipboardFilter::All {
+                        this.history.clear();
+                    } else {
+                        for id in &ids {
+                            this.history.remove(*id);
+                        }
+                    }
+                    this.selected_entry_id = None;
+                    this.expanded_image_id = None;
+                    this.status = match filter {
+                        ClipboardFilter::All => "全部历史已清空",
+                        ClipboardFilter::Text => "文本记录已清空",
+                        ClipboardFilter::Image => "图片记录已清空",
+                        ClipboardFilter::File => "文件记录已清空",
+                        ClipboardFilter::Favorite => "收藏记录已清空",
+                    }
+                    .into();
+                    cx.notify();
+                })
+                .ok();
         })
         .detach();
-        self.status = match filter {
-            ClipboardFilter::All => "全部历史已清空",
-            ClipboardFilter::Text => "文本记录已清空",
-            ClipboardFilter::Image => "图片记录已清空",
-            ClipboardFilter::File => "文件记录已清空",
-            ClipboardFilter::Favorite => "收藏记录已清空",
-        }
-        .into();
         cx.notify();
     }
 }
