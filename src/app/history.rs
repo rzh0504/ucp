@@ -4,10 +4,10 @@ use crate::services::ClipboardService;
 use crate::storage;
 use gpui::{prelude::FluentBuilder as _, *};
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
-    button::{Button, ButtonVariants as _},
-    h_flex,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
     input::Input,
+    menu::{ContextMenuExt as _, PopupMenuItem},
+    scroll::{Scrollbar, ScrollbarMode},
     tab::{Tab, TabBar},
     v_flex, v_virtual_list,
 };
@@ -53,12 +53,13 @@ impl ClipboardApp {
                     .filter_map(|index| {
                         this.visible_entries.get(index).cloned().map(|entry| {
                             let selected = this.selected_entry_id == Some(entry.id);
-                            Self::render_entry(entry, language, selected, cx)
+                            Self::render_entry(entry, index + 1, language, selected, cx)
                         })
                     })
                     .collect()
             },
         )
+        .track_scroll(&self.history_scroll)
         .size_full();
 
         let content = if self.visible_entries.is_empty() {
@@ -77,7 +78,13 @@ impl ClipboardApp {
                 .child(div().text_sm().child("复制文本、图片或文件后会显示在这里"))
                 .into_any_element()
         } else {
-            list.into_any_element()
+            div()
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .child(list)
+                .child(Scrollbar::vertical(&self.history_scroll).mode(ScrollbarMode::Scrolling))
+                .into_any_element()
         };
 
         v_flex()
@@ -100,7 +107,7 @@ impl ClipboardApp {
                             .cleanable(true),
                     ),
             )
-            .child(content)
+            .child(div().flex_1().min_h_0().overflow_hidden().child(content))
     }
 
     fn filter_tab(icon: IconName, label: &'static str, count: usize) -> Tab {
@@ -114,6 +121,7 @@ impl ClipboardApp {
 
     fn render_entry(
         entry: Rc<ClipboardEntry>,
+        position: usize,
         language: AppLanguage,
         selected: bool,
         cx: &mut Context<Self>,
@@ -121,55 +129,25 @@ impl ClipboardApp {
         let id = entry.id;
         let title = entry.title_with_language(language);
         let meta = entry.size_label_with_language(language);
+        let copy_time = crate::i18n::relative_time(language, entry.captured_at);
         let favorite = entry.favorite;
-        let hover_group = SharedString::from(format!("entry-{id}"));
+        let app = cx.entity().downgrade();
         let content = v_flex()
             .flex_1()
             .min_w_0()
+            .justify_center()
             .child(div().truncate().child(title))
             .child(
-                div()
-                    .text_sm()
+                h_flex()
+                    .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground)
+                    .child(copy_time)
+                    .child(div().flex_1())
                     .child(meta),
             );
-        let copy = Button::new(("copy", id))
-            .ghost()
-            .large()
-            .child(Icon::new(IconName::Copy).small())
-            .tooltip("复制")
-            .on_click(cx.listener(move |this, _, _, cx| this.copy_entry(id, cx)));
-        let favorite_button = Button::new(("favorite", id))
-            .ghost()
-            .large()
-            .child(
-                Icon::new(if favorite {
-                    IconName::Heart
-                } else {
-                    IconName::HeartOff
-                })
-                .small(),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_favorite(id, cx)));
-        let delete = Button::new(("delete", id))
-            .ghost()
-            .large()
-            .child(Icon::new(IconName::Delete).small())
-            .on_click(cx.listener(move |this, _, _, cx| this.delete_entry(id, cx)));
-
-        let actions = h_flex()
-            .gap_1()
-            .when(!selected, |this| {
-                this.invisible()
-                    .group_hover(hover_group.clone(), |style| style.visible())
-            })
-            .child(copy)
-            .child(favorite_button)
-            .child(delete);
 
         h_flex()
             .id(ElementId::NamedInteger("entry".into(), id))
-            .group(hover_group)
             .w_full()
             .h(px(64.))
             .gap_2()
@@ -182,8 +160,51 @@ impl ClipboardApp {
                 this.selected_entry_id = Some(id);
                 cx.notify();
             }))
+            .child(
+                h_flex()
+                    .w(px(24.))
+                    .flex_none()
+                    .justify_end()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(position.to_string()),
+            )
+            .child(div().w(px(4.)).flex_none())
             .child(content)
-            .child(actions)
+            .context_menu(move |menu, _, _| {
+                let copy_app = app.clone();
+                let favorite_app = app.clone();
+                let delete_app = app.clone();
+                let favorite_label = if favorite { "取消收藏" } else { "收藏" };
+                menu.item(PopupMenuItem::new("复制").icon(IconName::Copy).on_click(
+                    move |_, _, cx| {
+                        if let Some(app) = copy_app.upgrade() {
+                            app.update(cx, |this, cx| this.copy_entry(id, cx));
+                        }
+                    },
+                ))
+                .item(
+                    PopupMenuItem::new(favorite_label)
+                        .icon(if favorite {
+                            IconName::HeartOff
+                        } else {
+                            IconName::Heart
+                        })
+                        .on_click(move |_, _, cx| {
+                            if let Some(app) = favorite_app.upgrade() {
+                                app.update(cx, |this, cx| this.toggle_favorite(id, cx));
+                            }
+                        }),
+                )
+                .separator()
+                .item(PopupMenuItem::new("删除").icon(IconName::Delete).on_click(
+                    move |_, _, cx| {
+                        if let Some(app) = delete_app.upgrade() {
+                            app.update(cx, |this, cx| this.delete_entry(id, cx));
+                        }
+                    },
+                ))
+            })
             .into_any_element()
     }
 

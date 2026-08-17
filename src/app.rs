@@ -57,6 +57,7 @@ struct ClipboardApp {
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
     search: Entity<InputState>,
     initial_focus: FocusHandle,
+    history_scroll: gpui_component::VirtualListScrollHandle,
     _clipboard_listener: Option<platform::clipboard::ClipboardUpdateListener>,
     _subscriptions: Vec<Subscription>,
 }
@@ -103,6 +104,7 @@ impl ClipboardApp {
             visible_entries: Vec::new(),
             search,
             initial_focus,
+            history_scroll: gpui_component::VirtualListScrollHandle::new(),
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
