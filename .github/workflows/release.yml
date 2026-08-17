@@ -65,13 +65,55 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install cargo-bundle
-        run: cargo install cargo-bundle --locked
+        run: cargo install cargo-bundle --version 0.11.0 --locked
 
       - name: Build release binary
         run: cargo build --locked --release
 
       - name: Build installer
+        if: runner.os != 'Windows'
         run: cargo bundle --release --format ${{ matrix.package_type }}
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # cargo-bundle 0.11.0 generates a 32-bit Program Files directory for
+          # the 64-bit executable. Let it generate the project, then fix ICE80.
+          cargo bundle --release --format wxsmsi
+          $bundleExitCode = $LASTEXITCODE
+          if ($bundleExitCode -ne 0) {
+            Write-Host "cargo-bundle exited with $bundleExitCode after generating the WiX project; continuing with the patched project."
+          }
+
+          $wxsPath = "target/release/bundle/wxsmsi/installer.wxs"
+          if (-not (Test-Path -LiteralPath $wxsPath)) {
+            throw "cargo-bundle did not generate $wxsPath"
+          }
+
+          $wxs = [System.IO.File]::ReadAllText($wxsPath)
+          $patchedWxs = $wxs.Replace(
+            'Id="ProgramFilesFolder"',
+            'Id="ProgramFiles64Folder"'
+          ).Replace(
+            'Id="MainExecutableComponent" Guid="*"',
+            'Id="MainExecutableComponent" Guid="*" Bitness="always64"'
+          )
+          if ($patchedWxs -eq $wxs) {
+            throw "The 64-bit WiX substitutions were not applied to $wxsPath"
+          }
+          if (
+            -not $patchedWxs.Contains('Id="ProgramFiles64Folder"') -or
+            -not $patchedWxs.Contains('Id="MainExecutableComponent" Guid="*" Bitness="always64"')
+          ) {
+            throw "The generated WiX project did not match the expected structure"
+          }
+          [System.IO.File]::WriteAllText($wxsPath, $patchedWxs)
+
+          dotnet build target/release/bundle/wxsmsi/installer.wixproj -c Release -p:Platform=x64
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Collect installer artifacts
         shell: pwsh
