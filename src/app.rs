@@ -28,18 +28,83 @@ pub fn run(visible: bool) {
     let app = gpui_platform::application().with_assets(Assets);
     app.run(move |cx| {
         gpui_component::init(cx);
+        #[cfg(windows)]
+        let tray = platform::tray::create().ok();
+        #[cfg(windows)]
+        let has_tray = tray.is_some();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(900.), px(660.)), cx)),
             show: visible,
             ..TitleBar::window_options()
         };
         cx.spawn(async move |cx| {
-            cx.open_window(options, |window, cx| {
-                window.set_window_title("UCP Clipboard");
-                let view = cx.new(|cx| ClipboardApp::new(window, cx));
-                cx.new(|cx| Root::new(view, window, cx).bordered(false))
-            })
-            .expect("Failed to open GPUI window");
+            let window = cx
+                .open_window(options, |window, cx| {
+                    window.set_window_title("UCP Clipboard");
+                    let view = cx.new(|cx| ClipboardApp::new(window, cx));
+                    cx.new(|cx| Root::new(view, window, cx).bordered(false))
+                })
+                .expect("Failed to open GPUI window");
+            #[cfg(windows)]
+            {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOW, ShowWindow};
+
+                let hwnd = window
+                    .update(cx, |_, window, _| {
+                        match HasWindowHandle::window_handle(window) {
+                            Ok(handle) => match handle.as_raw() {
+                                RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+                                _ => None,
+                            },
+                            Err(_) => None,
+                        }
+                    })
+                    .ok()
+                    .flatten();
+                if has_tray && hwnd.is_some() {
+                    window
+                        .update(cx, |_, window, cx| {
+                            window.on_window_should_close(cx, move |_, _| {
+                                if let Some(hwnd) = hwnd {
+                                    unsafe { ShowWindow(hwnd as _, SW_HIDE) };
+                                }
+                                false
+                            });
+                        })
+                        .ok();
+                }
+
+                cx.spawn(async move |cx| {
+                    let _tray = tray;
+                    loop {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(100))
+                            .await;
+                        let should_show = platform::tray::take_show_request()
+                            || platform::single_instance::take_activation_request();
+                        let should_quit = platform::tray::take_quit_request()
+                            || platform::single_instance::take_quit_request();
+                        cx.update(|cx| {
+                            if should_quit {
+                                cx.quit();
+                            } else if should_show {
+                                if let Some(hwnd) = hwnd {
+                                    unsafe { ShowWindow(hwnd as _, SW_SHOW) };
+                                }
+                                cx.activate(true);
+                                window
+                                    .update(cx, |_, window, _| window.activate_window())
+                                    .ok();
+                            }
+                        });
+                        if should_quit {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+            }
         })
         .detach();
     });
