@@ -373,7 +373,6 @@ impl Render for ClipboardApp {
             .child(
                 StatusBar::new()
                     .left(format!("{} 条记录", self.history.counts().total))
-                    .child(self.status.clone())
                     .right(
                         h_flex()
                             .gap_1()
