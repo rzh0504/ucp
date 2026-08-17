@@ -6,7 +6,7 @@
 
 [English](README_en.md)
 
-基于 Dioxus 0.7 的跨平台桌面剪贴板历史应用。Windows 是主要验证目标；macOS 和 Linux 已尽量补齐支持，但在真实设备和发布包验证完成前仍属于实验支持。
+基于 GPUI 和 GPUI Component 的跨平台桌面剪贴板历史应用。Windows 是主要验证目标；macOS 和 Linux 支持仍属于实验阶段。
 
 ## 界面预览
 
@@ -79,19 +79,11 @@
 
 ## 开发
 
-如果尚未安装 Dioxus CLI：
+运行调试构建：
 
 ```powershell
-cargo install dioxus-cli
+cargo run
 ```
-
-使用热重载运行调试构建：
-
-```powershell
-dx serve --platform desktop
-```
-
-`dx serve` 会在 debug 模式下启用 RSX 热重载和 Subsecond 热补丁。不需要热重载时可使用 `cargo run`。
 
 运行测试和 lint：
 

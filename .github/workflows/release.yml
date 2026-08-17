@@ -4,13 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
   CARGO_TERM_COLOR: always
-  DIOXUS_CLI_VERSION: "0.7.9"
 
 jobs:
   build:
@@ -23,7 +27,7 @@ jobs:
           - name: Windows
             os: windows-2022
             artifact_name: ucp-windows
-            package_type: nsis
+            package_type: wxsmsi
           - name: macOS
             os: macos-latest
             artifact_name: ucp-macos
@@ -48,30 +52,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            libxdo-dev \
-            librsvg2-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcb1-dev \
+            libwayland-dev \
+            libfontconfig1-dev \
+            libasound2-dev \
             patchelf
-
-      - name: Install Windows bundler dependencies
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install nsis -y --no-progress
 
       - name: Configure MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version "${{ env.DIOXUS_CLI_VERSION }}" --locked --force
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle --locked
 
-      - name: Show Dioxus CLI version
-        run: dx --version
+      - name: Build release binary
+        run: cargo build --locked --release
 
       - name: Build installer
-        run: dx bundle --desktop --release --package-types ${{ matrix.package_type }}
+        run: cargo bundle --release --format ${{ matrix.package_type }}
 
       - name: Collect installer artifacts
         shell: pwsh
@@ -80,7 +80,7 @@ jobs:
           $artifactName = "${{ matrix.artifact_name }}"
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
 
-          $roots = @("dist", "target/dx", "target/release/bundle")
+          $roots = @("target/release/bundle")
           $installerExtensions = @(".msi", ".dmg", ".pkg", ".AppImage", ".deb", ".rpm")
           $allFiles = @()
 
@@ -125,7 +125,10 @@ jobs:
   release:
     name: Publish GitHub release
     needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout tags

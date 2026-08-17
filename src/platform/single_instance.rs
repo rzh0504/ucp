@@ -87,6 +87,16 @@ pub fn notify_existing_instance_to_quit() {
 }
 
 #[cfg(windows)]
+pub fn take_activation_request() -> bool {
+    ACTIVATION_REQUESTS.swap(0, std::sync::atomic::Ordering::AcqRel) != 0
+}
+
+#[cfg(windows)]
+pub fn take_quit_request() -> bool {
+    QUIT_REQUESTS.swap(0, std::sync::atomic::Ordering::AcqRel) != 0
+}
+
+#[cfg(windows)]
 fn send_activation_request(request: u8) {
     use std::io::Write as _;
     use std::time::Duration;
@@ -99,16 +109,6 @@ fn send_activation_request(request: u8) {
 
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-#[cfg(windows)]
-pub fn activation_count() -> u64 {
-    ACTIVATION_REQUESTS.load(std::sync::atomic::Ordering::Acquire)
-}
-
-#[cfg(windows)]
-pub fn quit_count() -> u64 {
-    QUIT_REQUESTS.load(std::sync::atomic::Ordering::Acquire)
 }
 
 #[cfg(windows)]

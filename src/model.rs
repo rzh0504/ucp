@@ -2,7 +2,9 @@ mod image;
 
 pub use image::ClipboardImage;
 
-use chrono::{DateTime, Duration as ChronoDuration, Local};
+#[cfg(test)]
+use chrono::Duration as ChronoDuration;
+use chrono::{DateTime, Local};
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const DEFAULT_BACKGROUND_OPACITY: u8 = 100;
@@ -20,19 +22,10 @@ pub enum AppLanguage {
 }
 
 impl AppLanguage {
-    pub const OPTIONS: [Self; 2] = [Self::Chinese, Self::English];
-
     pub fn key(self) -> &'static str {
         match self {
             Self::Chinese => "zh-CN",
             Self::English => "en-US",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Chinese => "简体中文",
-            Self::English => "English",
         }
     }
 
@@ -52,24 +45,11 @@ pub enum AppTheme {
 }
 
 impl AppTheme {
-    pub const OPTIONS: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
     pub fn key(self) -> &'static str {
         match self {
             Self::System => "system",
             Self::Light => "light",
             Self::Dark => "dark",
-        }
-    }
-
-    pub fn label(self, language: AppLanguage) -> &'static str {
-        match (self, language) {
-            (Self::System, AppLanguage::Chinese) => "跟随设备",
-            (Self::Light, AppLanguage::Chinese) => "浅色",
-            (Self::Dark, AppLanguage::Chinese) => "深色",
-            (Self::System, AppLanguage::English) => "Use device setting",
-            (Self::Light, AppLanguage::English) => "Light",
-            (Self::Dark, AppLanguage::English) => "Dark",
         }
     }
 
@@ -111,6 +91,7 @@ pub struct AppSettings {
     pub auto_focus_history: bool,
     pub promote_copied_entries: bool,
     pub quick_paste: bool,
+    pub double_click_copy: bool,
     pub hide_after_copy: bool,
     pub show_copy_time: bool,
     pub show_text_length: bool,
@@ -132,7 +113,8 @@ impl Default for AppSettings {
             global_show_shortcut: DEFAULT_GLOBAL_SHOW_SHORTCUT.to_string(),
             auto_focus_history: true,
             promote_copied_entries: true,
-            quick_paste: true,
+            quick_paste: false,
+            double_click_copy: true,
             hide_after_copy: false,
             show_copy_time: true,
             show_text_length: true,
@@ -233,28 +215,6 @@ pub enum ClipboardFilter {
     Favorite,
 }
 
-impl ClipboardFilter {
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::Text => "text",
-            Self::Image => "image",
-            Self::File => "file",
-            Self::Favorite => "favorite",
-        }
-    }
-
-    pub fn from_key(key: &str) -> Self {
-        match key {
-            "text" => Self::Text,
-            "image" => Self::Image,
-            "file" => Self::File,
-            "favorite" => Self::Favorite,
-            _ => Self::All,
-        }
-    }
-}
-
 use std::rc::Rc;
 
 // Eq lets Rc<ClipboardEntry> comparisons take the pointer-equality fast path,
@@ -269,8 +229,6 @@ pub struct ClipboardEntry {
 }
 
 // Rc-wrapped version for efficient sharing in UI
-pub type RcClipboardEntry = Rc<ClipboardEntry>;
-
 impl ClipboardEntry {
     pub fn new(id: u64, content: ClipboardContent) -> Self {
         Self {
@@ -286,31 +244,12 @@ impl ClipboardEntry {
         self.content.kind()
     }
 
-    pub fn is_text(&self) -> bool {
-        self.kind() == ClipboardKind::Text
-    }
-
     pub fn title_with_language(&self, language: AppLanguage) -> String {
         self.content.title_with_language(language)
     }
 
     pub fn size_label_with_language(&self, language: AppLanguage) -> String {
         self.content.size_label_with_language(language)
-    }
-
-    pub fn age_label_with_language(&self, language: AppLanguage) -> String {
-        let elapsed = Local::now().signed_duration_since(self.captured_at);
-        let seconds = elapsed.num_seconds().max(0);
-
-        if seconds < 60 {
-            crate::i18n::tr(language).just_now.to_string()
-        } else if seconds < 3_600 {
-            crate::i18n::age_minutes(language, seconds / 60)
-        } else if seconds < 86_400 {
-            crate::i18n::age_hours(language, seconds / 3_600)
-        } else {
-            crate::i18n::age_days(language, seconds / 86_400)
-        }
     }
 }
 
@@ -484,10 +423,7 @@ impl ClipboardHistory {
     }
 
     pub fn entry(&self, id: u64) -> Option<Rc<ClipboardEntry>> {
-        self.entries
-            .iter()
-            .find(|entry| entry.id == id)
-            .cloned()
+        self.entries.iter().find(|entry| entry.id == id).cloned()
     }
 
     pub fn should_promote(&self, id: u64) -> bool {
@@ -514,24 +450,20 @@ impl ClipboardHistory {
         }
     }
 
-    /// Replaces the preview URL of an image entry in place (keeping its
-    /// position and capture time), e.g. to swap a freshly captured base64
-    /// `data:` preview for the persisted `file://` cache URL.
+    /// Installs the persisted preview URL and releases the captured pixels.
+    /// Copying or expanding the image loads the original from storage on demand.
     pub fn set_image_preview_url(&mut self, id: u64, preview_url: String) -> bool {
         let Some(position) = self.entries.iter().position(|entry| entry.id == id) else {
             return false;
         };
-        let ClipboardContent::Image(image) = &self.entries[position].content else {
+        let rc_entry = self.entries.remove(position);
+        let mut entry = Rc::unwrap_or_clone(rc_entry);
+        let ClipboardContent::Image(image) = &mut entry.content else {
+            self.entries.insert(position, Rc::new(entry));
             return false;
         };
-        if image.preview_url.as_deref() == Some(preview_url.as_str()) {
-            return false;
-        }
-
-        let mut entry = Rc::unwrap_or_clone(self.entries.remove(position));
-        if let ClipboardContent::Image(image) = &mut entry.content {
-            image.preview_url = Some(preview_url);
-        }
+        image.preview_url = Some(preview_url);
+        image.bytes = None;
         self.entries.insert(position, Rc::new(entry));
         true
     }
@@ -549,6 +481,7 @@ impl ClipboardHistory {
         }
     }
 
+    #[cfg(test)]
     pub fn toggle_pin(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
             let rc_entry = self.entries.remove(position);
@@ -572,6 +505,7 @@ impl ClipboardHistory {
         self.entries.clear();
     }
 
+    #[cfg(test)]
     pub fn remove_older_than_days(&mut self, days: u16, preserve_favorites: bool) -> usize {
         let cutoff = Local::now() - ChronoDuration::days(i64::from(days));
         let before = self.entries.len();
@@ -580,6 +514,7 @@ impl ClipboardHistory {
         before - self.entries.len()
     }
 
+    #[cfg(test)]
     pub fn set_capacity(&mut self, capacity: usize) -> Vec<u64> {
         self.capacity = capacity.max(1);
         self.truncate()
@@ -878,5 +813,28 @@ mod tests {
         let search_results = history.filtered("5", ClipboardFilter::All);
         assert_eq!(search_results.len(), 1);
         assert_eq!(search_results[0].kind(), ClipboardKind::Text);
+    }
+
+    #[test]
+    fn image_preview_url_can_be_replaced_after_persistence() {
+        let mut history = ClipboardHistory::new(10);
+        let id = history
+            .push(ClipboardContent::Image(ClipboardImage {
+                width: 2,
+                height: 1,
+                bytes: Some(Arc::new(vec![0; 8])),
+                preview_url: None,
+            }))
+            .entry
+            .unwrap()
+            .id;
+
+        assert!(history.set_image_preview_url(id, "file:///preview.png".to_string()));
+        assert!(matches!(
+            &history.entry(id).unwrap().content,
+            ClipboardContent::Image(image)
+                if image.preview_url.as_deref() == Some("file:///preview.png")
+                    && image.bytes.is_none()
+        ));
     }
 }

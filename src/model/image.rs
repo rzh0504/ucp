@@ -1,11 +1,10 @@
-use base64::{Engine as _, engine::general_purpose};
 use image::{
     ColorType, ImageBuffer, ImageEncoder, Rgba, codecs::png::PngEncoder, imageops::FilterType,
 };
 use std::sync::Arc;
 
 const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
-const IMAGE_PREVIEW_MAX_HEIGHT: usize = 440;
+const IMAGE_PREVIEW_MAX_HEIGHT: usize = 900;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Clone, Debug)]
@@ -33,18 +32,11 @@ impl Eq for ClipboardImage {}
 
 impl ClipboardImage {
     pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
-        let preview_url = encode_image_preview(&bytes, width, height).map(|png| {
-            format!(
-                "data:image/png;base64,{}",
-                general_purpose::STANDARD.encode(png)
-            )
-        });
-
         Self {
             width,
             height,
             bytes: Some(Arc::new(bytes)),
-            preview_url,
+            preview_url: None,
         }
     }
 
@@ -164,7 +156,7 @@ mod tests {
 
     #[test]
     fn image_preview_dimensions_preserve_aspect_ratio_without_upscaling() {
-        assert_eq!(image_preview_dimensions(1920, 1080), Some((782, 440)));
+        assert_eq!(image_preview_dimensions(1920, 1080), Some((1440, 810)));
         assert_eq!(image_preview_dimensions(2000, 100), Some((1440, 72)));
         assert_eq!(image_preview_dimensions(32, 16), Some((32, 16)));
         assert_eq!(image_preview_dimensions(0, 16), None);

@@ -1,638 +1,90 @@
-use crate::model::{AppLanguage, ClipboardFilter};
+use crate::model::AppLanguage;
+use chrono::{DateTime, Local};
 
 pub struct Translations {
-    pub settings: &'static str,
-    pub app_preferences: &'static str,
-    pub back_to_content_title: &'static str,
-    pub back: &'static str,
-    pub system: &'static str,
-    pub launch_at_startup: &'static str,
-    pub launch_at_startup_hint: &'static str,
-    pub desktop_widget: &'static str,
-    pub desktop_widget_hint: &'static str,
-    pub history_policy: &'static str,
-    pub history_limit: &'static str,
-    pub history_limit_hint: &'static str,
-    pub auto_cleanup: &'static str,
-    pub auto_cleanup_hint: &'static str,
-    pub preserve_favorites_on_delete: &'static str,
-    pub preserve_favorites_on_delete_hint: &'static str,
-    pub shortcuts_interaction: &'static str,
-    pub copy_behavior: &'static str,
-    pub keyboard_shortcuts: &'static str,
-    pub keyboard_shortcuts_hint: &'static str,
-    pub global_shortcut: &'static str,
-    pub global_shortcut_hint: &'static str,
-    pub global_shortcut_placeholder: &'static str,
-    pub auto_focus_history: &'static str,
-    pub auto_focus_history_hint: &'static str,
-    pub promote_copied_entries: &'static str,
-    pub promote_copied_entries_hint: &'static str,
-    pub quick_paste: &'static str,
-    pub quick_paste_hint: &'static str,
-    pub hide_after_copy: &'static str,
-    pub hide_after_copy_hint: &'static str,
-    pub about: &'static str,
-    pub check_updates_button: &'static str,
-    pub check_updates_again: &'static str,
-    pub checking_updates: &'static str,
-    pub download_update: &'static str,
-    pub open_release_page: &'static str,
-    pub app_version: &'static str,
-    pub open_source_repository: &'static str,
-    pub open_source_repository_hint: &'static str,
-    pub display: &'static str,
-    pub show_copy_time: &'static str,
-    pub show_copy_time_hint: &'static str,
-    pub show_text_length: &'static str,
-    pub show_text_length_hint: &'static str,
-    pub theme: &'static str,
-    pub theme_hint: &'static str,
-    pub background_opacity: &'static str,
-    pub background_opacity_hint: &'static str,
-    pub language: &'static str,
-    pub language_hint: &'static str,
-    pub select_cleanup_period: &'static str,
-    pub select_history_limit: &'static str,
-    pub select_theme: &'static str,
-    pub no_auto_cleanup: &'static str,
-    pub settings_saved: &'static str,
-    pub toolbar_label: &'static str,
-    pub clipboard_type_filter: &'static str,
-    pub window_controls: &'static str,
-    pub minimize: &'static str,
-    pub maximize_or_restore: &'static str,
-    pub keep_on_top: &'static str,
-    pub cancel_keep_on_top: &'static str,
-    pub hide_to_background: &'static str,
-    pub focus_search_title: &'static str,
-    pub search_history: &'static str,
-    pub on_settings_page: &'static str,
-    pub open_settings: &'static str,
-    pub no_history_to_clear: &'static str,
-    pub clear_all_history: &'static str,
-    pub clear_all_history_title: &'static str,
-    pub clear_all_history_description: &'static str,
-    pub cancel: &'static str,
-    pub confirm_clear: &'static str,
-    pub pause_clipboard_monitor: &'static str,
-    pub pause_clipboard_monitor_title: &'static str,
-    pub pause_clipboard_monitor_description: &'static str,
-    pub pause_duration: &'static str,
-    pub confirm_pause: &'static str,
-    pub resume_clipboard_monitor: &'static str,
-    pub clipboard_monitor_paused: &'static str,
-    pub clipboard_monitor_paused_until_resume: &'static str,
-    pub clipboard_monitor_resumed: &'static str,
-    pub show_window: &'static str,
-    pub open_desktop_widget: &'static str,
-    pub quit: &'static str,
-    pub batch_actions: &'static str,
-    pub delete_selected: &'static str,
-    pub entry_actions: &'static str,
-    pub clipboard_history_list: &'static str,
-    pub image_preview_alt: &'static str,
-    pub collapse_file_list: &'static str,
-    pub open_file_location: &'static str,
-    pub save_as_image_file: &'static str,
-    pub copied_to_clipboard: &'static str,
-    pub switching_window_and_pasting: &'static str,
-    pub quick_pasted: &'static str,
-    pub empty_file_path: &'static str,
-    pub file_missing: &'static str,
-    pub history_deleted: &'static str,
-    pub selected_history_deleted: &'static str,
-    pub favorite_preserved: &'static str,
-    pub favorite_status_updated: &'static str,
-    pub pin_status_updated: &'static str,
-    pub history_cleared: &'static str,
-    pub exiting_app: &'static str,
-    pub image_original_missing: &'static str,
-    pub invalid_image_data: &'static str,
-    pub png_image_filter: &'static str,
     pub image: &'static str,
-    pub just_now: &'static str,
-    pub empty_path: &'static str,
-    pub path_empty: &'static str,
-    pub current_directory: &'static str,
-    pub invalid_path: &'static str,
-    pub missing: &'static str,
-    pub folder: &'static str,
-    pub file: &'static str,
 }
 
-static ZH: Translations = Translations {
-    settings: "设置",
-    app_preferences: "应用偏好",
-    back_to_content_title: "返回内容页",
-    back: "返回",
-    system: "系统",
-    launch_at_startup: "开机启动",
-    launch_at_startup_hint: "登录系统后自动启动 UCP Clipboard。",
-    desktop_widget: "桌面小组件模式",
-    desktop_widget_hint: "切换为固定尺寸、不可缩放、置顶的小窗口；关闭后恢复普通窗口。",
-    history_policy: "历史策略",
-    history_limit: "历史保留数量",
-    history_limit_hint: "超过上限时会自动清理较旧且未固定、未收藏的记录。",
-    auto_cleanup: "按时间自动清理",
-    auto_cleanup_hint: "只保留所选天数内的复制项；选择不自动清理则不会按时间删除。",
-    preserve_favorites_on_delete: "删除时始终保留收藏项",
-    preserve_favorites_on_delete_hint: "单项删除、批量删除、清空历史和自动清理都不会删除已收藏的记录。",
-    shortcuts_interaction: "快捷与交互",
-    copy_behavior: "复制行为",
-    keyboard_shortcuts: "键盘快捷键",
-    keyboard_shortcuts_hint: "启用 Ctrl+F 搜索、Ctrl+, 切换设置、数字过滤和列表快捷操作。",
-    global_shortcut: "显示窗口快捷键",
-    global_shortcut_hint: "点击输入框后直接按下组合键进行录制，例如 Ctrl+Shift+V。保存后会立即尝试注册。",
-    global_shortcut_placeholder: "点击后按下组合键",
-    auto_focus_history: "自动聚焦历史列表",
-    auto_focus_history_hint: "打开历史页后自动聚焦列表，方便直接使用方向键浏览。",
-    promote_copied_entries: "复制后置顶",
-    promote_copied_entries_hint: "从历史中复制记录后，将该记录更新时间并移动到列表顶部。",
-    quick_paste: "快捷粘贴",
-    quick_paste_hint: "双击或按 Enter 使用文本记录时，复制后自动粘贴到当前光标位置。",
-    hide_after_copy: "复制后隐藏窗口",
-    hide_after_copy_hint: "普通窗口中从历史复制成功后，将主窗口隐藏到托盘；桌面小组件模式会保持可见。",
-    about: "关于",
-    check_updates_button: "检查更新",
-    check_updates_again: "重新检查",
-    checking_updates: "正在检查更新...",
-    download_update: "下载更新",
-    open_release_page: "查看发布页",
-    app_version: "版本",
-    open_source_repository: "开源仓库",
-    open_source_repository_hint: "本项目基于 MIT License 开源",
-    display: "外观",
-    show_copy_time: "显示复制时间",
-    show_copy_time_hint: "在历史记录中显示每项的复制时间。",
-    show_text_length: "显示文本字符长度",
-    show_text_length_hint: "在文本记录中显示字符数量。",
-    theme: "颜色模式",
-    theme_hint: "跟随设备外观，或手动切换浅色、深色界面。",
-    background_opacity: "小组件背景透明度",
-    background_opacity_hint: "调整桌面小组件模式下的背景透明度，降低背景遮挡以便看到桌面和背后信息。",
-    language: "语言",
-    language_hint: "切换界面语言。",
-    select_cleanup_period: "选择清理周期",
-    select_history_limit: "选择保留数量",
-    select_theme: "选择外观",
-    no_auto_cleanup: "不自动清理",
-    settings_saved: "设置已保存",
-    toolbar_label: "剪贴板工具栏",
-    clipboard_type_filter: "剪贴板类型筛选",
-    window_controls: "窗口控制",
-    minimize: "最小化",
-    maximize_or_restore: "最大化或还原",
-    keep_on_top: "置于屏幕顶层",
-    cancel_keep_on_top: "取消置于屏幕顶层",
-    hide_to_background: "隐藏到后台",
-    focus_search_title: "Ctrl+F 聚焦搜索",
-    search_history: "搜索剪贴板历史",
-    on_settings_page: "已在设置页",
-    open_settings: "打开设置",
-    no_history_to_clear: "暂无历史可清空",
-    clear_all_history: "清空全部历史",
-    clear_all_history_title: "清空全部历史？",
-    clear_all_history_description: "这会删除所有剪贴板历史记录，操作不可撤销。",
-    cancel: "取消",
-    confirm_clear: "确认清空",
-    pause_clipboard_monitor: "暂停剪贴板监听",
-    pause_clipboard_monitor_title: "暂停剪贴板监听？",
-    pause_clipboard_monitor_description: "暂停期间，新复制的内容不会写入历史。",
-    pause_duration: "暂停时长",
-    confirm_pause: "暂停监听",
-    resume_clipboard_monitor: "恢复剪贴板监听",
-    clipboard_monitor_paused: "剪贴板监听已暂停",
-    clipboard_monitor_paused_until_resume: "已暂停剪贴板监听，直到手动恢复",
-    clipboard_monitor_resumed: "剪贴板监听已恢复",
-    show_window: "显示窗口",
-    open_desktop_widget: "打开桌面小组件",
-    quit: "退出",
-    batch_actions: "批量操作",
-    delete_selected: "删除已选",
-    entry_actions: "条目操作",
-    clipboard_history_list: "剪贴板历史列表",
-    image_preview_alt: "剪贴板图像预览",
-    collapse_file_list: "收起文件列表",
-    open_file_location: "打开文件位置",
-    save_as_image_file: "保存为图片文件",
-    copied_to_clipboard: "已复制到剪贴板",
-    switching_window_and_pasting: "正在切换窗口并粘贴...",
-    quick_pasted: "已快捷粘贴",
-    empty_file_path: "文件路径为空",
-    file_missing: "文件已不存在",
-    history_deleted: "历史已删除",
-    selected_history_deleted: "已删除所选历史",
-    favorite_preserved: "收藏项已保留",
-    favorite_status_updated: "收藏状态已更新",
-    pin_status_updated: "置顶状态已更新",
-    history_cleared: "历史已清空",
-    exiting_app: "正在退出 UCP Clipboard",
-    image_original_missing: "图片原始数据不存在，无法操作",
-    invalid_image_data: "保存图片失败：图像数据无效",
-    png_image_filter: "PNG 图像",
-    image: "图像",
-    just_now: "刚刚",
-    empty_path: "空路径",
-    path_empty: "路径为空",
-    current_directory: "当前目录",
-    invalid_path: "无效路径",
-    missing: "不存在",
-    folder: "文件夹",
-    file: "文件",
-};
+const CHINESE: Translations = Translations { image: "图片" };
 
-static EN: Translations = Translations {
-    settings: "Settings",
-    app_preferences: "App preferences",
-    back_to_content_title: "Back to content",
-    back: "Back",
-    system: "System",
-    launch_at_startup: "Launch at startup",
-    launch_at_startup_hint: "Start UCP Clipboard in the background after signing in.",
-    desktop_widget: "Desktop widget mode",
-    desktop_widget_hint: "Use a fixed-size always-on-top compact window; turn it off to restore the normal window.",
-    history_policy: "History policy",
-    history_limit: "History limit",
-    history_limit_hint: "Older unpinned and non-favorite records are removed when the limit is exceeded.",
-    auto_cleanup: "Auto cleanup by age",
-    auto_cleanup_hint: "Keep copied items within the selected age only; choose no cleanup to keep them by count only.",
-    preserve_favorites_on_delete: "Always preserve favorites when deleting",
-    preserve_favorites_on_delete_hint: "Keep favorite records during individual or batch deletion, history clearing, and automatic cleanup.",
-    shortcuts_interaction: "Shortcuts and interaction",
-    copy_behavior: "Copy behavior",
-    keyboard_shortcuts: "Keyboard shortcuts",
-    keyboard_shortcuts_hint: "Enable Ctrl+F search, Ctrl+, settings toggle, numeric filters, and list shortcuts.",
-    global_shortcut: "Show-window shortcut",
-    global_shortcut_hint: "Click the field, then press a key combination to record it, for example Ctrl+Shift+V. The shortcut is registered immediately after saving.",
-    global_shortcut_placeholder: "Click and press shortcut",
-    auto_focus_history: "Auto-focus history list",
-    auto_focus_history_hint: "Focus the history list after opening it so arrow-key browsing works immediately.",
-    promote_copied_entries: "Move copied entries to top",
-    promote_copied_entries_hint: "When copying from history, update that record and move it to the top of the list.",
-    quick_paste: "Quick paste",
-    quick_paste_hint: "Double-click or press Enter on text records to copy and paste at the current cursor.",
-    hide_after_copy: "Hide window after copy",
-    hide_after_copy_hint: "After copying from history in the normal window, hide the main window to the tray; desktop widget mode stays visible.",
-    about: "About",
-    check_updates_button: "Check for updates",
-    check_updates_again: "Check again",
-    checking_updates: "Checking for updates...",
-    download_update: "Download update",
-    open_release_page: "Open release page",
-    app_version: "Version",
-    open_source_repository: "Open-source repository",
-    open_source_repository_hint: "This project is open source under the MIT License.",
-    display: "Appearance",
-    show_copy_time: "Show copy time",
-    show_copy_time_hint: "Show each item's copy time in history.",
-    show_text_length: "Show text length",
-    show_text_length_hint: "Show the character count for text records.",
-    theme: "Color mode",
-    theme_hint: "Follow the device appearance, or manually choose light or dark.",
-    background_opacity: "Widget background opacity",
-    background_opacity_hint: "Adjust the background opacity in desktop widget mode to reveal more of the desktop and content behind it.",
-    language: "Language",
-    language_hint: "Switch the interface language.",
-    select_cleanup_period: "Select cleanup period",
-    select_history_limit: "Select history limit",
-    select_theme: "Select appearance",
-    no_auto_cleanup: "No auto cleanup",
-    settings_saved: "Settings saved",
-    toolbar_label: "Clipboard toolbar",
-    clipboard_type_filter: "Clipboard type filter",
-    window_controls: "Window controls",
-    minimize: "Minimize",
-    maximize_or_restore: "Maximize or restore",
-    keep_on_top: "Keep on top",
-    cancel_keep_on_top: "Stop keeping on top",
-    hide_to_background: "Hide to background",
-    focus_search_title: "Ctrl+F focuses search",
-    search_history: "Search clipboard history",
-    on_settings_page: "Already on settings",
-    open_settings: "Open settings",
-    no_history_to_clear: "No history to clear",
-    clear_all_history: "Clear all history",
-    clear_all_history_title: "Clear all history?",
-    clear_all_history_description: "This deletes every clipboard history record. This action cannot be undone.",
-    cancel: "Cancel",
-    confirm_clear: "Clear history",
-    pause_clipboard_monitor: "Pause clipboard monitoring",
-    pause_clipboard_monitor_title: "Pause clipboard monitoring?",
-    pause_clipboard_monitor_description: "While paused, newly copied content will not be saved to history.",
-    pause_duration: "Pause duration",
-    confirm_pause: "Pause",
-    resume_clipboard_monitor: "Resume clipboard monitoring",
-    clipboard_monitor_paused: "Clipboard monitoring is paused",
-    clipboard_monitor_paused_until_resume: "Clipboard monitoring paused until resumed",
-    clipboard_monitor_resumed: "Clipboard monitoring resumed",
-    show_window: "Show window",
-    open_desktop_widget: "Open desktop widget",
-    quit: "Quit",
-    batch_actions: "Batch actions",
-    delete_selected: "Delete selected",
-    entry_actions: "Entry actions",
-    clipboard_history_list: "Clipboard history list",
-    image_preview_alt: "Clipboard image preview",
-    collapse_file_list: "Collapse file list",
-    open_file_location: "Open file location",
-    save_as_image_file: "Save as image file",
-    copied_to_clipboard: "Copied to clipboard",
-    switching_window_and_pasting: "Switching window and pasting...",
-    quick_pasted: "Quick pasted",
-    empty_file_path: "File path is empty",
-    file_missing: "File no longer exists",
-    history_deleted: "History deleted",
-    selected_history_deleted: "Selected history deleted",
-    favorite_preserved: "Favorite item was kept",
-    favorite_status_updated: "Favorite status updated",
-    pin_status_updated: "Pin status updated",
-    history_cleared: "History cleared",
-    exiting_app: "Exiting UCP Clipboard",
-    image_original_missing: "Original image data is missing, so this action cannot continue",
-    invalid_image_data: "Failed to save image: invalid image data",
-    png_image_filter: "PNG image",
-    image: "Image",
-    just_now: "Just now",
-    empty_path: "Empty path",
-    path_empty: "Path is empty",
-    current_directory: "Current directory",
-    invalid_path: "Invalid path",
-    missing: "Missing",
-    folder: "Folder",
-    file: "File",
-};
+const ENGLISH: Translations = Translations { image: "Image" };
 
 pub fn tr(language: AppLanguage) -> &'static Translations {
     match language {
-        AppLanguage::Chinese => &ZH,
-        AppLanguage::English => &EN,
-    }
-}
-
-pub fn filter_label(language: AppLanguage, filter: ClipboardFilter) -> &'static str {
-    match (language, filter) {
-        (AppLanguage::Chinese, ClipboardFilter::All) => "全部",
-        (AppLanguage::Chinese, ClipboardFilter::Text) => "文本",
-        (AppLanguage::Chinese, ClipboardFilter::Image) => "图像",
-        (AppLanguage::Chinese, ClipboardFilter::File) => "文件",
-        (AppLanguage::Chinese, ClipboardFilter::Favorite) => "收藏",
-        (AppLanguage::English, ClipboardFilter::All) => "All",
-        (AppLanguage::English, ClipboardFilter::Text) => "Text",
-        (AppLanguage::English, ClipboardFilter::Image) => "Images",
-        (AppLanguage::English, ClipboardFilter::File) => "Files",
-        (AppLanguage::English, ClipboardFilter::Favorite) => "Favorites",
-    }
-}
-
-pub fn clear_history_label(language: AppLanguage, filter: ClipboardFilter) -> String {
-    match (language, filter) {
-        (AppLanguage::Chinese, ClipboardFilter::All) => tr(language).clear_all_history.to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::Text) => "清空文本历史".to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::Image) => "清空图像历史".to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::File) => "清空文件历史".to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::Favorite) => "清空收藏历史".to_string(),
-        (AppLanguage::English, ClipboardFilter::All) => tr(language).clear_all_history.to_string(),
-        (AppLanguage::English, ClipboardFilter::Text) => "Clear text history".to_string(),
-        (AppLanguage::English, ClipboardFilter::Image) => "Clear image history".to_string(),
-        (AppLanguage::English, ClipboardFilter::File) => "Clear file history".to_string(),
-        (AppLanguage::English, ClipboardFilter::Favorite) => "Clear favorite history".to_string(),
-    }
-}
-
-pub fn clear_history_title(language: AppLanguage, filter: ClipboardFilter) -> String {
-    match filter {
-        ClipboardFilter::All => tr(language).clear_all_history_title.to_string(),
-        _ => match language {
-            AppLanguage::Chinese => format!("{}？", clear_history_label(language, filter)),
-            AppLanguage::English => format!("{}?", clear_history_label(language, filter)),
-        },
-    }
-}
-
-pub fn clear_history_description(
-    language: AppLanguage,
-    filter: ClipboardFilter,
-    preserve_favorites: bool,
-) -> String {
-    let description = match filter {
-        ClipboardFilter::All => tr(language).clear_all_history_description.to_string(),
-        _ => match language {
-            AppLanguage::Chinese => format!(
-                "这会删除“{}”标签下的所有剪贴板历史记录，操作不可撤销。",
-                filter_label(language, filter)
-            ),
-            AppLanguage::English => format!(
-                "This deletes every clipboard history record in the {} tab. This action cannot be undone.",
-                filter_label(language, filter)
-            ),
-        },
-    };
-
-    if preserve_favorites {
-        match language {
-            AppLanguage::Chinese => format!("{description} 已收藏的记录会保留。"),
-            AppLanguage::English => format!("{description} Favorite records will be kept."),
-        }
-    } else {
-        description
-    }
-}
-
-pub fn history_cleared_message(
-    language: AppLanguage,
-    filter: ClipboardFilter,
-    preserve_favorites: bool,
-) -> String {
-    if preserve_favorites {
-        return match language {
-            AppLanguage::Chinese => "历史已清空，收藏项已保留".to_string(),
-            AppLanguage::English => "History cleared; favorites were kept".to_string(),
-        };
-    }
-
-    match (language, filter) {
-        (_, ClipboardFilter::All) => tr(language).history_cleared.to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::Text) => "文本历史已清空".to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::Image) => "图像历史已清空".to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::File) => "文件历史已清空".to_string(),
-        (AppLanguage::Chinese, ClipboardFilter::Favorite) => "收藏历史已清空".to_string(),
-        (AppLanguage::English, ClipboardFilter::Text) => "Text history cleared".to_string(),
-        (AppLanguage::English, ClipboardFilter::Image) => "Image history cleared".to_string(),
-        (AppLanguage::English, ClipboardFilter::File) => "File history cleared".to_string(),
-        (AppLanguage::English, ClipboardFilter::Favorite) => "Favorite history cleared".to_string(),
-    }
-}
-
-pub fn item_count(language: AppLanguage, count: usize) -> String {
-    match language {
-        AppLanguage::Chinese => format!("{count} 项"),
-        AppLanguage::English => format!("{count} items"),
-    }
-}
-
-pub fn file_count(language: AppLanguage, count: usize) -> String {
-    match language {
-        AppLanguage::Chinese => format!("{count} 个文件"),
-        AppLanguage::English if count == 1 => "1 file".to_string(),
-        AppLanguage::English => format!("{count} files"),
+        AppLanguage::Chinese => &CHINESE,
+        AppLanguage::English => &ENGLISH,
     }
 }
 
 pub fn character_count(language: AppLanguage, count: usize) -> String {
     match language {
         AppLanguage::Chinese => format!("{count} 字符"),
-        AppLanguage::English if count == 1 => "1 character".to_string(),
         AppLanguage::English => format!("{count} characters"),
     }
 }
 
-pub fn age_minutes(language: AppLanguage, minutes: i64) -> String {
+pub fn file_count(language: AppLanguage, count: usize) -> String {
     match language {
-        AppLanguage::Chinese => format!("{minutes} 分钟前"),
-        AppLanguage::English if minutes == 1 => "1 minute ago".to_string(),
-        AppLanguage::English => format!("{minutes} minutes ago"),
+        AppLanguage::Chinese => format!("{count} 个文件"),
+        AppLanguage::English => format!("{count} files"),
     }
 }
 
-pub fn age_hours(language: AppLanguage, hours: i64) -> String {
-    match language {
-        AppLanguage::Chinese => format!("{hours} 小时前"),
-        AppLanguage::English if hours == 1 => "1 hour ago".to_string(),
-        AppLanguage::English => format!("{hours} hours ago"),
-    }
-}
+pub fn relative_time(language: AppLanguage, timestamp: DateTime<Local>) -> String {
+    let seconds = Local::now()
+        .signed_duration_since(timestamp)
+        .num_seconds()
+        .max(0);
 
-pub fn age_days(language: AppLanguage, days: i64) -> String {
-    match language {
-        AppLanguage::Chinese => format!("{days} 天前"),
-        AppLanguage::English if days == 1 => "1 day ago".to_string(),
-        AppLanguage::English => format!("{days} days ago"),
-    }
-}
-
-pub fn auto_cleanup_label(language: AppLanguage, days: Option<u16>) -> String {
-    match (language, days) {
-        (AppLanguage::Chinese, Some(days)) => format!("{days} 天"),
-        (AppLanguage::English, Some(1)) => "1 day".to_string(),
-        (AppLanguage::English, Some(days)) => format!("{days} days"),
-        (_, None) => tr(language).no_auto_cleanup.to_string(),
-    }
-}
-
-pub fn update_available(language: AppLanguage, version: &str) -> String {
-    match language {
-        AppLanguage::Chinese => format!("发现新版本 {version}。"),
-        AppLanguage::English => format!("Version {version} is available to download."),
-    }
-}
-
-pub fn update_up_to_date(language: AppLanguage, version: &str) -> String {
-    match language {
-        AppLanguage::Chinese => format!("当前是最新版本 {version}。"),
-        AppLanguage::English => format!("UCP is up to date at version {version}."),
-    }
-}
-
-pub fn update_check_failed(language: AppLanguage, error: &str) -> String {
-    match language {
-        AppLanguage::Chinese => format!("检查更新失败：{error}"),
-        AppLanguage::English => format!("Failed to check for updates: {error}"),
-    }
-}
-
-pub struct EmptyStateCopy {
-    pub glyph: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
-}
-
-pub fn empty_state_copy(
-    language: AppLanguage,
-    filter: ClipboardFilter,
-    total_count: usize,
-    query: &str,
-) -> EmptyStateCopy {
-    if !query.is_empty() {
+    if seconds < 60 {
         return match language {
-            AppLanguage::Chinese => EmptyStateCopy {
-                glyph: "⌕",
-                title: "没有匹配的历史",
-                description: "当前筛选范围内没有找到相关内容。试试缩短关键词，或切换到全部标签。",
-            },
-            AppLanguage::English => EmptyStateCopy {
-                glyph: "⌕",
-                title: "No matching history",
-                description: "Nothing matched in the current filter. Try a shorter query or switch to All.",
-            },
+            AppLanguage::Chinese => "刚刚".to_string(),
+            AppLanguage::English => "Just now".to_string(),
         };
     }
 
-    if total_count == 0 {
+    let minutes = seconds / 60;
+    if minutes < 60 {
         return match language {
-            AppLanguage::Chinese => EmptyStateCopy {
-                glyph: "⌘C",
-                title: "复制任意内容开始",
-                description: "UCP 会在后台监听剪贴板，并把新的文本、图像和文件整理成可搜索历史。",
-            },
-            AppLanguage::English => EmptyStateCopy {
-                glyph: "⌘C",
-                title: "Copy anything to start",
-                description: "UCP watches the clipboard in the background and organizes new text, images, and files into searchable history.",
-            },
+            AppLanguage::Chinese => format!("{minutes}分钟前"),
+            AppLanguage::English => format!(
+                "{minutes} minute{} ago",
+                if minutes == 1 { "" } else { "s" }
+            ),
         };
     }
 
-    match (language, filter) {
-        (AppLanguage::Chinese, ClipboardFilter::All) => EmptyStateCopy {
-            glyph: "⌘C",
-            title: "暂无历史记录",
-            description: "复制文本、图像或文件后，新的剪贴板内容会出现在这里。",
-        },
-        (AppLanguage::Chinese, ClipboardFilter::Text) => EmptyStateCopy {
-            glyph: "TXT",
-            title: "还没有文本记录",
-            description: "复制一段文字后，文本历史会自动归入这个标签。",
-        },
-        (AppLanguage::Chinese, ClipboardFilter::Image) => EmptyStateCopy {
-            glyph: "IMG",
-            title: "还没有图像记录",
-            description: "截图或复制图片后，图像预览会按原比例显示在这里。",
-        },
-        (AppLanguage::Chinese, ClipboardFilter::File) => EmptyStateCopy {
-            glyph: "FILE",
-            title: "还没有文件记录",
-            description: "复制文件或文件夹后，文件路径和应用图标会整理到这个标签。",
-        },
-        (AppLanguage::Chinese, ClipboardFilter::Favorite) => EmptyStateCopy {
-            glyph: "★",
-            title: "还没有收藏记录",
-            description: "点击历史项右侧的星标，常用内容会集中显示在这里。",
-        },
-        (AppLanguage::English, ClipboardFilter::All) => EmptyStateCopy {
-            glyph: "⌘C",
-            title: "No history yet",
-            description: "Copied text, images, or files will appear here as new clipboard items.",
-        },
-        (AppLanguage::English, ClipboardFilter::Text) => EmptyStateCopy {
-            glyph: "TXT",
-            title: "No text records yet",
-            description: "Copy some text and it will be added to this tab automatically.",
-        },
-        (AppLanguage::English, ClipboardFilter::Image) => EmptyStateCopy {
-            glyph: "IMG",
-            title: "No image records yet",
-            description: "Screenshots and copied images will show proportional previews here.",
-        },
-        (AppLanguage::English, ClipboardFilter::File) => EmptyStateCopy {
-            glyph: "FILE",
-            title: "No file records yet",
-            description: "Copied files or folders will be organized here with their paths and app icons.",
-        },
-        (AppLanguage::English, ClipboardFilter::Favorite) => EmptyStateCopy {
-            glyph: "★",
-            title: "No favorites yet",
-            description: "Star history items to collect frequently used content here.",
-        },
+    let hours = minutes / 60;
+    if hours < 24 {
+        return match language {
+            AppLanguage::Chinese => format!("{hours}小时前"),
+            AppLanguage::English => {
+                format!("{hours} hour{} ago", if hours == 1 { "" } else { "s" })
+            }
+        };
+    }
+
+    let days = hours / 24;
+    if days < 30 {
+        return match language {
+            AppLanguage::Chinese => format!("{days}天前"),
+            AppLanguage::English => format!("{days} day{} ago", if days == 1 { "" } else { "s" }),
+        };
+    }
+
+    let months = days / 30;
+    if months < 12 {
+        return match language {
+            AppLanguage::Chinese => format!("{months}个月前"),
+            AppLanguage::English => {
+                format!("{months} month{} ago", if months == 1 { "" } else { "s" })
+            }
+        };
+    }
+
+    let years = months / 12;
+    match language {
+        AppLanguage::Chinese => format!("{years}年前"),
+        AppLanguage::English => format!("{years} year{} ago", if years == 1 { "" } else { "s" }),
     }
 }
