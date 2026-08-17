@@ -31,10 +31,18 @@ pub(super) fn exists(url: Option<&str>) -> bool {
         .is_some_and(|path| path.is_file())
 }
 
+pub(super) fn path(url: Option<&str>) -> Option<PathBuf> {
+    url.and_then(preview_path_from_url)
+}
+
 fn directory() -> Result<PathBuf, StorageError> {
-    let directory = data_directory().join(IMAGE_CACHE_DIR);
+    let directory = cache_directory();
     fs::create_dir_all(&directory)?;
     Ok(directory)
+}
+
+fn cache_directory() -> PathBuf {
+    data_directory().join(IMAGE_CACHE_DIR)
 }
 
 fn preview_path(entry_id: u64) -> Result<PathBuf, StorageError> {
@@ -43,7 +51,7 @@ fn preview_path(entry_id: u64) -> Result<PathBuf, StorageError> {
 
 fn preview_path_from_url(url: &str) -> Option<PathBuf> {
     let path = file_url_to_path(url)?;
-    let cache_directory = directory().ok()?;
+    let cache_directory = cache_directory();
     (path.parent() == Some(cache_directory.as_path())).then_some(path)
 }
 

@@ -145,9 +145,12 @@ pub fn load_image(entry_id: u64) -> Result<Option<ClipboardImage>, StorageError>
     })
 }
 
+pub fn image_preview_path(preview_url: Option<&str>) -> Option<PathBuf> {
+    image_cache::path(preview_url)
+}
+
 /// Saves the entry and returns the cached `file://` preview URL when an image
-/// preview was written to the on-disk cache, so callers can swap the in-memory
-/// base64 `data:` preview for the much cheaper file URL.
+/// preview was written to the on-disk cache.
 pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError> {
     let kind = entry.kind().key();
     let mut text_content: Option<&str> = None;

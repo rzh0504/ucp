@@ -54,6 +54,7 @@ struct ClipboardApp {
     status: String,
     monitor_paused: bool,
     selected_entry_id: Option<u64>,
+    expanded_image_id: Option<u64>,
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
     search: Entity<InputState>,
     initial_focus: FocusHandle,
@@ -101,6 +102,7 @@ impl ClipboardApp {
             status: String::new(),
             monitor_paused: false,
             selected_entry_id: None,
+            expanded_image_id: None,
             visible_entries: Vec::new(),
             search,
             initial_focus,
@@ -146,13 +148,32 @@ impl ClipboardApp {
         }
         let result = self.history.push(content);
         let entry = result.entry;
+        let result_id = entry.as_ref().map(|entry| entry.id).unwrap_or_default();
         let removed_ids = result.removed_ids;
-        cx.background_spawn(async move {
-            if let Some(entry) = entry.as_ref() {
-                let _ = storage::save_entry(entry);
-            }
-            if !removed_ids.is_empty() {
-                let _ = storage::delete_entries(&removed_ids);
+        cx.spawn(async move |entity, cx| {
+            let saved_preview = cx
+                .background_spawn(async move {
+                    let saved_preview = entry
+                        .as_ref()
+                        .map(storage::save_entry)
+                        .transpose()
+                        .ok()
+                        .flatten()
+                        .flatten();
+                    if !removed_ids.is_empty() {
+                        let _ = storage::delete_entries(&removed_ids);
+                    }
+                    saved_preview
+                })
+                .await;
+            if let Some(preview_url) = saved_preview {
+                entity
+                    .update(cx, |this, cx| {
+                        if this.history.set_image_preview_url(result_id, preview_url) {
+                            cx.notify();
+                        }
+                    })
+                    .ok();
             }
         })
         .detach();

@@ -448,9 +448,24 @@ impl ClipboardHistory {
         }
     }
 
-    /// Replaces the preview URL of an image entry in place (keeping its
-    /// position and capture time), e.g. to swap a freshly captured base64
-    /// `data:` preview for the persisted `file://` cache URL.
+    /// Installs the persisted preview URL and releases the captured pixels.
+    /// Copying or expanding the image loads the original from storage on demand.
+    pub fn set_image_preview_url(&mut self, id: u64, preview_url: String) -> bool {
+        let Some(position) = self.entries.iter().position(|entry| entry.id == id) else {
+            return false;
+        };
+        let rc_entry = self.entries.remove(position);
+        let mut entry = Rc::unwrap_or_clone(rc_entry);
+        let ClipboardContent::Image(image) = &mut entry.content else {
+            self.entries.insert(position, Rc::new(entry));
+            return false;
+        };
+        image.preview_url = Some(preview_url);
+        image.bytes = None;
+        self.entries.insert(position, Rc::new(entry));
+        true
+    }
+
     pub fn toggle_favorite(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
             let rc_entry = self.entries.remove(position);
@@ -796,5 +811,28 @@ mod tests {
         let search_results = history.filtered("5", ClipboardFilter::All);
         assert_eq!(search_results.len(), 1);
         assert_eq!(search_results[0].kind(), ClipboardKind::Text);
+    }
+
+    #[test]
+    fn image_preview_url_can_be_replaced_after_persistence() {
+        let mut history = ClipboardHistory::new(10);
+        let id = history
+            .push(ClipboardContent::Image(ClipboardImage {
+                width: 2,
+                height: 1,
+                bytes: Some(Arc::new(vec![0; 8])),
+                preview_url: None,
+            }))
+            .entry
+            .unwrap()
+            .id;
+
+        assert!(history.set_image_preview_url(id, "file:///preview.png".to_string()));
+        assert!(matches!(
+            &history.entry(id).unwrap().content,
+            ClipboardContent::Image(image)
+                if image.preview_url.as_deref() == Some("file:///preview.png")
+                    && image.bytes.is_none()
+        ));
     }
 }
