@@ -5,8 +5,8 @@ use crate::updater::{self, UpdateCheck, UpdateInfo};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode, TitleBar,
-    WindowExt as _,
+    ActiveTheme as _, FocusableExt as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode,
+    TitleBar, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
@@ -15,6 +15,7 @@ use gpui_component::{
     v_flex,
 };
 use gpui_component_assets::Assets;
+use std::borrow::Cow;
 
 mod history;
 mod settings;
@@ -34,8 +35,29 @@ enum UpdateCheckState {
     Failed(String),
 }
 
+struct AppAssets(Assets);
+
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path == "icons/pin.svg" {
+            return Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/pin.svg"
+            ))));
+        }
+        self.0.load(path)
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        let mut assets = self.0.list(path)?;
+        if "icons/pin.svg".starts_with(path) {
+            assets.push("icons/pin.svg".into());
+        }
+        Ok(assets)
+    }
+}
+
 pub fn run(visible: bool) {
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_platform::application().with_assets(AppAssets(Assets));
     app.run(move |cx| {
         gpui_component::init(cx);
         #[cfg(windows)]
@@ -128,6 +150,7 @@ struct ClipboardApp {
     page: AppPage,
     status: String,
     monitor_paused: bool,
+    always_on_top: bool,
     update_check: UpdateCheckState,
     selected_entry_id: Option<u64>,
     expanded_image_id: Option<u64>,
@@ -177,6 +200,7 @@ impl ClipboardApp {
             page: AppPage::History,
             status: String::new(),
             monitor_paused: false,
+            always_on_top: false,
             update_check: UpdateCheckState::Idle,
             selected_entry_id: None,
             expanded_image_id: None,
@@ -347,6 +371,48 @@ impl ClipboardApp {
             self.status = "设置已保存".into();
         }
     }
+
+    #[cfg(windows)]
+    fn set_always_on_top(window: &Window, always_on_top: bool) -> bool {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED,
+            SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WS_EX_TOPMOST,
+        };
+
+        let Ok(handle) = HasWindowHandle::window_handle(window) else {
+            return false;
+        };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return false;
+        };
+        let insert_after = if always_on_top {
+            HWND_TOPMOST
+        } else {
+            HWND_NOTOPMOST
+        };
+
+        unsafe {
+            let changed = SetWindowPos(
+                handle.hwnd.get() as _,
+                insert_after,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED,
+            ) != 0;
+            let is_topmost = GetWindowLongPtrW(handle.hwnd.get() as _, GWL_EXSTYLE)
+                & WS_EX_TOPMOST as isize
+                != 0;
+            changed && is_topmost == always_on_top
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn set_always_on_top(_: &Window, _: bool) -> bool {
+        false
+    }
 }
 
 impl Render for ClipboardApp {
@@ -377,6 +443,33 @@ impl Render for ClipboardApp {
                         h_flex()
                             .gap_1()
                             .items_center()
+                            .child(
+                                Button::new("always-on-top")
+                                    .ghost()
+                                    .focus_ring(false)
+                                    .large()
+                                    .child(
+                                        Icon::default().path("icons/pin.svg").small().text_color(
+                                            if self.always_on_top {
+                                                rgb(0x3b82f6).into()
+                                            } else {
+                                                cx.theme().muted_foreground
+                                            },
+                                        ),
+                                    )
+                                    .tooltip(if self.always_on_top {
+                                        "取消置顶"
+                                    } else {
+                                        "窗口置顶"
+                                    })
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let always_on_top = !this.always_on_top;
+                                        if Self::set_always_on_top(window, always_on_top) {
+                                            this.always_on_top = always_on_top;
+                                            cx.notify();
+                                        }
+                                    })),
+                            )
                             .child(
                                 Button::new("status-settings")
                                     .ghost()
