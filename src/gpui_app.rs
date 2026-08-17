@@ -1,18 +1,17 @@
-use crate::model::{
-    AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory, ClipboardKind,
-};
+use crate::model::{AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory};
 use crate::platform;
 use crate::services::ClipboardService;
 use crate::storage;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme as _, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode, TitleBar,
+    ActiveTheme as _, Icon, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode,
+    TitleBar,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
+    setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings},
     status_bar::StatusBar,
-    switch::Switch,
     tab::{Tab, TabBar},
     v_flex, v_virtual_list,
 };
@@ -164,7 +163,8 @@ impl ClipboardApp {
         let language = self.settings.language;
         let counts = self.history.counts();
         let filters = TabBar::new("filters")
-            .underline()
+            .segmented()
+            .large()
             .selected_index(match self.filter {
                 ClipboardFilter::All => 0,
                 ClipboardFilter::Text => 1,
@@ -182,14 +182,48 @@ impl ClipboardApp {
                 };
                 cx.notify();
             }))
-            .child(Tab::new().label(format!("全部 {}", counts.total)))
-            .child(Tab::new().label(format!("文本 {}", counts.text)))
-            .child(Tab::new().label(format!("图片 {}", counts.image)))
-            .child(Tab::new().label(format!("文件 {}", counts.file)))
-            .child(Tab::new().label(format!("收藏 {}", counts.favorite)));
+            .child(
+                Tab::new().child(
+                    h_flex()
+                        .gap_1()
+                        .child(Icon::new(IconName::Inbox).small())
+                        .child(format!("全部 {}", counts.total)),
+                ),
+            )
+            .child(
+                Tab::new().child(
+                    h_flex()
+                        .gap_1()
+                        .child(Icon::new(IconName::ALargeSmall).small())
+                        .child(format!("文本 {}", counts.text)),
+                ),
+            )
+            .child(
+                Tab::new().child(
+                    h_flex()
+                        .gap_1()
+                        .child(Icon::new(IconName::Frame).small())
+                        .child(format!("图片 {}", counts.image)),
+                ),
+            )
+            .child(
+                Tab::new().child(
+                    h_flex()
+                        .gap_1()
+                        .child(Icon::new(IconName::File).small())
+                        .child(format!("文件 {}", counts.file)),
+                ),
+            )
+            .child(
+                Tab::new().child(
+                    h_flex()
+                        .gap_1()
+                        .child(Icon::new(IconName::Heart).small())
+                        .child(format!("收藏 {}", counts.favorite)),
+                ),
+            );
         self.visible_entries = self.history.filtered(&self.query, self.filter);
-        let item_sizes =
-            std::rc::Rc::new(vec![size(px(900.), px(64.)); self.visible_entries.len()]);
+        let item_sizes = std::rc::Rc::new(vec![size(px(0.), px(64.)); self.visible_entries.len()]);
         let list = v_virtual_list(
             cx.entity().clone(),
             "history-list",
@@ -231,7 +265,8 @@ impl ClipboardApp {
             .child(
                 h_flex()
                     .px_4()
-                    .gap_3()
+                    .py_2()
+                    .gap_4()
                     .items_center()
                     .border_b_1()
                     .border_color(cx.theme().border)
@@ -239,8 +274,8 @@ impl ClipboardApp {
                     .child(div().flex_1())
                     .child(
                         Input::new(&self.search)
-                            .small()
-                            .w(px(280.))
+                            .large()
+                            .w(px(300.))
                             .prefix(IconName::Search)
                             .cleanable(true),
                     ),
@@ -257,11 +292,6 @@ impl ClipboardApp {
         let title = entry.title_with_language(language);
         let meta = entry.size_label_with_language(language);
         let favorite = entry.favorite;
-        let kind_icon = match entry.kind() {
-            ClipboardKind::Text => IconName::ALargeSmall,
-            ClipboardKind::Image => IconName::Frame,
-            ClipboardKind::File => IconName::File,
-        };
         let content = v_flex()
             .flex_1()
             .min_w_0()
@@ -274,48 +304,76 @@ impl ClipboardApp {
             );
         let copy = Button::new(("copy", id))
             .ghost()
-            .xsmall()
-            .icon(IconName::Copy)
+            .large()
+            .child(Icon::new(IconName::Copy).small())
             .tooltip("复制")
             .on_click(cx.listener(move |this, _, _, cx| {
-                match ClipboardService::copy_entry(
-                    &this.history,
-                    id,
-                    this.settings.promote_copied_entries,
-                ) {
-                    Ok(result) => {
-                        if result.should_promote
-                            && let Some(updated) = this.history.promote(id)
-                        {
-                            let _ = storage::save_entry(&updated);
-                        }
-                        this.status = "已复制".into();
-                    }
-                    Err(error) => this.status = error.to_localized_string(this.settings.language),
-                }
-                cx.notify();
+                let Some(entry) = this.history.entry(id) else {
+                    return;
+                };
+                let content = entry.content.clone();
+                let should_promote =
+                    this.settings.promote_copied_entries && this.history.should_promote(id);
+                let language = this.settings.language;
+                this.status = "复制中...".into();
+                cx.spawn(async move |entity, cx| {
+                    let result = cx
+                        .background_spawn(
+                            async move { ClipboardService::copy_content(id, content) },
+                        )
+                        .await;
+                    entity
+                        .update(cx, |this, cx| {
+                            match result {
+                                Ok(()) => {
+                                    if should_promote
+                                        && let Some(updated) = this.history.promote(id)
+                                    {
+                                        cx.background_spawn(async move {
+                                            let _ = storage::save_entry(&updated);
+                                        })
+                                        .detach();
+                                    }
+                                    this.status = "已复制".into();
+                                }
+                                Err(error) => this.status = error.to_localized_string(language),
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .detach();
             }));
         let favorite_button = Button::new(("favorite", id))
             .ghost()
-            .xsmall()
-            .icon(if favorite {
-                IconName::Heart
-            } else {
-                IconName::HeartOff
-            })
+            .large()
+            .child(
+                Icon::new(if favorite {
+                    IconName::Heart
+                } else {
+                    IconName::HeartOff
+                })
+                .small(),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(updated) = this.history.toggle_favorite(id) {
-                    let _ = storage::save_entry(&updated);
+                    cx.background_spawn(async move {
+                        let _ = storage::save_entry(&updated);
+                    })
+                    .detach();
                 }
                 cx.notify();
             }));
         let delete = Button::new(("delete", id))
             .ghost()
-            .xsmall()
-            .icon(IconName::Delete)
+            .large()
+            .child(Icon::new(IconName::Delete).small())
             .on_click(cx.listener(move |this, _, _, cx| {
                 if this.history.remove(id) {
-                    let _ = storage::delete_entries(&[id]);
+                    cx.background_spawn(async move {
+                        let _ = storage::delete_entries(&[id]);
+                    })
+                    .detach();
                     this.status = "已删除".into();
                     cx.notify();
                 }
@@ -330,18 +388,6 @@ impl ClipboardApp {
             .border_b_1()
             .border_color(cx.theme().border)
             .hover(|style| style.bg(cx.theme().secondary_hover))
-            .child(
-                div()
-                    .size_8()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_md()
-                    .bg(cx.theme().secondary)
-                    .text_color(cx.theme().muted_foreground)
-                    .child(kind_icon),
-            )
             .child(content)
             .child(copy)
             .child(favorite_button)
@@ -378,16 +424,8 @@ impl Render for ClipboardApp {
             )
             .child(
                 StatusBar::new()
-                    .left(if self.status.is_empty() {
-                        if self.monitor_paused {
-                            "监听已暂停".to_string()
-                        } else {
-                            "就绪".to_string()
-                        }
-                    } else {
-                        self.status.clone()
-                    })
-                    .child(format!("{} 条记录", self.history.counts().total))
+                    .left(format!("{} 条记录", self.history.counts().total))
+                    .child(self.status.clone())
                     .right(
                         h_flex()
                             .gap_1()
@@ -395,12 +433,15 @@ impl Render for ClipboardApp {
                             .child(
                                 Button::new("status-settings")
                                     .ghost()
-                                    .xsmall()
-                                    .icon(if page == AppPage::History {
-                                        IconName::Settings2
-                                    } else {
-                                        IconName::ArrowLeft
-                                    })
+                                    .large()
+                                    .child(
+                                        Icon::new(if page == AppPage::History {
+                                            IconName::Settings2
+                                        } else {
+                                            IconName::ArrowLeft
+                                        })
+                                        .small(),
+                                    )
                                     .tooltip(if page == AppPage::History {
                                         "设置"
                                     } else {
@@ -418,28 +459,22 @@ impl Render for ClipboardApp {
                             .when(page == AppPage::History, |this| {
                                 this.child(
                                     Button::new("status-clear")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Delete)
+                                        .danger()
+                                        .text()
+                                        .large()
+                                        .child(Icon::new(IconName::Delete).small())
                                         .tooltip("清空历史")
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.history.clear();
-                                            let _ = storage::clear_history();
+                                            cx.background_spawn(async {
+                                                let _ = storage::clear_history();
+                                            })
+                                            .detach();
                                             this.status = "历史已清空".into();
                                             cx.notify();
                                         })),
                                 )
-                            })
-                            .child(
-                                Switch::new("monitor")
-                                    .small()
-                                    .label("监听剪贴板")
-                                    .checked(!self.monitor_paused)
-                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                        this.monitor_paused = !*checked;
-                                        cx.notify();
-                                    })),
-                            ),
+                            }),
                     ),
             )
     }
@@ -447,43 +482,107 @@ impl Render for ClipboardApp {
 
 impl ClipboardApp {
     fn render_settings(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .size_full()
-            .p_4()
-            .gap_4()
-            .child(
-                Switch::new("startup")
-                    .label("开机启动")
-                    .checked(self.settings.launch_at_startup)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.settings.launch_at_startup = *checked;
-                        if let Err(error) = platform::startup::set_enabled(*checked) {
-                            this.status = error;
-                        } else {
+        let app = cx.entity().clone();
+        let monitor = SettingItem::new(
+            "监听剪贴板",
+            SettingField::switch(
+                {
+                    let app = app.clone();
+                    move |cx| !app.read(cx).monitor_paused
+                },
+                {
+                    let app = app.clone();
+                    move |checked, cx| {
+                        app.update(cx, |this, cx| {
+                            this.monitor_paused = !checked;
+                            this.status = if checked {
+                                "剪贴板监听已开启".into()
+                            } else {
+                                "剪贴板监听已暂停".into()
+                            };
+                            cx.notify();
+                        });
+                    }
+                },
+            ),
+        )
+        .description("在后台监听系统剪贴板并保存新的内容。");
+        let startup = SettingItem::new(
+            "开机启动",
+            SettingField::switch(
+                {
+                    let app = app.clone();
+                    move |cx| app.read(cx).settings.launch_at_startup
+                },
+                {
+                    let app = app.clone();
+                    move |checked, cx| {
+                        app.update(cx, |this, cx| {
+                            this.settings.launch_at_startup = checked;
+                            if let Err(error) = platform::startup::set_enabled(checked) {
+                                this.status = error;
+                            } else {
+                                this.save_settings();
+                            }
+                            cx.notify();
+                        });
+                    }
+                },
+            ),
+        )
+        .description("启动系统时自动运行 UCP。");
+        let promote = SettingItem::new(
+            "复制后提升记录",
+            SettingField::switch(
+                {
+                    let app = app.clone();
+                    move |cx| app.read(cx).settings.promote_copied_entries
+                },
+                {
+                    let app = app.clone();
+                    move |checked, cx| {
+                        app.update(cx, |this, cx| {
+                            this.settings.promote_copied_entries = checked;
                             this.save_settings();
-                        }
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Switch::new("promote")
-                    .label("复制后提升记录")
-                    .checked(self.settings.promote_copied_entries)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.settings.promote_copied_entries = *checked;
+                            cx.notify();
+                        });
+                    }
+                },
+            ),
+        )
+        .description("复制历史记录时，将其移动到列表顶部。");
+        let quick_paste = SettingItem::new(
+            "启用快捷粘贴",
+            SettingField::switch(
+                {
+                    let app = app.clone();
+                    move |cx| app.read(cx).settings.quick_paste
+                },
+                move |checked, cx| {
+                    app.update(cx, |this, cx| {
+                        this.settings.quick_paste = checked;
                         this.save_settings();
                         cx.notify();
-                    })),
-            )
-            .child(
-                Switch::new("quick-paste")
-                    .label("启用快捷粘贴")
-                    .checked(self.settings.quick_paste)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.settings.quick_paste = *checked;
-                        this.save_settings();
-                        cx.notify();
-                    })),
-            )
+                    });
+                },
+            ),
+        )
+        .description("允许使用快捷键快速打开剪贴板历史。");
+
+        div()
+            .size_full()
+            .child(Settings::new("clipboard-settings").large().pages(vec![
+                    SettingPage::new("常规")
+                        .icon(IconName::Settings2)
+                        .default_open(true)
+                        .groups(vec![
+                            SettingGroup::new()
+                                .title("剪贴板")
+                                .items(vec![monitor, promote]),
+                            SettingGroup::new()
+                                .title("系统")
+                                .items(vec![startup, quick_paste]),
+                        ]),
+                ]))
     }
 }

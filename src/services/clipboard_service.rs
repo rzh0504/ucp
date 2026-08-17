@@ -19,28 +19,17 @@ pub enum ClipboardError {
     StorageError(String),
 }
 
-pub struct CopyResult {
-    pub should_promote: bool,
-}
-
 impl ClipboardService {
-    /// 复制条目到剪贴板
-    pub fn copy_entry(
-        history: &ClipboardHistory,
-        id: u64,
-        promote_on_copy: bool,
-    ) -> Result<CopyResult, ClipboardError> {
-        let Some(entry) = history.entry(id) else {
-            return Err(ClipboardError::EntryNotFound);
-        };
-
-        let mut content = entry.content.clone();
-
+    /// Copies already extracted content without requiring the UI history entity.
+    pub fn copy_content(
+        entry_id: u64,
+        mut content: ClipboardContent,
+    ) -> Result<(), ClipboardError> {
         // 如果是图片且未加载，先加载图片
         if let ClipboardContent::Image(image) = &content
             && !image.has_bytes()
         {
-            if let Some(loaded_image) = storage::load_image(entry.id)
+            if let Some(loaded_image) = storage::load_image(entry_id)
                 .map_err(|e| ClipboardError::ImageLoadFailed(e.to_string()))?
             {
                 content = ClipboardContent::Image(loaded_image);
@@ -60,9 +49,7 @@ impl ClipboardService {
         platform::clipboard::write_content(&content)
             .map_err(|e| ClipboardError::WriteError(e.to_string()))?;
 
-        let should_promote = promote_on_copy && history.should_promote(id);
-
-        Ok(CopyResult { should_promote })
+        Ok(())
     }
 
     /// 保存条目到存储
