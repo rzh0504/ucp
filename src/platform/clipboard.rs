@@ -248,13 +248,115 @@ pub fn write_files(_files: &[String]) -> Result<(), ClipboardError> {
 }
 
 #[cfg(windows)]
-pub fn sequence_number() -> Option<u32> {
-    clipboard_win::raw::seq_num().map(|sequence| sequence.get())
+pub struct ClipboardUpdateListener {
+    _shutdown: clipboard_win::monitor::Shutdown,
 }
 
-#[cfg(not(windows))]
-pub fn sequence_number() -> Option<u32> {
-    None
+#[cfg(target_os = "macos")]
+pub struct ClipboardUpdateListener {
+    shutdown: Option<std::sync::mpsc::Sender<()>>,
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for ClipboardUpdateListener {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub struct ClipboardUpdateListener {
+    shutdown: Option<std::sync::mpsc::Sender<()>>,
+    child: Option<std::process::Child>,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ClipboardUpdateListener {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
+pub struct ClipboardUpdateListener;
+
+#[cfg(windows)]
+pub fn listen_for_updates(
+    mut on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let (setup_tx, setup_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut monitor = match clipboard_win::Monitor::new() {
+            Ok(monitor) => monitor,
+            Err(error) => {
+                let _ = setup_tx.send(Err(map_clipboard_win_error(error)));
+                return;
+            }
+        };
+        let shutdown = monitor.shutdown_channel();
+        if setup_tx.send(Ok(shutdown)).is_err() {
+            return;
+        }
+        while let Ok(true) = monitor.recv() {
+            on_update();
+        }
+    });
+
+    let shutdown = setup_rx
+        .recv()
+        .map_err(|error| ClipboardError::Unavailable(format!("启动剪贴板监听失败：{error}")))??;
+    Ok(ClipboardUpdateListener {
+        _shutdown: shutdown,
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub fn listen_for_updates(
+    mut on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut last_change_count = macos_pasteboard_change_count();
+        while shutdown_rx
+            .recv_timeout(std::time::Duration::from_millis(650))
+            .is_err()
+        {
+            let change_count = macos_pasteboard_change_count();
+            if change_count.is_some() && change_count != last_change_count {
+                last_change_count = change_count;
+                on_update();
+            }
+        }
+    });
+    Ok(ClipboardUpdateListener {
+        shutdown: Some(shutdown_tx),
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn listen_for_updates(
+    on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    let on_update = std::sync::Arc::new(std::sync::Mutex::new(
+        Box::new(on_update) as Box<dyn FnMut() + Send>
+    ));
+    listen_with_wl_paste(on_update.clone()).or_else(|_| listen_with_clipnotify(on_update))
+}
+
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
+pub fn listen_for_updates(
+    _on_update: impl FnMut() + Send + 'static,
+) -> Result<ClipboardUpdateListener, ClipboardError> {
+    Err(ClipboardError::Unavailable(
+        "当前平台暂不支持剪贴板事件监听".to_string(),
+    ))
 }
 
 fn map_error(error: ArboardError) -> ClipboardError {
@@ -371,47 +473,6 @@ fn listen_with_clipnotify(
         shutdown: Some(shutdown_tx),
         child: None,
     })
-}
-
-#[cfg(target_os = "macos")]
-fn platform_paste_shortcut() -> Result<(), ClipboardError> {
-    unix::command_status(
-        "osascript",
-        &[
-            "-e",
-            "tell application \"System Events\" to keystroke \"v\" using command down",
-        ],
-        &[],
-    )
-    .map_err(|message| ClipboardError::Unavailable(format!("发送 macOS 粘贴快捷键失败：{message}")))
-}
-
-#[cfg(target_os = "linux")]
-fn platform_paste_shortcut() -> Result<(), ClipboardError> {
-    let attempts: [(&str, &[&str]); 2] = [
-        ("wtype", &["-M", "ctrl", "v", "-m", "ctrl"]),
-        ("xdotool", &["key", "--clearmodifiers", "ctrl+v"]),
-    ];
-    let mut errors = Vec::new();
-
-    for (command, args) in attempts {
-        match unix::command_status(command, args, &[]) {
-            Ok(()) => return Ok(()),
-            Err(error) => errors.push(format!("{command}: {error}")),
-        }
-    }
-
-    Err(ClipboardError::Unavailable(format!(
-        "发送 Linux 粘贴快捷键失败，请安装 wtype 或 xdotool：{}",
-        errors.join("; ")
-    )))
-}
-
-#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
-fn platform_paste_shortcut() -> Result<(), ClipboardError> {
-    Err(ClipboardError::Unavailable(
-        "当前平台暂不支持快捷粘贴".to_string(),
-    ))
 }
 
 #[cfg(windows)]

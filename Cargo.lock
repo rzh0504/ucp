@@ -6836,6 +6836,7 @@ name = "ucp"
 version = "0.2.0"
 dependencies = [
  "arboard",
+ "async-channel",
  "base64",
  "chrono",
  "clipboard-win",

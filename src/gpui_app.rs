@@ -1,19 +1,22 @@
-use crate::model::{AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory};
+use crate::model::{
+    AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory, ClipboardKind,
+};
 use crate::platform;
 use crate::services::ClipboardService;
 use crate::storage;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
-    ActiveTheme as _, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode,
+    ActiveTheme as _, IconName, Root, Sizable as _, StyledExt as _, Theme, ThemeMode, TitleBar,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
+    status_bar::StatusBar,
     switch::Switch,
     tab::{Tab, TabBar},
     v_flex, v_virtual_list,
 };
 use gpui_component_assets::Assets;
-use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AppPage {
@@ -28,7 +31,7 @@ pub fn run(visible: bool) {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(900.), px(660.)), cx)),
             show: visible,
-            ..Default::default()
+            ..TitleBar::window_options()
         };
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
@@ -52,6 +55,7 @@ struct ClipboardApp {
     monitor_paused: bool,
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
     search: Entity<InputState>,
+    _clipboard_listener: Option<platform::clipboard::ClipboardUpdateListener>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -76,6 +80,13 @@ impl ClipboardApp {
                 }
             }
         })];
+        let (update_tx, update_rx) = async_channel::unbounded();
+        let _ = update_tx.try_send(());
+        let event_tx = update_tx.clone();
+        let clipboard_listener = platform::clipboard::listen_for_updates(move || {
+            let _ = event_tx.send_blocking(());
+        })
+        .ok();
         let mut app = Self {
             settings,
             history,
@@ -86,24 +97,26 @@ impl ClipboardApp {
             monitor_paused: false,
             visible_entries: Vec::new(),
             search,
+            _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
-        app.start_clipboard_monitor(cx);
+        app.start_clipboard_monitor(update_rx, cx);
         app
     }
 
-    fn start_clipboard_monitor(&mut self, cx: &mut Context<Self>) {
+    fn start_clipboard_monitor(
+        &mut self,
+        updates: async_channel::Receiver<()>,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn(async move |entity, cx| {
-            let mut last_sequence = None;
-            loop {
-                smol::Timer::after(Duration::from_millis(650)).await;
-                let sequence = cx
-                    .background_spawn(async { platform::clipboard::sequence_number() })
-                    .await;
-                if sequence.is_some() && sequence == last_sequence {
+            while updates.recv().await.is_ok() {
+                let paused = entity
+                    .update(cx, |this, _| this.monitor_paused)
+                    .unwrap_or(true);
+                if paused {
                     continue;
                 }
-                last_sequence = sequence;
                 let content = cx
                     .background_spawn(async { platform::clipboard::read_content().ok().flatten() })
                     .await;
@@ -151,7 +164,7 @@ impl ClipboardApp {
         let language = self.settings.language;
         let counts = self.history.counts();
         let filters = TabBar::new("filters")
-            .pill()
+            .underline()
             .selected_index(match self.filter {
                 ClipboardFilter::All => 0,
                 ClipboardFilter::Text => 1,
@@ -176,7 +189,7 @@ impl ClipboardApp {
             .child(Tab::new().label(format!("收藏 {}", counts.favorite)));
         self.visible_entries = self.history.filtered(&self.query, self.filter);
         let item_sizes =
-            std::rc::Rc::new(vec![size(px(900.), px(72.)); self.visible_entries.len()]);
+            std::rc::Rc::new(vec![size(px(900.), px(64.)); self.visible_entries.len()]);
         let list = v_virtual_list(
             cx.entity().clone(),
             "history-list",
@@ -194,7 +207,45 @@ impl ClipboardApp {
         )
         .size_full();
 
-        v_flex().size_full().gap_3().child(filters).child(list)
+        let content = if self.visible_entries.is_empty() {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_color(cx.theme().muted_foreground)
+                .child(IconName::Inbox)
+                .child(div().font_medium().child(if self.query.is_empty() {
+                    "暂无剪贴板记录"
+                } else {
+                    "没有匹配的记录"
+                }))
+                .child(div().text_sm().child("复制文本、图片或文件后会显示在这里"))
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
+
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .px_4()
+                    .gap_3()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(filters)
+                    .child(div().flex_1())
+                    .child(
+                        Input::new(&self.search)
+                            .small()
+                            .w(px(280.))
+                            .prefix(IconName::Search)
+                            .cleanable(true),
+                    ),
+            )
+            .child(content)
     }
 
     fn render_entry(
@@ -206,6 +257,11 @@ impl ClipboardApp {
         let title = entry.title_with_language(language);
         let meta = entry.size_label_with_language(language);
         let favorite = entry.favorite;
+        let kind_icon = match entry.kind() {
+            ClipboardKind::Text => IconName::ALargeSmall,
+            ClipboardKind::Image => IconName::Frame,
+            ClipboardKind::File => IconName::File,
+        };
         let content = v_flex()
             .flex_1()
             .min_w_0()
@@ -268,12 +324,24 @@ impl ClipboardApp {
         h_flex()
             .id(ElementId::NamedInteger("entry".into(), id))
             .w_full()
+            .h(px(64.))
             .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
+            .px_4()
+            .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().secondary)
+            .hover(|style| style.bg(cx.theme().secondary_hover))
+            .child(
+                div()
+                    .size_8()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .bg(cx.theme().secondary)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(kind_icon),
+            )
             .child(content)
             .child(copy)
             .child(favorite_button)
@@ -287,69 +355,91 @@ impl Render for ClipboardApp {
         let page = self.page;
         v_flex()
             .size_full()
-            .p_4()
-            .gap_3()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(div().text_xl().font_semibold().child("UCP Clipboard"))
-                    .child(
-                        Input::new(&self.search)
-                            .prefix(IconName::Search)
-                            .cleanable(true),
-                    )
-                    .child(
-                        Button::new("settings")
-                            .ghost()
-                            .icon(IconName::Settings2)
-                            .tooltip("设置")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.page = if this.page == AppPage::History {
-                                    AppPage::Settings
-                                } else {
-                                    AppPage::History
-                                };
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("clear")
-                            .danger()
-                            .small()
-                            .icon(IconName::Delete)
-                            .label("清空")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.history.clear();
-                                let _ = storage::clear_history();
-                                this.status = "历史已清空".into();
-                                cx.notify();
-                            })),
-                    ),
+                TitleBar::new().child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .child(div().font_semibold().child("UCP")),
+                ),
             )
-            .child(if page == AppPage::History {
-                self.render_history(cx).into_any_element()
-            } else {
-                self.render_settings(cx).into_any_element()
-            })
             .child(
-                h_flex()
-                    .justify_between()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .pt_2()
-                    .child(self.status.clone())
-                    .child(
-                        Switch::new("monitor")
-                            .small()
-                            .label("监听剪贴板")
-                            .checked(!self.monitor_paused)
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                this.monitor_paused = !*checked;
-                                cx.notify();
-                            })),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(if page == AppPage::History {
+                        self.render_history(cx).into_any_element()
+                    } else {
+                        self.render_settings(cx).into_any_element()
+                    }),
+            )
+            .child(
+                StatusBar::new()
+                    .left(if self.status.is_empty() {
+                        if self.monitor_paused {
+                            "监听已暂停".to_string()
+                        } else {
+                            "就绪".to_string()
+                        }
+                    } else {
+                        self.status.clone()
+                    })
+                    .child(format!("{} 条记录", self.history.counts().total))
+                    .right(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                Button::new("status-settings")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(if page == AppPage::History {
+                                        IconName::Settings2
+                                    } else {
+                                        IconName::ArrowLeft
+                                    })
+                                    .tooltip(if page == AppPage::History {
+                                        "设置"
+                                    } else {
+                                        "返回历史"
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.page = if this.page == AppPage::History {
+                                            AppPage::Settings
+                                        } else {
+                                            AppPage::History
+                                        };
+                                        cx.notify();
+                                    })),
+                            )
+                            .when(page == AppPage::History, |this| {
+                                this.child(
+                                    Button::new("status-clear")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Delete)
+                                        .tooltip("清空历史")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.history.clear();
+                                            let _ = storage::clear_history();
+                                            this.status = "历史已清空".into();
+                                            cx.notify();
+                                        })),
+                                )
+                            })
+                            .child(
+                                Switch::new("monitor")
+                                    .small()
+                                    .label("监听剪贴板")
+                                    .checked(!self.monitor_paused)
+                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                        this.monitor_paused = !*checked;
+                                        cx.notify();
+                                    })),
+                            ),
                     ),
             )
     }
@@ -359,8 +449,8 @@ impl ClipboardApp {
     fn render_settings(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
+            .p_4()
             .gap_4()
-            .child(div().text_2xl().font_semibold().child("设置"))
             .child(
                 Switch::new("startup")
                     .label("开机启动")
@@ -392,16 +482,6 @@ impl ClipboardApp {
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
                         this.settings.quick_paste = *checked;
                         this.save_settings();
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("back")
-                    .secondary()
-                    .icon(IconName::ArrowLeft)
-                    .label("返回历史")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.page = AppPage::History;
                         cx.notify();
                     })),
             )
