@@ -609,10 +609,14 @@ impl ClipboardApp {
     fn toggle_image_expansion(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.expanded_image_id == Some(id) {
             self.expanded_image_id = None;
+            if let Some(offset) = self.expanded_image_scroll_offset.take() {
+                self.history_scroll.set_offset(offset);
+            }
             cx.notify();
             return;
         }
 
+        self.expanded_image_scroll_offset = Some(self.history_scroll.offset());
         self.expanded_image_id = Some(id);
         cx.notify();
     }
@@ -782,6 +786,7 @@ impl ClipboardApp {
                             }
                             if this.expanded_image_id.is_some_and(|id| ids.contains(&id)) {
                                 this.expanded_image_id = None;
+                                this.expanded_image_scroll_offset = None;
                             }
                             if this.expanded_text_id.is_some_and(|id| ids.contains(&id)) {
                                 this.expanded_text_id = None;
@@ -845,6 +850,7 @@ impl ClipboardApp {
                     this.selection_anchor_id = None;
                     this.navigation_entry_id = None;
                     this.expanded_image_id = None;
+                    this.expanded_image_scroll_offset = None;
                     this.status = match filter {
                         ClipboardFilter::All => "全部历史已清空",
                         ClipboardFilter::Text => "文本记录已清空",
