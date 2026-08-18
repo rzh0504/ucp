@@ -5,9 +5,11 @@ use crate::platform;
 use crate::storage;
 use chrono::Local;
 use std::path::Path;
+use std::path::PathBuf;
 
 /// UI-independent clipboard operations.
 pub struct ClipboardService;
+pub type ClipboardStorage = storage::StorageHandle;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClipboardError {
@@ -32,6 +34,31 @@ pub enum ClipboardError {
 }
 
 impl ClipboardService {
+    pub fn initialize() -> Result<
+        (
+            ClipboardStorage,
+            crate::model::AppSettings,
+            ClipboardHistory,
+        ),
+        ClipboardError,
+    > {
+        let storage = storage::StorageHandle::new().map_err(ClipboardError::StorageError)?;
+        let settings = storage::load_settings(&storage)
+            .map_err(ClipboardError::StorageError)?
+            .normalized();
+        let history = storage::load_history(&storage, settings.history_limit)
+            .map_err(ClipboardError::StorageError)?;
+        Ok((storage, settings, history))
+    }
+
+    pub fn suppress_entry_saves(storage: &ClipboardStorage, ids: &[u64]) {
+        storage.suppress_entry_saves(ids);
+    }
+
+    pub fn allow_entry_saves(storage: &ClipboardStorage, ids: &[u64]) {
+        storage.allow_entry_saves(ids);
+    }
+
     /// Copies already extracted content without requiring the UI history entity.
     pub fn copy_content(
         storage: &crate::storage::StorageHandle,
@@ -67,10 +94,32 @@ impl ClipboardService {
     pub fn save_entry(
         storage: &crate::storage::StorageHandle,
         entry: &ClipboardEntry,
+    ) -> Result<Option<String>, ClipboardError> {
+        storage::save_entry(storage, entry).map_err(ClipboardError::StorageError)
+    }
+
+    pub fn save_settings(
+        storage: &crate::storage::StorageHandle,
+        settings: &crate::model::AppSettings,
     ) -> Result<(), ClipboardError> {
-        storage::save_entry(storage, entry)
-            .map(|_| ())
-            .map_err(ClipboardError::StorageError)
+        storage::save_settings(storage, settings).map_err(ClipboardError::StorageError)
+    }
+
+    pub fn image_preview_path(preview_url: Option<&str>) -> Option<PathBuf> {
+        storage::image_preview_path(preview_url)
+    }
+
+    pub fn delete_stored_entries(
+        storage: &crate::storage::StorageHandle,
+        ids: &[u64],
+    ) -> Result<(), ClipboardError> {
+        storage::delete_entries(storage, ids).map_err(ClipboardError::StorageError)
+    }
+
+    pub fn clear_stored_history(
+        storage: &crate::storage::StorageHandle,
+    ) -> Result<(), ClipboardError> {
+        storage::clear_history(storage).map_err(ClipboardError::StorageError)
     }
 
     /// 验证文件是否存在

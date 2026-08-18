@@ -1,7 +1,6 @@
 use super::ClipboardApp;
 use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter};
 use crate::services::ClipboardService;
-use crate::storage;
 use gpui::{prelude::FluentBuilder as _, *};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
@@ -277,7 +276,7 @@ impl ClipboardApp {
                         .child(Icon::new(IconName::Frame))
                         .into_any_element()
                 };
-                let preview = storage::image_preview_path(image.preview_url.as_deref())
+                let preview = ClipboardService::image_preview_path(image.preview_url.as_deref())
                     .map(|path| {
                         img(path)
                             .size_full()
@@ -671,7 +670,7 @@ impl ClipboardApp {
                                 this.update_visible_entry(id);
                                 let storage = storage_for_promote.clone();
                                 cx.background_spawn(async move {
-                                    let _ = storage::save_entry(&storage, &updated);
+                                    let _ = ClipboardService::save_entry(&storage, &updated);
                                 })
                                 .detach();
                             }
@@ -726,7 +725,7 @@ impl ClipboardApp {
             self.update_visible_entry(id);
             let storage = self.storage.clone();
             cx.background_spawn(async move {
-                let _ = storage::save_entry(&storage, &updated);
+                let _ = ClipboardService::save_entry(&storage, &updated);
             })
             .detach();
         }
@@ -746,14 +745,16 @@ impl ClipboardApp {
             return;
         }
 
-        self.storage.suppress_entry_saves(&ids);
+        ClipboardService::suppress_entry_saves(&self.storage, &ids);
         self.status = "删除中...".into();
         cx.notify();
         let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
             let delete_ids = ids.clone();
             let result = cx
-                .background_spawn(async move { storage::delete_entries(&storage, &delete_ids) })
+                .background_spawn(async move {
+                    ClipboardService::delete_stored_entries(&storage, &delete_ids)
+                })
                 .await;
             entity
                 .update(cx, |this, cx| {
@@ -780,7 +781,7 @@ impl ClipboardApp {
                             this.status = format!("已删除 {} 条记录", ids.len());
                         }
                         Err(error) => {
-                            this.storage.allow_entry_saves(&ids);
+                            ClipboardService::allow_entry_saves(&this.storage, &ids);
                             let message = error.to_string();
                             this.status = message.clone();
                             this.show_error("删除失败", message, cx);
@@ -796,7 +797,7 @@ impl ClipboardApp {
     pub(super) fn clear_current_filter(&mut self, cx: &mut Context<Self>) {
         let filter = self.filter;
         let ids = self.history.deletable_ids_for_filter(filter, false);
-        self.storage.suppress_entry_saves(&ids);
+        ClipboardService::suppress_entry_saves(&self.storage, &ids);
         self.status = "清空中...".into();
         let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
@@ -805,9 +806,9 @@ impl ClipboardApp {
                     let ids = ids.clone();
                     async move {
                         if filter == ClipboardFilter::All {
-                            storage::clear_history(&storage)
+                            ClipboardService::clear_stored_history(&storage)
                         } else {
-                            storage::delete_entries(&storage, &ids)
+                            ClipboardService::delete_stored_entries(&storage, &ids)
                         }
                     }
                 })
@@ -815,7 +816,7 @@ impl ClipboardApp {
             entity
                 .update(cx, |this, cx| {
                     if let Err(error) = result {
-                        this.storage.allow_entry_saves(&ids);
+                        ClipboardService::allow_entry_saves(&this.storage, &ids);
                         let message = error.to_string();
                         this.status = message.clone();
                         this.show_error("清空失败", message, cx);

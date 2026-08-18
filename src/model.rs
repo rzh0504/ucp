@@ -300,6 +300,7 @@ pub struct PushResult {
 }
 
 impl ClipboardHistory {
+    #[cfg(test)]
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
