@@ -75,7 +75,7 @@ pub fn run(visible: bool) {
         cx.spawn(async move |cx| {
             let window = cx
                 .open_window(options, |window, cx| {
-                    window.set_window_title("UCP Clipboard");
+                    window.set_window_title("UCP");
                     let view = cx.new(|cx| ClipboardApp::new(window, cx));
                     cx.new(|cx| Root::new(view, window, cx).bordered(false))
                 })

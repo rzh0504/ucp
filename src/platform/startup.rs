@@ -1,6 +1,8 @@
 use crate::error::StartupError;
 
-const APP_RUN_VALUE: &str = "UCP Clipboard";
+const APP_RUN_VALUE: &str = "UCP";
+#[cfg(windows)]
+const LEGACY_APP_RUN_VALUE: &str = "UCP Clipboard";
 pub const SILENT_STARTUP_ARG: &str = "--silent-startup";
 
 #[cfg(windows)]
@@ -23,6 +25,7 @@ fn enable() -> Result<(), StartupError> {
     let value_name = wide_null(APP_RUN_VALUE);
     let command = wide_null(&command);
     let key = open_run_key()?;
+    delete_run_value(&key, LEGACY_APP_RUN_VALUE)?;
 
     let result = unsafe {
         RegSetValueExW(
@@ -40,13 +43,18 @@ fn enable() -> Result<(), StartupError> {
 
 #[cfg(windows)]
 fn disable() -> Result<(), StartupError> {
+    let key = open_run_key()?;
+    delete_run_value(&key, APP_RUN_VALUE)?;
+    delete_run_value(&key, LEGACY_APP_RUN_VALUE)
+}
+
+#[cfg(windows)]
+fn delete_run_value(key: &RegistryKey, name: &str) -> Result<(), StartupError> {
     use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
     use windows_sys::Win32::System::Registry::RegDeleteValueW;
 
-    let value_name = wide_null(APP_RUN_VALUE);
-    let key = open_run_key()?;
+    let value_name = wide_null(name);
     let result = unsafe { RegDeleteValueW(key.0, value_name.as_ptr()) };
-
     if result == ERROR_FILE_NOT_FOUND {
         Ok(())
     } else {

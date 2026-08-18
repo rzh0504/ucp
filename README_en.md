@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icons/Ucp.png" alt="UCP Clipboard app icon" width="96" height="96">
+  <img src="assets/icons/Ucp.png" alt="UCP app icon" width="96" height="96">
 </p>
 
-# UCP Clipboard
+# UCP
 
 [简体中文](README.md)
 
@@ -19,7 +19,7 @@ Cross-platform desktop clipboard history app built with GPUI and GPUI Component.
 
 ## Shortcuts
 
-- `Ctrl+Shift+V`: Default global shortcut to show and focus UCP Clipboard. This can be changed in settings by clicking the shortcut field and pressing a new key combination.
+- `Ctrl+Shift+V`: Default global shortcut to show and focus UCP. This can be changed in settings by clicking the shortcut field and pressing a new key combination.
 - `Ctrl+F`: Focus search.
 - `Ctrl+,`: Toggle settings.
 - `Ctrl+1` to `Ctrl+5`: Switch filters.

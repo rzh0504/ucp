@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icons/Ucp.png" alt="UCP Clipboard app icon" width="96" height="96">
+  <img src="assets/icons/Ucp.png" alt="UCP app icon" width="96" height="96">
 </p>
 
-# UCP Clipboard
+# UCP
 
 <!-- [English](README_en.md) -->
 

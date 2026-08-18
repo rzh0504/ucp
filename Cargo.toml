@@ -1,6 +1,6 @@
 [package]
 name = "ucp"
-version = "0.2.0"
+version = "0.3.1"
 edition = "2024"
 description = "A desktop clipboard history app built with GPUI."
 license = "MIT"
@@ -40,7 +40,7 @@ opt-level = 3
 lto = "thin"
 
 [package.metadata.bundle]
-name = "UCP Clipboard"
+name = "UCP"
 identifier = "dev.ucp.clipboard"
 publisher = "UCP"
 icon = ["assets/icons/app.ico", "assets/icons/app.icns", "assets/icons/Ucp.png"]

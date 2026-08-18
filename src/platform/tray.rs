@@ -46,7 +46,7 @@ pub fn create() -> Result<TrayIcon, TrayError> {
 
     let icon = TrayIconBuilder::new()
         .with_icon(icon)
-        .with_tooltip("UCP Clipboard")
+        .with_tooltip("UCP")
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
         .build()

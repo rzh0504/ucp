@@ -332,7 +332,7 @@ impl ClipboardApp {
                     .size(px(64.))
                     .object_fit(ObjectFit::Contain),
                 )
-                .child(Label::new("UCP Clipboard").text_lg())
+                .child(Label::new("UCP").text_lg())
                 .child(
                     div()
                         .text_sm()

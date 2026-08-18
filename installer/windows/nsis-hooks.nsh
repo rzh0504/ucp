@@ -21,7 +21,7 @@ Function EnsureUcpNotRunning
     ${EndIf}
 
     MessageBox MB_ICONEXCLAMATION|MB_YESNO \
-        "UCP Clipboard 正在运行，安装前需要关闭它。$\r$\n$\r$\n是否立即关闭 UCP Clipboard 并继续安装？" \
+        "UCP 正在运行，安装前需要关闭它。$\r$\n$\r$\n是否立即关闭 UCP 并继续安装？" \
         IDYES close_running IDNO abort_install
 
     close_running:
@@ -33,7 +33,7 @@ Function EnsureUcpNotRunning
         ${EndIf}
 
         MessageBox MB_ICONSTOP|MB_RETRYCANCEL \
-            "无法自动关闭 UCP Clipboard。请手动退出后点击重试。" \
+            "无法自动关闭 UCP。请手动退出后点击重试。" \
             IDRETRY retry_check IDCANCEL abort_install
 
     abort_install:
