@@ -45,6 +45,7 @@ impl ClipboardApp {
                     4 => ClipboardFilter::Favorite,
                     _ => ClipboardFilter::All,
                 };
+                this.refresh_visible_entries();
                 cx.notify();
             }))
             .child(Self::filter_tab(IconName::Inbox, "全部", counts.total))
@@ -52,20 +53,6 @@ impl ClipboardApp {
             .child(Self::filter_tab(IconName::Frame, "图片", counts.image))
             .child(Self::filter_tab(IconName::File, "文件", counts.file))
             .child(Self::filter_tab(IconName::Heart, "收藏", counts.favorite));
-        self.visible_entries = self.history.filtered(&self.query, self.filter);
-        let visible_ids = self
-            .visible_entries
-            .iter()
-            .map(|entry| entry.id)
-            .collect::<std::collections::HashSet<_>>();
-        self.selected_entry_ids
-            .retain(|id| visible_ids.contains(id));
-        if self
-            .selection_anchor_id
-            .is_some_and(|id| !visible_ids.contains(&id))
-        {
-            self.selection_anchor_id = None;
-        }
         let item_sizes = Rc::new(
             self.visible_entries
                 .iter()
@@ -681,6 +668,7 @@ impl ClipboardApp {
                     match result {
                         Ok(()) => {
                             if should_promote && let Some(updated) = this.history.promote(id) {
+                                this.update_visible_entry(id);
                                 let storage = storage_for_promote.clone();
                                 cx.background_spawn(async move {
                                     let _ = storage::save_entry(&storage, &updated);
@@ -735,6 +723,7 @@ impl ClipboardApp {
 
     fn toggle_favorite(&mut self, id: u64, cx: &mut Context<Self>) {
         if let Some(updated) = self.history.toggle_favorite(id) {
+            self.update_visible_entry(id);
             let storage = self.storage.clone();
             cx.background_spawn(async move {
                 let _ = storage::save_entry(&storage, &updated);
@@ -774,6 +763,7 @@ impl ClipboardApp {
                                 this.history.remove(*id);
                                 this.selected_entry_ids.remove(id);
                             }
+                            this.remove_visible_entries(&ids);
                             if this.navigation_entry_id.is_some_and(|id| ids.contains(&id)) {
                                 this.navigation_entry_id = None;
                             }
@@ -840,6 +830,7 @@ impl ClipboardApp {
                             this.history.remove(*id);
                         }
                     }
+                    this.remove_visible_entries(&ids);
                     this.selected_entry_ids.clear();
                     this.selection_anchor_id = None;
                     this.navigation_entry_id = None;

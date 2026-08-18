@@ -402,6 +402,17 @@ impl ClipboardHistory {
         entries
     }
 
+    pub fn entry_matches(entry: &ClipboardEntry, query: &str, filter: ClipboardFilter) -> bool {
+        if !matches_filter(entry, filter) {
+            return false;
+        }
+
+        let normalized_query = query.trim().to_lowercase();
+        normalized_query.is_empty()
+            || (entry.kind() != ClipboardKind::Image
+                && content_matches_query(&entry.content, &normalized_query))
+    }
+
     pub fn deletable_ids(&self, ids: &[u64], preserve_favorites: bool) -> Vec<u64> {
         self.entries
             .iter()
@@ -447,6 +458,10 @@ impl ClipboardHistory {
 
     pub fn entry(&self, id: u64) -> Option<Rc<ClipboardEntry>> {
         self.entries.iter().find(|entry| entry.id == id).cloned()
+    }
+
+    pub fn position(&self, id: u64) -> Option<usize> {
+        self.entries.iter().position(|entry| entry.id == id)
     }
 
     pub fn should_promote(&self, id: u64) -> bool {

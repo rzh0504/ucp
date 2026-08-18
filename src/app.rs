@@ -170,6 +170,53 @@ struct ClipboardApp {
 }
 
 impl ClipboardApp {
+    fn refresh_visible_entries(&mut self) {
+        self.visible_entries = self.history.filtered(&self.query, self.filter);
+        self.retain_visible_selection();
+    }
+
+    fn update_visible_entry(&mut self, id: u64) {
+        self.visible_entries.retain(|entry| entry.id != id);
+        if let Some(entry) = self.history.entry(id)
+            && crate::model::ClipboardHistory::entry_matches(&entry, &self.query, self.filter)
+        {
+            let position = self.history.position(id).unwrap_or(usize::MAX);
+            let insert_at = self
+                .visible_entries
+                .iter()
+                .position(|visible| {
+                    self.history
+                        .position(visible.id)
+                        .is_some_and(|visible_position| visible_position > position)
+                })
+                .unwrap_or(self.visible_entries.len());
+            self.visible_entries.insert(insert_at, entry);
+        }
+        self.retain_visible_selection();
+    }
+
+    fn remove_visible_entries(&mut self, ids: &[u64]) {
+        self.visible_entries
+            .retain(|entry| !ids.contains(&entry.id));
+        self.retain_visible_selection();
+    }
+
+    fn retain_visible_selection(&mut self) {
+        let visible_ids = self
+            .visible_entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<std::collections::HashSet<_>>();
+        self.selected_entry_ids
+            .retain(|id| visible_ids.contains(id));
+        if self
+            .selection_anchor_id
+            .is_some_and(|id| !visible_ids.contains(&id))
+        {
+            self.selection_anchor_id = None;
+        }
+    }
+
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let storage = storage::StorageHandle::new().expect("Failed to initialize storage");
         let settings = storage::load_settings(&storage).unwrap_or_default();
@@ -191,6 +238,7 @@ impl ClipboardApp {
             move |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.query = search.read(cx).value().to_string();
+                    this.refresh_visible_entries();
                     cx.notify();
                 }
             }
@@ -226,6 +274,7 @@ impl ClipboardApp {
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
+        app.refresh_visible_entries();
         app.start_clipboard_monitor(update_rx, cx);
         app
     }
@@ -321,6 +370,8 @@ impl ClipboardApp {
         let entry = result.entry;
         let result_id = entry.as_ref().map(|entry| entry.id).unwrap_or_default();
         let removed_ids = result.removed_ids;
+        self.update_visible_entry(result_id);
+        self.remove_visible_entries(&removed_ids);
         let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
             let saved_preview = cx
@@ -342,6 +393,7 @@ impl ClipboardApp {
                 entity
                     .update(cx, |this, cx| {
                         if this.history.set_image_preview_url(result_id, preview_url) {
+                            this.update_visible_entry(result_id);
                             cx.notify();
                         }
                     })
