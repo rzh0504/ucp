@@ -82,19 +82,8 @@ pub fn run(visible: bool) {
                 .expect("Failed to open GPUI window");
             #[cfg(windows)]
             {
-                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-                use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOW, ShowWindow};
-
                 let hwnd = window
-                    .update(cx, |_, window, _| {
-                        match HasWindowHandle::window_handle(window) {
-                            Ok(handle) => match handle.as_raw() {
-                                RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
-                                _ => None,
-                            },
-                            Err(_) => None,
-                        }
-                    })
+                    .update(cx, |_, window, _| platform::windows::window_handle(window))
                     .ok()
                     .flatten();
                 if has_tray && hwnd.is_some() {
@@ -102,7 +91,7 @@ pub fn run(visible: bool) {
                         .update(cx, |_, window, cx| {
                             window.on_window_should_close(cx, move |_, _| {
                                 if let Some(hwnd) = hwnd {
-                                    unsafe { ShowWindow(hwnd as _, SW_HIDE) };
+                                    platform::windows::hide_window(hwnd);
                                 }
                                 false
                             });
@@ -125,7 +114,7 @@ pub fn run(visible: bool) {
                                 cx.quit();
                             } else if should_show {
                                 if let Some(hwnd) = hwnd {
-                                    unsafe { ShowWindow(hwnd as _, SW_SHOW) };
+                                    platform::windows::show_window(hwnd);
                                 }
                                 cx.activate(true);
                                 window
@@ -462,39 +451,7 @@ impl ClipboardApp {
 
     #[cfg(windows)]
     fn set_always_on_top(window: &Window, always_on_top: bool) -> bool {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GWL_EXSTYLE, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED,
-            SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WS_EX_TOPMOST,
-        };
-
-        let Ok(handle) = HasWindowHandle::window_handle(window) else {
-            return false;
-        };
-        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-            return false;
-        };
-        let insert_after = if always_on_top {
-            HWND_TOPMOST
-        } else {
-            HWND_NOTOPMOST
-        };
-
-        unsafe {
-            let changed = SetWindowPos(
-                handle.hwnd.get() as _,
-                insert_after,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED,
-            ) != 0;
-            let is_topmost = GetWindowLongPtrW(handle.hwnd.get() as _, GWL_EXSTYLE)
-                & WS_EX_TOPMOST as isize
-                != 0;
-            changed && is_topmost == always_on_top
-        }
+        platform::windows::set_always_on_top(window, always_on_top)
     }
 
     #[cfg(not(windows))]
