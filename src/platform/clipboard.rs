@@ -366,7 +366,7 @@ pub fn listen_for_updates(
     std::thread::spawn(move || {
         let mut last_change_count = macos_pasteboard_change_count();
         while shutdown_rx
-            .recv_timeout(std::time::Duration::from_millis(650))
+            .recv_timeout(std::time::Duration::from_millis(200))
             .is_err()
         {
             let change_count = macos_pasteboard_change_count();
