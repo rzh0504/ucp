@@ -71,7 +71,13 @@ jobs:
         run: cargo build --locked --release
 
       - name: Build installer
+        if: runner.os != 'Windows'
         run: cargo bundle --release --format ${{ matrix.package_type }}
+
+      - name: Build Windows MSI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\installer\windows\build-msi.ps1
 
       - name: Collect installer artifacts
         shell: pwsh
