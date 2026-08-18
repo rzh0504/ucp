@@ -15,7 +15,14 @@ fn main() {
         .any(|argument| argument == platform::startup::SILENT_STARTUP_ARG);
 
     if args.iter().any(|argument| argument == "--compact-storage") {
-        if let Err(error) = storage::compact_database() {
+        let storage = match storage::StorageHandle::new() {
+            Ok(s) => s,
+            Err(error) => {
+                eprintln!("Failed to open database: {error}");
+                std::process::exit(1);
+            }
+        };
+        if let Err(error) = storage::compact_database(&storage) {
             eprintln!("Failed to compact storage: {error}");
             std::process::exit(1);
         }

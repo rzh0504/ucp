@@ -22,7 +22,7 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let directory = unique_test_directory();
-    reset_storage_for_tests();
+    let storage = StorageHandle::new_for_test(directory.clone());
     *test_data_directory().lock().unwrap() = Some(directory.clone());
 
     let settings = AppSettings {
@@ -45,42 +45,42 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         show_text_length: false,
         background_opacity: DEFAULT_BACKGROUND_OPACITY,
     };
-    save_settings(&settings).unwrap();
+    save_settings(&storage, &settings).unwrap();
 
     let mut text_entry = ClipboardEntry::new(10, ClipboardContent::Text("hello".to_string()));
     text_entry.favorite = true;
-    save_entry(&text_entry).unwrap();
+    save_entry(&storage, &text_entry).unwrap();
 
     let mut image_entry = ClipboardEntry::new(
         11,
         ClipboardContent::Image(ClipboardImage::from_rgba(1, 1, vec![10, 20, 30, 255])),
     );
     image_entry.pinned = true;
-    save_entry(&image_entry).unwrap();
+    save_entry(&storage, &image_entry).unwrap();
 
     let file_entry = ClipboardEntry::new(
         12,
         ClipboardContent::Files(vec!["C:\\tmp\\a.txt".to_string(), "D:\\b.png".to_string()]),
     );
-    save_entry(&file_entry).unwrap();
+    save_entry(&storage, &file_entry).unwrap();
 
-    let loaded_settings = load_settings().unwrap();
-    let loaded_history = load_history(10).unwrap();
-    let database_bytes = fs::read(database_path().unwrap()).unwrap();
+    let loaded_settings = load_settings(&storage).unwrap();
+    let loaded_history = load_history(&storage, 10).unwrap();
+    let database_bytes = fs::read(storage.database_path().unwrap()).unwrap();
     assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
 
-    let schema_version = with_connection(|connection| schema_version(connection)).unwrap();
+    let schema_version = storage.with_connection(|connection| schema_version(connection)).unwrap();
     let has_image_rgba =
-        with_connection(|connection| column_exists(connection, "clipboard_entries", "image_rgba"))
+        storage.with_connection(|connection| column_exists(connection, "clipboard_entries", "image_rgba"))
             .unwrap();
     let has_image_blob =
-        with_connection(|connection| column_exists(connection, "clipboard_entries", "image_blob"))
+        storage.with_connection(|connection| column_exists(connection, "clipboard_entries", "image_blob"))
             .unwrap();
-    let has_image_format = with_connection(|connection| {
+    let has_image_format = storage.with_connection(|connection| {
         column_exists(connection, "clipboard_entries", "image_format")
     })
     .unwrap();
-    let has_content_hash = with_connection(|connection| {
+    let has_content_hash = storage.with_connection(|connection| {
         column_exists(connection, "clipboard_entries", "content_hash")
     })
     .unwrap();
@@ -105,10 +105,10 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         ClipboardContent::Image(image) if !image.has_bytes()
     ));
     assert!(matches!(
-        load_image(11).unwrap(),
+        load_image(&storage, 11).unwrap(),
         Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
     ));
-    let stored_image = with_connection(|connection| {
+    let stored_image = storage.with_connection(|connection| {
         connection
             .query_row(
                 "SELECT image_blob FROM clipboard_entries WHERE id = 11",
@@ -132,18 +132,18 @@ fn storage_round_trips_settings_and_clipboard_entries() {
 
     let mut metadata_only_image = Rc::unwrap_or_clone(loaded_history.entry(11).unwrap());
     metadata_only_image.favorite = true;
-    save_entry(&metadata_only_image).unwrap();
+    save_entry(&storage, &metadata_only_image).unwrap();
     assert!(matches!(
-        load_image(11).unwrap(),
+        load_image(&storage, 11).unwrap(),
         Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
     ));
 
-    save_entry(&ClipboardEntry::new(
+    save_entry(&storage, &ClipboardEntry::new(
         13,
         ClipboardContent::Text("hello".to_string()),
     ))
     .unwrap();
-    let hello_count = with_connection(|connection| {
+    let hello_count = storage.with_connection(|connection| {
         connection
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_entries WHERE text_content = 'hello'",
@@ -155,15 +155,14 @@ fn storage_round_trips_settings_and_clipboard_entries() {
     .unwrap();
     assert_eq!(hello_count, 1);
 
-    delete_entries(&[10]).unwrap();
-    assert!(load_history(10).unwrap().entry(10).is_none());
-    save_entry(&text_entry).unwrap();
-    assert!(load_history(10).unwrap().entry(10).is_none());
+    delete_entries(&storage, &[10]).unwrap();
+    assert!(load_history(&storage, 10).unwrap().entry(10).is_none());
+    save_entry(&storage, &text_entry).unwrap();
+    assert!(load_history(&storage, 10).unwrap().entry(10).is_none());
 
-    delete_entries(&[11]).unwrap();
+    delete_entries(&storage, &[11]).unwrap();
     assert!(!image_cache::exists(Some(preview_url.as_str())));
 
-    reset_storage_for_tests();
     *test_data_directory().lock().unwrap() = None;
     let _ = fs::remove_dir_all(directory);
 }
@@ -174,28 +173,27 @@ fn age_cleanup_preserves_favorites_when_enabled() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let directory = unique_test_directory();
-    reset_storage_for_tests();
+    let storage = StorageHandle::new_for_test(directory.clone());
     *test_data_directory().lock().unwrap() = Some(directory.clone());
 
     let captured_at = Local::now() - chrono::Duration::days(31);
     let mut regular = ClipboardEntry::new(20, ClipboardContent::Text("regular".to_string()));
     regular.captured_at = captured_at;
-    save_entry(&regular).unwrap();
+    save_entry(&storage, &regular).unwrap();
 
     let mut favorite = ClipboardEntry::new(21, ClipboardContent::Text("favorite".to_string()));
     favorite.captured_at = captured_at;
     favorite.favorite = true;
-    save_entry(&favorite).unwrap();
+    save_entry(&storage, &favorite).unwrap();
 
     let removed =
-        delete_entries_older_than(Local::now() - chrono::Duration::days(30), true).unwrap();
-    let history = load_history(10).unwrap();
+        delete_entries_older_than(&storage, Local::now() - chrono::Duration::days(30), true).unwrap();
+    let history = load_history(&storage, 10).unwrap();
 
     assert_eq!(removed, 1);
     assert!(history.entry(20).is_none());
     assert!(history.entry(21).is_some());
 
-    reset_storage_for_tests();
     *test_data_directory().lock().unwrap() = None;
     let _ = fs::remove_dir_all(directory);
 }

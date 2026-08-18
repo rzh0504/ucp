@@ -1,9 +1,9 @@
-use super::{StorageError, with_connection};
+use super::{StorageError, StorageHandle};
 use crate::model::{AppLanguage, AppSettings, AppTheme};
 use rusqlite::params;
 
-pub fn load_settings() -> Result<AppSettings, StorageError> {
-    with_connection(|connection| {
+pub fn load_settings(storage: &StorageHandle) -> Result<AppSettings, StorageError> {
+    storage.with_connection(|connection| {
         let mut settings = AppSettings::default();
         let mut statement = connection.prepare("SELECT key, value FROM app_settings")?;
 
@@ -50,8 +50,8 @@ pub fn load_settings() -> Result<AppSettings, StorageError> {
     })
 }
 
-pub fn save_settings(settings: &AppSettings) -> Result<(), StorageError> {
-    with_connection(|connection| {
+pub fn save_settings(storage: &StorageHandle, settings: &AppSettings) -> Result<(), StorageError> {
+    storage.with_connection(|connection| {
         let transaction = connection.transaction()?;
         let values = [
             ("history_limit", settings.history_limit.to_string()),

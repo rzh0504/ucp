@@ -127,7 +127,7 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{reset_storage_for_tests, storage_test_lock, test_data_directory};
+    use crate::storage::{storage_test_lock, test_data_directory, StorageHandle};
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -151,7 +151,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let directory = unique_test_directory();
-        reset_storage_for_tests();
+        let _storage = StorageHandle::new_for_test(directory.clone());
         *test_data_directory().lock().unwrap() = Some(directory.clone());
 
         let cache_path = preview_path(7).unwrap();
@@ -171,7 +171,6 @@ mod tests {
         assert!(outside_path.exists());
         assert!(!cache_path.exists());
 
-        reset_storage_for_tests();
         *test_data_directory().lock().unwrap() = None;
         let _ = fs::remove_dir_all(directory);
     }

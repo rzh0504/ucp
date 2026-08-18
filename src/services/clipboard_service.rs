@@ -22,6 +22,7 @@ pub enum ClipboardError {
 impl ClipboardService {
     /// Copies already extracted content without requiring the UI history entity.
     pub fn copy_content(
+        storage: &crate::storage::StorageHandle,
         entry_id: u64,
         mut content: ClipboardContent,
     ) -> Result<(), ClipboardError> {
@@ -29,7 +30,7 @@ impl ClipboardService {
         if let ClipboardContent::Image(image) = &content
             && !image.has_bytes()
         {
-            if let Some(loaded_image) = storage::load_image(entry_id)
+            if let Some(loaded_image) = storage::load_image(storage, entry_id)
                 .map_err(|e| ClipboardError::ImageLoadFailed(e.to_string()))?
             {
                 content = ClipboardContent::Image(loaded_image);
@@ -54,8 +55,11 @@ impl ClipboardService {
 
     /// 保存条目到存储
     #[allow(dead_code)]
-    pub fn save_entry(entry: &ClipboardEntry) -> Result<(), ClipboardError> {
-        storage::save_entry(entry)
+    pub fn save_entry(
+        storage: &crate::storage::StorageHandle,
+        entry: &ClipboardEntry,
+    ) -> Result<(), ClipboardError> {
+        storage::save_entry(storage, entry)
             .map(|_| ())
             .map_err(|e| ClipboardError::StorageError(e.to_string()))
     }
@@ -122,6 +126,7 @@ impl ClipboardService {
 
     /// 删除条目（返回实际删除的 ID）
     pub fn delete_entries(
+        storage: &crate::storage::StorageHandle,
         history: &mut ClipboardHistory,
         ids: &[u64],
         preserve_favorites: bool,
@@ -129,7 +134,7 @@ impl ClipboardService {
         let deletable_ids = history.deletable_ids(ids, preserve_favorites);
 
         if !deletable_ids.is_empty() {
-            storage::delete_entries(&deletable_ids)
+            storage::delete_entries(storage, &deletable_ids)
                 .map_err(|e| ClipboardError::StorageError(e.to_string()))?;
         }
 
@@ -143,6 +148,7 @@ impl ClipboardService {
     /// 切换收藏状态
     #[allow(dead_code)]
     pub fn toggle_favorite(
+        storage: &crate::storage::StorageHandle,
         history: &mut ClipboardHistory,
         id: u64,
     ) -> Result<ClipboardEntry, ClipboardError> {
@@ -150,24 +156,25 @@ impl ClipboardService {
             .toggle_favorite(id)
             .ok_or(ClipboardError::EntryNotFound)?;
 
-        Self::save_entry(&entry)?;
+        Self::save_entry(storage, &entry)?;
         Ok(entry)
     }
 
     /// 清空历史记录
     #[allow(dead_code)]
     pub fn clear_history(
+        storage: &crate::storage::StorageHandle,
         history: &mut ClipboardHistory,
         preserve_favorites: bool,
     ) -> Result<usize, ClipboardError> {
         let count = if preserve_favorites {
             let ids = history.deletable_ids_for_filter(ClipboardFilter::All, preserve_favorites);
             let len = ids.len();
-            Self::delete_entries(history, &ids, preserve_favorites)?;
+            Self::delete_entries(storage, history, &ids, preserve_favorites)?;
             len
         } else {
             let count = history.counts().total;
-            storage::delete_entries_older_than(Local::now(), false)
+            storage::delete_entries_older_than(storage, Local::now(), false)
                 .map_err(|e| ClipboardError::StorageError(e.to_string()))?;
             history.clear();
             count

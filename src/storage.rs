@@ -17,7 +17,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
 #[cfg(test)]
 use std::sync::OnceLock;
@@ -28,9 +28,14 @@ const SCHEMA_VERSION: i32 = 3;
 const BUSY_TIMEOUT_MS: u64 = 3_000;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const IMAGE_FORMAT_PNG: &str = "png";
-static DATABASE_CONNECTION: Mutex<Option<Connection>> = Mutex::new(None);
-static DELETED_ENTRY_IDS: LazyLock<Mutex<HashSet<u64>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Handle to the storage layer, encapsulating database connection and pending deletes.
+/// This replaces the global mutable state pattern with a per-instance handle.
+#[derive(Clone)]
+pub struct StorageHandle {
+    connection: std::sync::Arc<Mutex<Connection>>,
+    pending_deletes: std::sync::Arc<Mutex<HashSet<u64>>>,
+}
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -60,8 +65,71 @@ impl From<rusqlite::Error> for StorageError {
     }
 }
 
-pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
-    with_connection(|connection| {
+impl StorageHandle {
+    /// Creates a new storage handle with an open database connection.
+    pub fn new() -> Result<Self, StorageError> {
+        let connection = open_connection()?;
+        Ok(Self {
+            connection: std::sync::Arc::new(Mutex::new(connection)),
+            pending_deletes: std::sync::Arc::new(Mutex::new(HashSet::new())),
+        })
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(directory: PathBuf) -> Self {
+        *test_data_directory().lock().unwrap() = Some(directory.clone());
+        let connection = open_connection().expect("Failed to open test database");
+        Self {
+            connection: std::sync::Arc::new(Mutex::new(connection)),
+            pending_deletes: std::sync::Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    /// Marks entries as pending deletion to prevent race conditions during save.
+    pub fn suppress_entry_saves(&self, ids: &[u64]) {
+        let mut pending = self.pending_deletes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        pending.extend(ids.iter().copied());
+    }
+
+    /// Removes entries from pending deletion list.
+    pub fn allow_entry_saves(&self, ids: &[u64]) {
+        let mut pending = self.pending_deletes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        for id in ids {
+            pending.remove(id);
+        }
+    }
+
+    /// Checks if an entry is marked for deletion.
+    fn is_pending_delete(&self, id: u64) -> bool {
+        self.pending_deletes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&id)
+    }
+
+    /// Executes an operation with the database connection.
+    fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        let mut connection = self.connection
+            .lock()
+            .map_err(|_| StorageError::Database("数据库连接锁已损坏".to_string()))?;
+        operation(&mut connection)
+    }
+
+    #[cfg(test)]
+    pub fn database_path(&self) -> Result<PathBuf, StorageError> {
+        database_path()
+    }
+}
+
+pub fn load_history(storage: &StorageHandle, capacity: usize) -> Result<ClipboardHistory, StorageError> {
+    storage.with_connection(|connection| {
         let mut statement = connection.prepare(
             "SELECT e.id, e.kind, e.text_content, e.image_width, e.image_height, e.image_preview_url, \
                     e.captured_at_millis, e.pinned, e.favorite, \
@@ -116,8 +184,8 @@ pub fn load_history(capacity: usize) -> Result<ClipboardHistory, StorageError> {
     })
 }
 
-pub fn load_image(entry_id: u64) -> Result<Option<ClipboardImage>, StorageError> {
-    with_connection(|connection| {
+pub fn load_image(storage: &StorageHandle, entry_id: u64) -> Result<Option<ClipboardImage>, StorageError> {
+    storage.with_connection(|connection| {
         connection
             .query_row(
                 "SELECT image_width, image_height, image_blob, image_preview_url \
@@ -153,12 +221,8 @@ pub fn image_preview_path(preview_url: Option<&str>) -> Option<PathBuf> {
 
 /// Saves the entry and returns the cached `file://` preview URL when an image
 /// preview was written to the on-disk cache.
-pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError> {
-    if DELETED_ENTRY_IDS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .contains(&entry.id)
-    {
+pub fn save_entry(storage: &StorageHandle, entry: &ClipboardEntry) -> Result<Option<String>, StorageError> {
+    if storage.is_pending_delete(entry.id) {
         return Ok(None);
     }
 
@@ -183,12 +247,8 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError
     }
     let content_hash = content_hash_for_entry(entry, image_blob.as_deref());
 
-    with_connection(|connection| {
-        if DELETED_ENTRY_IDS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .contains(&entry.id)
-        {
+    storage.with_connection(|connection| {
+        if storage.is_pending_delete(entry.id) {
             return Ok(None);
         }
 
@@ -289,29 +349,13 @@ pub fn save_entry(entry: &ClipboardEntry) -> Result<Option<String>, StorageError
     })
 }
 
-pub fn suppress_entry_saves(ids: &[u64]) {
-    DELETED_ENTRY_IDS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .extend(ids.iter().copied());
-}
-
-pub fn allow_entry_saves(ids: &[u64]) {
-    let mut deleted_ids = DELETED_ENTRY_IDS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    for id in ids {
-        deleted_ids.remove(id);
-    }
-}
-
-pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
+pub fn delete_entries(storage: &StorageHandle, ids: &[u64]) -> Result<(), StorageError> {
     if ids.is_empty() {
         return Ok(());
     }
 
-    suppress_entry_saves(ids);
-    with_connection(|connection| {
+    storage.suppress_entry_saves(ids);
+    storage.with_connection(|connection| {
         let transaction = connection.transaction()?;
         let preview_urls = image_preview_urls_for_ids(&transaction, ids)?;
 
@@ -328,8 +372,8 @@ pub fn delete_entries(ids: &[u64]) -> Result<(), StorageError> {
     })
 }
 
-pub fn clear_history() -> Result<(), StorageError> {
-    with_connection(|connection| {
+pub fn clear_history(storage: &StorageHandle) -> Result<(), StorageError> {
+    storage.with_connection(|connection| {
         let preview_urls = all_image_preview_urls(connection)?;
         connection.execute("DELETE FROM clipboard_entries", [])?;
         image_cache::remove_previews(preview_urls);
@@ -338,10 +382,11 @@ pub fn clear_history() -> Result<(), StorageError> {
 }
 
 pub fn delete_entries_older_than(
+    storage: &StorageHandle,
     cutoff: DateTime<Local>,
     preserve_favorites: bool,
 ) -> Result<usize, StorageError> {
-    with_connection(|connection| {
+    storage.with_connection(|connection| {
         let preview_urls = image_preview_urls_older_than(connection, cutoff, preserve_favorites)?;
         let removed = connection.execute(
             "DELETE FROM clipboard_entries \
@@ -353,8 +398,8 @@ pub fn delete_entries_older_than(
     })
 }
 
-pub fn compact_database() -> Result<(), StorageError> {
-    with_connection(|connection| {
+pub fn compact_database(storage: &StorageHandle) -> Result<(), StorageError> {
+    storage.with_connection(|connection| {
         schema::ensure_current_schema_columns(connection)?;
         schema::compress_stored_images(connection)?;
         schema::materialize_cached_image_previews(connection)?;
@@ -452,24 +497,6 @@ where
         .query_map(params, |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
-}
-
-fn with_connection<T>(
-    operation: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
-) -> Result<T, StorageError> {
-    let mut connection = DATABASE_CONNECTION
-        .lock()
-        .map_err(|_| StorageError::Database("数据库连接锁已损坏".to_string()))?;
-
-    if connection.is_none() {
-        *connection = Some(open_connection()?);
-    }
-
-    operation(
-        connection
-            .as_mut()
-            .ok_or_else(|| StorageError::Database("数据库连接未初始化".to_string()))?,
-    )
 }
 
 fn open_connection() -> Result<Connection, StorageError> {
@@ -592,15 +619,6 @@ fn data_directory() -> PathBuf {
 fn test_data_directory() -> &'static Mutex<Option<PathBuf>> {
     static TEST_DATA_DIRECTORY: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
     TEST_DATA_DIRECTORY.get_or_init(|| Mutex::new(None))
-}
-
-#[cfg(test)]
-fn reset_storage_for_tests() {
-    *DATABASE_CONNECTION.lock().unwrap() = None;
-    DELETED_ENTRY_IDS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .clear();
 }
 
 #[cfg(test)]

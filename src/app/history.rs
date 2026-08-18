@@ -439,9 +439,11 @@ impl ClipboardApp {
         let language = self.settings.language;
         self.status = "复制中...".into();
         cx.notify();
+        let storage = self.storage.clone();
+        let storage_for_promote = storage.clone();
         cx.spawn(async move |entity, cx| {
             let result = cx
-                .background_spawn(async move { ClipboardService::copy_content(id, content) })
+                .background_spawn(async move { ClipboardService::copy_content(&storage, id, content) })
                 .await;
             let copied = result.is_ok();
             entity
@@ -449,8 +451,9 @@ impl ClipboardApp {
                     match result {
                         Ok(()) => {
                             if should_promote && let Some(updated) = this.history.promote(id) {
+                                let storage = storage_for_promote.clone();
                                 cx.background_spawn(async move {
-                                    let _ = storage::save_entry(&updated);
+                                    let _ = storage::save_entry(&storage, &updated);
                                 })
                                 .detach();
                             }
@@ -494,8 +497,9 @@ impl ClipboardApp {
 
     fn toggle_favorite(&mut self, id: u64, cx: &mut Context<Self>) {
         if let Some(updated) = self.history.toggle_favorite(id) {
+            let storage = self.storage.clone();
             cx.background_spawn(async move {
-                let _ = storage::save_entry(&updated);
+                let _ = storage::save_entry(&storage, &updated);
             })
             .detach();
         }
@@ -507,12 +511,13 @@ impl ClipboardApp {
             return;
         }
 
-        storage::suppress_entry_saves(&[id]);
+        self.storage.suppress_entry_saves(&[id]);
         self.status = "删除中...".into();
         cx.notify();
+        let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
             let result = cx
-                .background_spawn(async move { storage::delete_entries(&[id]) })
+                .background_spawn(async move { storage::delete_entries(&storage, &[id]) })
                 .await;
             entity
                 .update(cx, |this, cx| {
@@ -528,7 +533,7 @@ impl ClipboardApp {
                             this.status = "已删除".into();
                         }
                         Err(error) => {
-                            storage::allow_entry_saves(&[id]);
+                            this.storage.allow_entry_saves(&[id]);
                             this.status = format!("删除失败：{error}");
                         }
                     }
@@ -542,17 +547,18 @@ impl ClipboardApp {
     pub(super) fn clear_current_filter(&mut self, cx: &mut Context<Self>) {
         let filter = self.filter;
         let ids = self.history.deletable_ids_for_filter(filter, false);
-        storage::suppress_entry_saves(&ids);
+        self.storage.suppress_entry_saves(&ids);
         self.status = "清空中...".into();
+        let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
             let result = cx
                 .background_spawn({
                     let ids = ids.clone();
                     async move {
                         if filter == ClipboardFilter::All {
-                            storage::clear_history()
+                            storage::clear_history(&storage)
                         } else {
-                            storage::delete_entries(&ids)
+                            storage::delete_entries(&storage, &ids)
                         }
                     }
                 })
@@ -560,7 +566,7 @@ impl ClipboardApp {
             entity
                 .update(cx, |this, cx| {
                     if let Err(error) = result {
-                        storage::allow_entry_saves(&ids);
+                        this.storage.allow_entry_saves(&ids);
                         this.status = format!("清空失败：{error}");
                         cx.notify();
                         return;

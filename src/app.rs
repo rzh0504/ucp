@@ -143,6 +143,7 @@ pub fn run(visible: bool) {
 }
 
 struct ClipboardApp {
+    storage: storage::StorageHandle,
     settings: AppSettings,
     history: ClipboardHistory,
     query: String,
@@ -164,7 +165,9 @@ struct ClipboardApp {
 
 impl ClipboardApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let settings = storage::load_settings().unwrap_or_default();
+        let storage = storage::StorageHandle::new()
+            .expect("Failed to initialize storage");
+        let settings = storage::load_settings(&storage).unwrap_or_default();
         let theme_mode = if matches!(settings.theme, crate::model::AppTheme::Dark) {
             ThemeMode::Dark
         } else {
@@ -172,7 +175,7 @@ impl ClipboardApp {
         };
         Theme::change(theme_mode, Some(window), cx);
         Self::apply_palette(cx);
-        let history = storage::load_history(settings.history_limit)
+        let history = storage::load_history(&storage, settings.history_limit)
             .unwrap_or_else(|_| ClipboardHistory::new(settings.history_limit));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史..."));
         let initial_focus = cx.focus_handle();
@@ -193,6 +196,7 @@ impl ClipboardApp {
         })
         .ok();
         let mut app = Self {
+            storage,
             settings,
             history,
             query: String::new(),
@@ -306,18 +310,19 @@ impl ClipboardApp {
         let entry = result.entry;
         let result_id = entry.as_ref().map(|entry| entry.id).unwrap_or_default();
         let removed_ids = result.removed_ids;
+        let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
             let saved_preview = cx
                 .background_spawn(async move {
                     let saved_preview = entry
                         .as_ref()
-                        .map(storage::save_entry)
+                        .map(|e| storage::save_entry(&storage, e))
                         .transpose()
                         .ok()
                         .flatten()
                         .flatten();
                     if !removed_ids.is_empty() {
-                        let _ = storage::delete_entries(&removed_ids);
+                        let _ = storage::delete_entries(&storage, &removed_ids);
                     }
                     saved_preview
                 })
@@ -365,7 +370,7 @@ impl ClipboardApp {
 
     fn save_settings(&mut self) {
         self.settings = self.settings.clone().normalized();
-        if let Err(error) = storage::save_settings(&self.settings) {
+        if let Err(error) = storage::save_settings(&self.storage, &self.settings) {
             self.status = format!("设置保存失败：{error}");
         } else {
             self.status = "设置已保存".into();
