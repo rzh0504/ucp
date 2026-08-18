@@ -20,6 +20,8 @@ use std::borrow::Cow;
 
 mod history;
 mod settings;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AppPage {
