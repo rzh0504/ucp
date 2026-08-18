@@ -79,11 +79,15 @@ impl ClipboardApp {
                             let selected = this.selected_entry_id == Some(entry.id);
                             let image_expanded = this.expanded_image_id == Some(entry.id);
                             let text_expanded = this.expanded_text_id == Some(entry.id);
+                            let navigated = this.navigation_entry_id == Some(entry.id)
+                                || image_expanded
+                                || text_expanded;
                             Self::render_entry(
                                 entry,
                                 index + 1,
                                 language,
                                 selected,
+                                navigated,
                                 image_expanded,
                                 text_expanded,
                                 (
@@ -167,6 +171,7 @@ impl ClipboardApp {
         position: usize,
         language: AppLanguage,
         selected: bool,
+        navigated: bool,
         image_expanded: bool,
         text_expanded: bool,
         options: (bool, bool, bool, bool),
@@ -349,7 +354,10 @@ impl ClipboardApp {
                 this.bg(cx.theme().blue.opacity(0.12))
                     .border_color(cx.theme().blue.opacity(0.78))
             })
-            .when(!selected, |this| {
+            .when(navigated && !selected, |this| {
+                this.border_color(cx.theme().blue.opacity(0.78))
+            })
+            .when(!selected && !navigated, |this| {
                 this.child(
                     div()
                         .absolute()
@@ -363,9 +371,11 @@ impl ClipboardApp {
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 if (double_click_copy || quick_paste) && event.click_count() == 2 {
                     this.selected_entry_id = None;
+                    this.navigation_entry_id = None;
                     this.copy_entry(id, quick_paste, Some(window.window_handle()), cx);
                     return;
                 }
+                this.navigation_entry_id = None;
                 this.selected_entry_id = if this.selected_entry_id == Some(id) {
                     None
                 } else {
@@ -406,7 +416,7 @@ impl ClipboardApp {
             .context_menu(move |menu, _, cx| {
                 if let Some(app) = app.upgrade() {
                     app.update(cx, |this, cx| {
-                        this.selected_entry_id = Some(id);
+                        this.navigation_entry_id = Some(id);
                         cx.notify();
                     });
                 }
@@ -627,6 +637,9 @@ impl ClipboardApp {
                             if this.selected_entry_id == Some(id) {
                                 this.selected_entry_id = None;
                             }
+                            if this.navigation_entry_id == Some(id) {
+                                this.navigation_entry_id = None;
+                            }
                             if this.expanded_image_id == Some(id) {
                                 this.expanded_image_id = None;
                             }
@@ -680,6 +693,7 @@ impl ClipboardApp {
                         }
                     }
                     this.selected_entry_id = None;
+                    this.navigation_entry_id = None;
                     this.expanded_image_id = None;
                     this.status = match filter {
                         ClipboardFilter::All => "全部历史已清空",
