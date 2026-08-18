@@ -560,10 +560,14 @@ impl ClipboardApp {
     fn toggle_text_expansion(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.expanded_text_id == Some(id) {
             self.expanded_text_id = None;
+            if let Some(offset) = self.expanded_text_scroll_offset.take() {
+                self.history_scroll.set_offset(offset);
+            }
             cx.notify();
             return;
         }
 
+        self.expanded_text_scroll_offset = Some(self.history_scroll.offset());
         self.expanded_text_id = Some(id);
         cx.notify();
     }
