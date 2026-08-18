@@ -4,22 +4,20 @@ mod unix;
 use crate::model::{ClipboardContent, ClipboardImage};
 use arboard::{Clipboard, Error as ArboardError, ImageData};
 use std::borrow::Cow;
-use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ClipboardError {
+    #[error("{0}")]
     Unavailable(String),
+    #[error("clipboard operation failed")]
+    Arboard(#[source] ArboardError),
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[error("command {command} failed: {message}")]
+    Command { command: String, message: String },
+    #[cfg(windows)]
+    #[error("Windows clipboard operation failed: {0}")]
+    Windows(clipboard_win::ErrorCode),
 }
-
-impl fmt::Display for ClipboardError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unavailable(message) => formatter.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for ClipboardError {}
 
 pub fn read_text() -> Result<Option<String>, ClipboardError> {
     let mut clipboard = Clipboard::new().map_err(map_error)?;
@@ -403,19 +401,7 @@ pub fn listen_for_updates(
 }
 
 fn map_error(error: ArboardError) -> ClipboardError {
-    let message = match error {
-        ArboardError::ContentNotAvailable => "剪贴板中没有可读取的内容".to_string(),
-        ArboardError::ClipboardNotSupported => "当前系统剪贴板不可用".to_string(),
-        ArboardError::ClipboardOccupied => "剪贴板正被其他程序占用，请稍后重试".to_string(),
-        ArboardError::ConversionFailure => "剪贴板内容格式暂不支持".to_string(),
-        ArboardError::Unknown { description } => match description.as_str() {
-            "failed to read clipboard image data" => "剪贴板图片数据暂不可读取".to_string(),
-            _ => format!("剪贴板操作失败：{description}"),
-        },
-        _ => "剪贴板操作失败".to_string(),
-    };
-
-    ClipboardError::Unavailable(message)
+    ClipboardError::Arboard(error)
 }
 
 fn image_data_is_unreadable(error: &ArboardError) -> bool {
@@ -490,7 +476,10 @@ fn listen_with_wl_paste(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|error| ClipboardError::Unavailable(error.to_string()))?;
+        .map_err(|error| ClipboardError::Command {
+            command: "wl-paste".to_string(),
+            message: error.to_string(),
+        })?;
 
     let stdout = child
         .stdout
@@ -561,5 +550,5 @@ fn listen_with_clipnotify(
 
 #[cfg(windows)]
 fn map_clipboard_win_error(error: clipboard_win::ErrorCode) -> ClipboardError {
-    ClipboardError::Unavailable(error.to_string())
+    ClipboardError::Windows(error)
 }

@@ -11,6 +11,7 @@ use gpui_component::{
     dialog::DialogButtonProps,
     h_flex,
     input::{InputEvent, InputState},
+    notification::Notification,
     status_bar::StatusBar,
     v_flex,
 };
@@ -162,6 +163,7 @@ struct ClipboardApp {
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
     search: Entity<InputState>,
     initial_focus: FocusHandle,
+    window_handle: AnyWindowHandle,
     history_scroll: gpui_component::VirtualListScrollHandle,
     _clipboard_listener: Option<platform::clipboard::ClipboardUpdateListener>,
     _subscriptions: Vec<Subscription>,
@@ -182,6 +184,7 @@ impl ClipboardApp {
             .unwrap_or_else(|_| ClipboardHistory::new(settings.history_limit));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史..."));
         let initial_focus = cx.focus_handle();
+        let window_handle = window.window_handle();
         initial_focus.focus(window, cx);
         let subscriptions = vec![cx.subscribe_in(&search, window, {
             let search = search.clone();
@@ -218,6 +221,7 @@ impl ClipboardApp {
             visible_entries: Vec::new(),
             search,
             initial_focus,
+            window_handle,
             history_scroll: gpui_component::VirtualListScrollHandle::new(),
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
@@ -366,7 +370,11 @@ impl ClipboardApp {
                         Ok(UpdateCheck::UpToDate { latest_version }) => {
                             UpdateCheckState::UpToDate(latest_version)
                         }
-                        Err(error) => UpdateCheckState::Failed(error),
+                        Err(error) => {
+                            let message = error.to_string();
+                            this.show_error("检查更新失败", message.clone(), cx);
+                            UpdateCheckState::Failed(message)
+                        }
                     };
                     cx.notify();
                 })
@@ -375,13 +383,29 @@ impl ClipboardApp {
         .detach();
     }
 
-    fn save_settings(&mut self) {
+    fn save_settings(&mut self, cx: &mut Context<Self>) {
         self.settings = self.settings.clone().normalized();
         if let Err(error) = storage::save_settings(&self.storage, &self.settings) {
-            self.status = format!("设置保存失败：{error}");
+            let message = error.to_string();
+            self.status = message.clone();
+            self.show_error("设置保存失败", message, cx);
         } else {
             self.status = "设置已保存".into();
         }
+    }
+
+    fn show_error(
+        &self,
+        title: impl Into<SharedString>,
+        message: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        let notification = Notification::error(message).title(title);
+        self.window_handle
+            .update(cx, move |_, window, cx| {
+                window.push_notification(notification, cx);
+            })
+            .ok();
     }
 
     #[cfg(windows)]
@@ -431,6 +455,7 @@ impl Render for ClipboardApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page;
         let dialog_layer = Root::render_dialog_layer(window, cx);
+        let notification_layer = Root::render_notification_layer(window, cx);
         v_flex()
             .track_focus(&self.initial_focus)
             .on_key_down(cx.listener(|this, event, window, cx| {
@@ -580,5 +605,6 @@ impl Render for ClipboardApp {
                     ),
             )
             .children(dialog_layer)
+            .children(notification_layer)
     }
 }

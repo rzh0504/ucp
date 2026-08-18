@@ -14,7 +14,7 @@ pub struct TrayIcon {
 }
 
 #[cfg(windows)]
-pub fn create() -> Result<TrayIcon, String> {
+pub fn create() -> Result<TrayIcon, TrayError> {
     use tray_icon::{
         TrayIconBuilder, TrayIconEvent,
         menu::{Menu, MenuEvent, MenuItem},
@@ -22,7 +22,8 @@ pub fn create() -> Result<TrayIcon, String> {
 
     let show = MenuItem::with_id("show", "显示主窗口", true, None);
     let quit = MenuItem::with_id("quit", "退出", true, None);
-    let menu = Menu::with_items(&[&show, &quit]).map_err(|error| error.to_string())?;
+    let menu =
+        Menu::with_items(&[&show, &quit]).map_err(|error| TrayError::Menu(error.to_string()))?;
     let icon = load_icon()?;
 
     MenuEvent::set_event_handler(Some(|event: MenuEvent| match event.id.0.as_str() {
@@ -49,7 +50,7 @@ pub fn create() -> Result<TrayIcon, String> {
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
         .build()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| TrayError::Icon(error.to_string()))?;
 
     Ok(TrayIcon { _icon: icon })
 }
@@ -75,10 +76,13 @@ fn take(action: u8) -> bool {
 }
 
 #[cfg(windows)]
-fn load_icon() -> Result<tray_icon::Icon, String> {
+fn load_icon() -> Result<tray_icon::Icon, TrayError> {
     let image = image::load_from_memory(include_bytes!("../../assets/icons/Ucp.png"))
-        .map_err(|error| error.to_string())?
+        .map_err(TrayError::Image)?
         .into_rgba8();
     let (width, height) = image.dimensions();
-    tray_icon::Icon::from_rgba(image.into_raw(), width, height).map_err(|error| error.to_string())
+    tray_icon::Icon::from_rgba(image.into_raw(), width, height)
+        .map_err(|error| TrayError::Icon(error.to_string()))
 }
+#[cfg(windows)]
+use crate::error::TrayError;

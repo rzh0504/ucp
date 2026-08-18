@@ -8,9 +8,10 @@ use rusqlite::{Connection, params};
 pub(super) fn migrate(connection: &Connection) -> Result<(), StorageError> {
     let user_version = schema_version(connection)?;
     if user_version > SCHEMA_VERSION {
-        return Err(StorageError::Database(format!(
-            "数据库版本 {user_version} 高于当前程序支持的版本 {SCHEMA_VERSION}"
-        )));
+        return Err(StorageError::UnsupportedSchema {
+            found: user_version,
+            supported: SCHEMA_VERSION,
+        });
     }
 
     connection.execute_batch(

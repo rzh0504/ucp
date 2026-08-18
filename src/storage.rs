@@ -14,10 +14,10 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use thiserror::Error;
 
 #[cfg(test)]
 use std::sync::OnceLock;
@@ -37,32 +37,16 @@ pub struct StorageHandle {
     pending_deletes: std::sync::Arc<Mutex<HashSet<u64>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum StorageError {
-    Io(String),
-    Database(String),
-}
-
-impl fmt::Display for StorageError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(message) | Self::Database(message) => formatter.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for StorageError {}
-
-impl From<std::io::Error> for StorageError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error.to_string())
-    }
-}
-
-impl From<rusqlite::Error> for StorageError {
-    fn from(error: rusqlite::Error) -> Self {
-        Self::Database(error.to_string())
-    }
+    #[error("storage I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("storage database error: {0}")]
+    Database(#[from] rusqlite::Error),
+    #[error("database connection lock is poisoned")]
+    ConnectionLock,
+    #[error("database version {found} is newer than supported version {supported}")]
+    UnsupportedSchema { found: i32, supported: i32 },
 }
 
 impl StorageHandle {
@@ -121,7 +105,7 @@ impl StorageHandle {
         let mut connection = self
             .connection
             .lock()
-            .map_err(|_| StorageError::Database("数据库连接锁已损坏".to_string()))?;
+            .map_err(|_| StorageError::ConnectionLock)?;
         operation(&mut connection)
     }
 

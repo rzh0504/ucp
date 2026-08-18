@@ -57,7 +57,7 @@ impl ClipboardApp {
                         app.update(cx, |this, cx| {
                             this.settings.theme = AppTheme::from_key(value.as_ref());
                             Self::apply_theme(this.settings.theme, cx);
-                            this.save_settings();
+                            this.save_settings(cx);
                             cx.notify();
                         });
                     }
@@ -102,9 +102,11 @@ impl ClipboardApp {
                         app.update(cx, |this, cx| {
                             this.settings.launch_at_startup = checked;
                             if let Err(error) = platform::startup::set_enabled(checked) {
-                                this.status = error;
+                                let message = error.to_string();
+                                this.status = message.clone();
+                                this.show_error("开机启动设置失败", message, cx);
                             } else {
-                                this.save_settings();
+                                this.save_settings(cx);
                             }
                             cx.notify();
                         });
@@ -125,7 +127,7 @@ impl ClipboardApp {
                     move |checked, cx| {
                         app.update(cx, |this, cx| {
                             this.settings.promote_copied_entries = checked;
-                            this.save_settings();
+                            this.save_settings(cx);
                             cx.notify();
                         });
                     }
@@ -145,7 +147,7 @@ impl ClipboardApp {
                     move |checked, cx| {
                         app.update(cx, |this, cx| {
                             this.settings.show_copy_time = checked;
-                            this.save_settings();
+                            this.save_settings(cx);
                             cx.notify();
                         });
                     }
@@ -165,7 +167,7 @@ impl ClipboardApp {
                     move |checked, cx| {
                         app.update(cx, |this, cx| {
                             this.settings.show_text_length = checked;
-                            this.save_settings();
+                            this.save_settings(cx);
                             cx.notify();
                         });
                     }
@@ -185,7 +187,7 @@ impl ClipboardApp {
                     move |checked, cx| {
                         app.update(cx, |this, cx| {
                             this.settings.quick_paste = checked;
-                            this.save_settings();
+                            this.save_settings(cx);
                             cx.notify();
                         });
                     }
@@ -205,7 +207,7 @@ impl ClipboardApp {
                     move |checked, cx| {
                         app.update(cx, |this, cx| {
                             this.settings.double_click_copy = checked;
-                            this.save_settings();
+                            this.save_settings(cx);
                             cx.notify();
                         });
                     }

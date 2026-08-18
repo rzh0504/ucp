@@ -6981,6 +6981,7 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "smol",
+ "thiserror 2.0.18",
  "tray-icon",
  "windows-sys 0.61.2",
  "winresource",

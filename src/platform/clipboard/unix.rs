@@ -45,44 +45,69 @@ pub(super) fn command_status(
     command: &str,
     args: &[&str],
     extra_args: &[String],
-) -> Result<(), String> {
+) -> Result<(), ClipboardError> {
     let output = std::process::Command::new(command)
         .args(args)
         .args(extra_args)
         .output()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| ClipboardError::Command {
+            command: command.to_string(),
+            message: error.to_string(),
+        })?;
 
     if output.status.success() {
         Ok(())
     } else {
-        Err(command_error(&output))
+        Err(ClipboardError::Command {
+            command: command.to_string(),
+            message: command_error(&output),
+        })
     }
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn command_with_stdin(command: &str, args: &[&str], stdin: &str) -> Result<(), String> {
+pub(super) fn command_with_stdin(
+    command: &str,
+    args: &[&str],
+    stdin: &str,
+) -> Result<(), ClipboardError> {
     let mut child = std::process::Command::new(command)
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| ClipboardError::Command {
+            command: command.to_string(),
+            message: error.to_string(),
+        })?;
 
     child
         .stdin
         .as_mut()
-        .ok_or_else(|| "stdin unavailable".to_string())?
+        .ok_or_else(|| ClipboardError::Command {
+            command: command.to_string(),
+            message: "stdin unavailable".to_string(),
+        })?
         .write_all(stdin.as_bytes())
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| ClipboardError::Command {
+            command: command.to_string(),
+            message: error.to_string(),
+        })?;
 
     let output = child
         .wait_with_output()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| ClipboardError::Command {
+            command: command.to_string(),
+            message: error.to_string(),
+        })?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(command_error(&output))
+        Err(ClipboardError::Command {
+            command: command.to_string(),
+            message: command_error(&output),
+        })
     }
 }
 

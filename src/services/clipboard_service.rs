@@ -9,14 +9,26 @@ use std::path::Path;
 /// UI-independent clipboard operations.
 pub struct ClipboardService;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ClipboardError {
+    #[error("entry not found")]
     EntryNotFound,
-    ImageLoadFailed(String),
+    #[error("failed to load image")]
+    ImageLoadFailed(#[source] storage::StorageError),
+    #[error("image not found in storage")]
+    ImageNotFound,
+    #[error("files not found: {0:?}")]
     FilesNotFound(Vec<String>),
-    FileAccessError(String),
-    WriteError(String),
-    StorageError(String),
+    #[error("file access error for {path}")]
+    FileAccessError {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("clipboard write failed")]
+    WriteError(#[source] platform::clipboard::ClipboardError),
+    #[error("storage operation failed")]
+    StorageError(#[source] storage::StorageError),
 }
 
 impl ClipboardService {
@@ -30,14 +42,12 @@ impl ClipboardService {
         if let ClipboardContent::Image(image) = &content
             && !image.has_bytes()
         {
-            if let Some(loaded_image) = storage::load_image(storage, entry_id)
-                .map_err(|e| ClipboardError::ImageLoadFailed(e.to_string()))?
+            if let Some(loaded_image) =
+                storage::load_image(storage, entry_id).map_err(ClipboardError::ImageLoadFailed)?
             {
                 content = ClipboardContent::Image(loaded_image);
             } else {
-                return Err(ClipboardError::ImageLoadFailed(
-                    "Image not found in storage".to_string(),
-                ));
+                return Err(ClipboardError::ImageNotFound);
             }
         }
 
@@ -47,8 +57,7 @@ impl ClipboardService {
         }
 
         // 写入剪贴板
-        platform::clipboard::write_content(&content)
-            .map_err(|e| ClipboardError::WriteError(e.to_string()))?;
+        platform::clipboard::write_content(&content).map_err(ClipboardError::WriteError)?;
 
         Ok(())
     }
@@ -61,7 +70,7 @@ impl ClipboardService {
     ) -> Result<(), ClipboardError> {
         storage::save_entry(storage, entry)
             .map(|_| ())
-            .map_err(|e| ClipboardError::StorageError(e.to_string()))
+            .map_err(ClipboardError::StorageError)
     }
 
     /// 验证文件是否存在
@@ -82,10 +91,10 @@ impl ClipboardService {
                 Ok(true) => {}
                 Ok(false) => missing_files.push(file.to_string()),
                 Err(e) => {
-                    return Err(ClipboardError::FileAccessError(format!(
-                        "Cannot access {}: {}",
-                        file, e
-                    )));
+                    return Err(ClipboardError::FileAccessError {
+                        path: file.to_string(),
+                        source: e,
+                    });
                 }
             }
         }
@@ -104,9 +113,13 @@ impl ClipboardService {
         // 验证路径不包含危险字符
         let path_str = path.to_string_lossy();
         if path_str.contains('\0') {
-            return Err(ClipboardError::FileAccessError(
-                "File path contains null bytes".to_string(),
-            ));
+            return Err(ClipboardError::FileAccessError {
+                path: path_str.to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "file path contains null bytes",
+                ),
+            });
         }
 
         std::process::Command::new("explorer")
@@ -114,14 +127,21 @@ impl ClipboardService {
             .arg(path.as_os_str())
             .spawn()
             .map(|_| ())
-            .map_err(|e| ClipboardError::WriteError(format!("Failed to open explorer: {}", e)))
+            .map_err(|source| ClipboardError::FileAccessError {
+                path: path.display().to_string(),
+                source,
+            })
     }
 
     #[cfg(not(windows))]
     pub fn open_file_location(_path: &Path) -> Result<(), ClipboardError> {
-        Err(ClipboardError::WriteError(
-            "Opening file location not supported on this platform".to_string(),
-        ))
+        Err(ClipboardError::FileAccessError {
+            path: _path.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "opening file location is not supported on this platform",
+            ),
+        })
     }
 
     /// 删除条目（返回实际删除的 ID）
@@ -135,7 +155,7 @@ impl ClipboardService {
 
         if !deletable_ids.is_empty() {
             storage::delete_entries(storage, &deletable_ids)
-                .map_err(|e| ClipboardError::StorageError(e.to_string()))?;
+                .map_err(ClipboardError::StorageError)?;
         }
 
         for id in &deletable_ids {
@@ -175,7 +195,7 @@ impl ClipboardService {
         } else {
             let count = history.counts().total;
             storage::delete_entries_older_than(storage, Local::now(), false)
-                .map_err(|e| ClipboardError::StorageError(e.to_string()))?;
+                .map_err(ClipboardError::StorageError)?;
             history.clear();
             count
         };
@@ -195,6 +215,10 @@ impl ClipboardError {
                 AppLanguage::Chinese => format!("图片加载失败：{}", e),
                 AppLanguage::English => format!("Failed to load image: {}", e),
             },
+            ClipboardError::ImageNotFound => match language {
+                AppLanguage::Chinese => "存储中未找到图片".to_string(),
+                AppLanguage::English => "Image not found in storage".to_string(),
+            },
             ClipboardError::FilesNotFound(files) if files.is_empty() => match language {
                 AppLanguage::Chinese => "文件列表为空".to_string(),
                 AppLanguage::English => "File list is empty".to_string(),
@@ -207,9 +231,9 @@ impl ClipboardError {
                 AppLanguage::Chinese => format!("{} 个文件已不存在", files.len()),
                 AppLanguage::English => format!("{} files no longer exist", files.len()),
             },
-            ClipboardError::FileAccessError(e) => match language {
-                AppLanguage::Chinese => format!("文件访问错误：{}", e),
-                AppLanguage::English => format!("File access error: {}", e),
+            ClipboardError::FileAccessError { path, source } => match language {
+                AppLanguage::Chinese => format!("文件访问错误：{path}（{source}）"),
+                AppLanguage::English => format!("File access error: {path} ({source})"),
             },
             ClipboardError::WriteError(e) => match language {
                 AppLanguage::Chinese => format!("写入失败：{}", e),

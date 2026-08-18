@@ -698,7 +698,11 @@ impl ClipboardApp {
                                 this.status = "已复制".into();
                             }
                         }
-                        Err(error) => this.status = error.to_localized_string(language),
+                        Err(error) => {
+                            let message = error.to_localized_string(language);
+                            this.status = message.clone();
+                            this.show_error("复制失败", message, cx);
+                        }
                     }
                     cx.notify();
                 })
@@ -715,7 +719,11 @@ impl ClipboardApp {
                     .update(cx, |this, cx| {
                         this.status = match result {
                             Ok(()) => "已快捷粘贴".into(),
-                            Err(error) => format!("快捷粘贴失败：{error}"),
+                            Err(error) => {
+                                let message = error.to_string();
+                                this.show_error("快捷粘贴失败", message.clone(), cx);
+                                message
+                            }
                         };
                         cx.notify();
                     })
@@ -783,7 +791,9 @@ impl ClipboardApp {
                         }
                         Err(error) => {
                             this.storage.allow_entry_saves(&ids);
-                            this.status = format!("删除失败：{error}");
+                            let message = error.to_string();
+                            this.status = message.clone();
+                            this.show_error("删除失败", message, cx);
                         }
                     }
                     cx.notify();
@@ -816,7 +826,9 @@ impl ClipboardApp {
                 .update(cx, |this, cx| {
                     if let Err(error) = result {
                         this.storage.allow_entry_saves(&ids);
-                        this.status = format!("清空失败：{error}");
+                        let message = error.to_string();
+                        this.status = message.clone();
+                        this.show_error("清空失败", message, cx);
                         cx.notify();
                         return;
                     }

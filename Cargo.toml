@@ -20,6 +20,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
+thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5", features = ["monitor"] }

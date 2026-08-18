@@ -1,3 +1,4 @@
+use crate::error::UpdateError;
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use semver::Version;
@@ -38,11 +39,14 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
-pub fn check_for_updates() -> Result<UpdateCheck, String> {
+pub fn check_for_updates() -> Result<UpdateCheck, UpdateError> {
     let client = update_client()?;
     let release = fetch_latest_release(&client).or_else(|api_error| {
         fetch_latest_release_from_redirect(&client).map_err(|fallback_error| {
-            format!("{api_error}; fallback release check failed: {fallback_error}")
+            UpdateError::ApiAndFallback {
+                api: Box::new(api_error),
+                fallback: Box::new(fallback_error),
+            }
         })
     })?;
     let current_version = parse_release_version(APP_VERSION)?;
@@ -66,35 +70,36 @@ pub fn check_for_updates() -> Result<UpdateCheck, String> {
     }))
 }
 
-fn update_client() -> Result<Client, String> {
+fn update_client() -> Result<Client, UpdateError> {
     Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .map_err(|error| format!("failed to create update client: {error}"))
+        .map_err(UpdateError::Client)
 }
 
-fn fetch_latest_release(client: &Client) -> Result<GithubRelease, String> {
+fn fetch_latest_release(client: &Client) -> Result<GithubRelease, UpdateError> {
     client
         .get(LATEST_RELEASE_API)
         .header(USER_AGENT, REQUEST_USER_AGENT)
         .header(ACCEPT, RELEASE_ACCEPT)
         .send()
         .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("failed to fetch latest release: {error}"))?
+        .map_err(UpdateError::Fetch)?
         .json::<GithubRelease>()
-        .map_err(|error| format!("failed to read latest release: {error}"))
+        .map_err(UpdateError::Decode)
 }
 
-fn fetch_latest_release_from_redirect(client: &Client) -> Result<GithubRelease, String> {
+fn fetch_latest_release_from_redirect(client: &Client) -> Result<GithubRelease, UpdateError> {
     let response = client
         .get(LATEST_RELEASE_URL)
         .header(USER_AGENT, REQUEST_USER_AGENT)
         .send()
         .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("failed to fetch latest release page: {error}"))?;
+        .map_err(UpdateError::Fetch)?;
     let release_url = response.url().to_string();
-    let tag_name = release_tag_from_url(&release_url)
-        .ok_or_else(|| format!("latest release page did not resolve to a tag: {release_url}"))?;
+    let tag_name = release_tag_from_url(&release_url).ok_or_else(|| UpdateError::MissingTag {
+        url: release_url.clone(),
+    })?;
 
     Ok(GithubRelease {
         tag_name,
@@ -110,14 +115,17 @@ fn release_tag_from_url(url: &str) -> Option<String> {
     (!tag.is_empty()).then(|| tag.to_string())
 }
 
-fn parse_release_version(version: &str) -> Result<Version, String> {
+fn parse_release_version(version: &str) -> Result<Version, UpdateError> {
     let version = version.trim();
     let version = version
         .strip_prefix('v')
         .or_else(|| version.strip_prefix('V'))
         .unwrap_or(version);
 
-    Version::parse(version).map_err(|error| format!("invalid release version {version}: {error}"))
+    Version::parse(version).map_err(|source| UpdateError::InvalidVersion {
+        version: version.to_string(),
+        source,
+    })
 }
 
 fn preferred_asset(assets: &[GithubAsset]) -> Option<&GithubAsset> {
@@ -184,6 +192,16 @@ mod tests {
             parse_release_version("0.4.5").unwrap(),
             Version::new(0, 4, 5)
         );
+    }
+
+    #[test]
+    fn reports_invalid_versions_structurally() {
+        let error = parse_release_version("not-a-version").unwrap_err();
+
+        assert!(matches!(
+            error,
+            UpdateError::InvalidVersion { ref version, .. } if version == "not-a-version"
+        ));
     }
 
     #[test]
