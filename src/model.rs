@@ -8,7 +8,7 @@ use chrono::{DateTime, Local};
 
 pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const DEFAULT_BACKGROUND_OPACITY: u8 = 100;
-pub const DEFAULT_GLOBAL_SHOW_SHORTCUT: &str = "Ctrl+Shift+V";
+pub const DEFAULT_GLOBAL_SHOW_SHORTCUT: &str = "Alt+C";
 pub const MIN_BACKGROUND_OPACITY: u8 = 45;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];

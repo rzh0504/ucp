@@ -16,6 +16,27 @@ use gpui_component::{
 use std::sync::Arc;
 
 impl ClipboardApp {
+    pub(super) fn handle_global_shortcut_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.editing_global_shortcut {
+            return false;
+        }
+
+        self.editing_global_shortcut = false;
+        if event.keystroke.key != "escape" {
+            self.settings.global_show_shortcut = Kbd::format(&event.keystroke);
+            #[cfg(windows)]
+            platform::single_instance::configure_global_hotkey(&self.settings.global_show_shortcut);
+            self.save_settings(cx);
+        }
+        cx.stop_propagation();
+        cx.notify();
+        true
+    }
+
     fn shortcut_item(label: &'static str, shortcut: &'static str) -> SettingItem {
         let keystroke = Keystroke::parse(shortcut).expect("shortcut must be valid");
         SettingItem::render(move |_, _, cx| {
@@ -222,6 +243,45 @@ impl ClipboardApp {
         let move_last = Self::shortcut_item("跳转到最后一条", "end");
         let clear_navigation = Self::shortcut_item("清除导航", "escape");
         let delete_selected = Self::shortcut_item("删除选中项", "delete");
+        let global_show_shortcut = {
+            let app = app.clone();
+            SettingItem::render(move |_, _, cx| {
+                let state = app.read(cx);
+                let shortcut = state.settings.global_show_shortcut.clone();
+                let keystroke = Keystroke::parse(&shortcut).ok();
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_4()
+                    .child(Label::new("打开窗口").text_sm())
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("edit-global-show-shortcut")
+                            .icon(IconName::Settings2)
+                            .ghost()
+                            .compact()
+                            .on_click({
+                                let app = app.clone();
+                                move |_, window, cx| {
+                                    app.update(cx, |this, cx| {
+                                        this.editing_global_shortcut = true;
+                                        this.initial_focus.focus(window, cx);
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    )
+                    .when_some(keystroke, |this, keystroke| {
+                        this.child(
+                            Kbd::new(keystroke)
+                                .px_2()
+                                .py_1()
+                                .text_sm()
+                                .text_color(cx.theme().foreground),
+                        )
+                    })
+            })
+        };
 
         let update_app = cx.entity().clone();
         let about = SettingItem::render(move |_, _, cx| {
@@ -354,14 +414,19 @@ impl ClipboardApp {
                     SettingPage::new("快捷键")
                         .icon(IconName::Settings2)
                         .resettable(false)
-                        .groups(vec![SettingGroup::new().title("导航").items(vec![
-                            move_up,
-                            move_down,
-                            move_first,
-                            move_last,
-                            clear_navigation,
-                            delete_selected,
-                        ])]),
+                        .groups(vec![
+                            SettingGroup::new()
+                                .title("全局")
+                                .items(vec![global_show_shortcut]),
+                            SettingGroup::new().title("导航").items(vec![
+                                move_up,
+                                move_down,
+                                move_first,
+                                move_last,
+                                clear_navigation,
+                                delete_selected,
+                            ]),
+                        ]),
                     SettingPage::new("关于")
                         .icon(IconName::Info)
                         .resettable(false)

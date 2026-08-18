@@ -144,6 +144,7 @@ struct ClipboardApp {
     status: String,
     monitor_paused: bool,
     always_on_top: bool,
+    editing_global_shortcut: bool,
     update_check: UpdateCheckState,
     selected_entry_ids: std::collections::HashSet<u64>,
     selection_anchor_id: Option<u64>,
@@ -211,6 +212,8 @@ impl ClipboardApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (storage, settings, history) =
             ClipboardService::initialize().expect("Failed to initialize clipboard service");
+        #[cfg(windows)]
+        platform::single_instance::configure_global_hotkey(&settings.global_show_shortcut);
         let theme_mode = if matches!(settings.theme, crate::model::AppTheme::Dark) {
             ThemeMode::Dark
         } else {
@@ -248,6 +251,7 @@ impl ClipboardApp {
             status: String::new(),
             monitor_paused: false,
             always_on_top: false,
+            editing_global_shortcut: false,
             update_check: UpdateCheckState::Idle,
             selected_entry_ids: std::collections::HashSet::new(),
             selection_anchor_id: None,
@@ -468,7 +472,9 @@ impl Render for ClipboardApp {
         v_flex()
             .track_focus(&self.initial_focus)
             .on_key_down(cx.listener(|this, event, window, cx| {
-                this.handle_history_key_down(event, window, cx);
+                if !this.handle_global_shortcut_key_down(event, cx) {
+                    this.handle_history_key_down(event, window, cx);
+                }
             }))
             .size_full()
             .bg(cx.theme().background)

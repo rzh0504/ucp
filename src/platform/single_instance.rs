@@ -7,6 +7,11 @@ const ACTIVATION_ENDPOINT: &str = "127.0.0.1:49731";
 static ACTIVATION_REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 #[cfg(windows)]
 static QUIT_REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(windows)]
+static HOTKEY_COMMANDS: std::sync::OnceLock<std::sync::mpsc::Sender<String>> =
+    std::sync::OnceLock::new();
+#[cfg(windows)]
+static PENDING_HOTKEY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 #[cfg(windows)]
 const SHOW_REQUEST: u8 = 1;
@@ -60,6 +65,7 @@ pub fn start_activation_listener() {
     use std::io::Read as _;
 
     std::thread::spawn(|| {
+        start_hotkey_listener();
         let Ok(listener) = std::net::TcpListener::bind(ACTIVATION_ENDPOINT) else {
             return;
         };
@@ -74,6 +80,95 @@ pub fn start_activation_listener() {
             }
         }
     });
+}
+
+#[cfg(windows)]
+fn start_hotkey_listener() {
+    let (command_tx, command_rx) = std::sync::mpsc::channel();
+    let _ = HOTKEY_COMMANDS.set(command_tx);
+    let initial_shortcut = PENDING_HOTKEY
+        .lock()
+        .ok()
+        .and_then(|mut shortcut| shortcut.take());
+    std::thread::spawn(move || unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            MSG, PM_REMOVE, PeekMessageW, WM_HOTKEY,
+        };
+        let mut message = std::mem::zeroed::<MSG>();
+        let mut registered = false;
+        let mut initial_shortcut = initial_shortcut;
+        loop {
+            let shortcut = command_rx
+                .try_recv()
+                .ok()
+                .or_else(|| initial_shortcut.take());
+            if let Some(shortcut) = shortcut {
+                if registered {
+                    windows_sys::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey(
+                        std::ptr::null_mut(),
+                        1,
+                    );
+                    registered = false;
+                }
+                if let Some((modifiers, key)) = parse_hotkey(&shortcut) {
+                    registered = windows_sys::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey(
+                        std::ptr::null_mut(),
+                        1,
+                        modifiers,
+                        key,
+                    ) != 0;
+                }
+            }
+            while PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                if message.message == WM_HOTKEY {
+                    ACTIVATION_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Release);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    });
+}
+
+#[cfg(windows)]
+pub fn configure_global_hotkey(shortcut: &str) {
+    if let Some(sender) = HOTKEY_COMMANDS.get() {
+        let _ = sender.send(shortcut.to_string());
+    } else if let Ok(mut pending) = PENDING_HOTKEY.lock() {
+        *pending = Some(shortcut.to_string());
+    }
+}
+
+#[cfg(windows)]
+fn parse_hotkey(shortcut: &str) -> Option<(u32, u32)> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN,
+    };
+    let mut modifiers = 0;
+    let mut key = None;
+    for part in shortcut
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        match part.to_ascii_lowercase().as_str() {
+            "alt" => modifiers |= MOD_ALT,
+            "ctrl" | "control" => modifiers |= MOD_CONTROL,
+            "shift" => modifiers |= MOD_SHIFT,
+            "win" | "meta" | "super" => modifiers |= MOD_WIN,
+            value if value.len() == 1 && value.as_bytes()[0].is_ascii_alphanumeric() => {
+                key = Some(value.as_bytes()[0].to_ascii_uppercase() as u32)
+            }
+            value if value.starts_with('f') => {
+                let n = value[1..].parse::<u32>().ok()?;
+                if !(1..=24).contains(&n) {
+                    return None;
+                }
+                key = Some(0x70 + n - 1);
+            }
+            _ => return None,
+        }
+    }
+    key.map(|key| (modifiers, key))
 }
 
 #[cfg(windows)]
