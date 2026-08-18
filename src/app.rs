@@ -155,6 +155,7 @@ struct ClipboardApp {
     update_check: UpdateCheckState,
     selected_entry_id: Option<u64>,
     expanded_image_id: Option<u64>,
+    expanded_text_id: Option<u64>,
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
     search: Entity<InputState>,
     initial_focus: FocusHandle,
@@ -165,8 +166,7 @@ struct ClipboardApp {
 
 impl ClipboardApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let storage = storage::StorageHandle::new()
-            .expect("Failed to initialize storage");
+        let storage = storage::StorageHandle::new().expect("Failed to initialize storage");
         let settings = storage::load_settings(&storage).unwrap_or_default();
         let theme_mode = if matches!(settings.theme, crate::model::AppTheme::Dark) {
             ThemeMode::Dark
@@ -208,6 +208,7 @@ impl ClipboardApp {
             update_check: UpdateCheckState::Idle,
             selected_entry_id: None,
             expanded_image_id: None,
+            expanded_text_id: None,
             visible_entries: Vec::new(),
             search,
             initial_focus,

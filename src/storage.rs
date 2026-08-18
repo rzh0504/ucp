@@ -87,7 +87,8 @@ impl StorageHandle {
 
     /// Marks entries as pending deletion to prevent race conditions during save.
     pub fn suppress_entry_saves(&self, ids: &[u64]) {
-        let mut pending = self.pending_deletes
+        let mut pending = self
+            .pending_deletes
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         pending.extend(ids.iter().copied());
@@ -95,7 +96,8 @@ impl StorageHandle {
 
     /// Removes entries from pending deletion list.
     pub fn allow_entry_saves(&self, ids: &[u64]) {
-        let mut pending = self.pending_deletes
+        let mut pending = self
+            .pending_deletes
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         for id in ids {
@@ -116,7 +118,8 @@ impl StorageHandle {
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
     ) -> Result<T, StorageError> {
-        let mut connection = self.connection
+        let mut connection = self
+            .connection
             .lock()
             .map_err(|_| StorageError::Database("数据库连接锁已损坏".to_string()))?;
         operation(&mut connection)
@@ -128,7 +131,10 @@ impl StorageHandle {
     }
 }
 
-pub fn load_history(storage: &StorageHandle, capacity: usize) -> Result<ClipboardHistory, StorageError> {
+pub fn load_history(
+    storage: &StorageHandle,
+    capacity: usize,
+) -> Result<ClipboardHistory, StorageError> {
     storage.with_connection(|connection| {
         let mut statement = connection.prepare(
             "SELECT e.id, e.kind, e.text_content, e.image_width, e.image_height, e.image_preview_url, \
@@ -184,7 +190,10 @@ pub fn load_history(storage: &StorageHandle, capacity: usize) -> Result<Clipboar
     })
 }
 
-pub fn load_image(storage: &StorageHandle, entry_id: u64) -> Result<Option<ClipboardImage>, StorageError> {
+pub fn load_image(
+    storage: &StorageHandle,
+    entry_id: u64,
+) -> Result<Option<ClipboardImage>, StorageError> {
     storage.with_connection(|connection| {
         connection
             .query_row(
@@ -221,7 +230,10 @@ pub fn image_preview_path(preview_url: Option<&str>) -> Option<PathBuf> {
 
 /// Saves the entry and returns the cached `file://` preview URL when an image
 /// preview was written to the on-disk cache.
-pub fn save_entry(storage: &StorageHandle, entry: &ClipboardEntry) -> Result<Option<String>, StorageError> {
+pub fn save_entry(
+    storage: &StorageHandle,
+    entry: &ClipboardEntry,
+) -> Result<Option<String>, StorageError> {
     if storage.is_pending_delete(entry.id) {
         return Ok(None);
     }

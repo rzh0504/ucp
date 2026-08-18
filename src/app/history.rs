@@ -13,6 +13,12 @@ use gpui_component::{
 };
 use std::rc::Rc;
 
+const COLLAPSED_TEXT_LINES: usize = 6;
+const TEXT_LINE_HEIGHT: f32 = 24.;
+const TEXT_VERTICAL_PADDING: f32 = 16.;
+const TEXT_FOOTER_HEIGHT: f32 = 24.;
+const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
+
 impl ClipboardApp {
     pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let language = self.settings.language;
@@ -56,6 +62,7 @@ impl ClipboardApp {
                         px(Self::entry_height(
                             entry,
                             self.expanded_image_id == Some(entry.id),
+                            self.expanded_text_id == Some(entry.id),
                         )),
                     )
                 })
@@ -70,13 +77,15 @@ impl ClipboardApp {
                     .filter_map(|index| {
                         this.visible_entries.get(index).cloned().map(|entry| {
                             let selected = this.selected_entry_id == Some(entry.id);
-                            let expanded = this.expanded_image_id == Some(entry.id);
+                            let image_expanded = this.expanded_image_id == Some(entry.id);
+                            let text_expanded = this.expanded_text_id == Some(entry.id);
                             Self::render_entry(
                                 entry,
                                 index + 1,
                                 language,
                                 selected,
-                                expanded,
+                                image_expanded,
+                                text_expanded,
                                 (
                                     show_copy_time,
                                     show_text_length,
@@ -152,19 +161,25 @@ impl ClipboardApp {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_entry(
         entry: Rc<ClipboardEntry>,
         position: usize,
         language: AppLanguage,
         selected: bool,
-        expanded: bool,
+        image_expanded: bool,
+        text_expanded: bool,
         options: (bool, bool, bool, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (show_copy_time, show_text_length, double_click_copy, quick_paste) = options;
         let id = entry.id;
         let is_image = matches!(entry.content, ClipboardContent::Image(_));
-        let title = entry.title_with_language(language);
+        let title = match &entry.content {
+            ClipboardContent::Text(text) if text_expanded => text.clone(),
+            ClipboardContent::Text(text) => Self::text_preview(text, COLLAPSED_TEXT_LINES),
+            _ => entry.title_with_language(language),
+        };
         let meta = match &entry.content {
             ClipboardContent::Text(_) if !show_text_length => None,
             ClipboardContent::Image(image) => Some(format!("{} x {}", image.width, image.height)),
@@ -173,7 +188,7 @@ impl ClipboardApp {
         let copy_time = crate::i18n::relative_time(language, entry.captured_at);
         let favorite = entry.favorite;
         let app = cx.entity().downgrade();
-        let row_height = Self::entry_height(&entry, expanded);
+        let row_height = Self::entry_height(&entry, image_expanded, text_expanded);
         let muted_foreground = cx.theme().muted_foreground;
         let image_content = match &entry.content {
             ClipboardContent::Image(image) => {
@@ -191,7 +206,7 @@ impl ClipboardApp {
                     .map(|path| {
                         img(path)
                             .size_full()
-                            .object_fit(if expanded {
+                            .object_fit(if image_expanded {
                                 ObjectFit::Contain
                             } else {
                                 ObjectFit::ScaleDown
@@ -218,8 +233,8 @@ impl ClipboardApp {
                                 .justify_center()
                                 .child(
                                     div()
-                                        .when(!expanded, |this| this.w(px(180.)).h(px(100.)))
-                                        .when(expanded, |this| this.size_full())
+                                        .when(!image_expanded, |this| this.w(px(180.)).h(px(100.)))
+                                        .when(image_expanded, |this| this.size_full())
                                         .overflow_hidden()
                                         .bg(cx.theme().background)
                                         .child(preview),
@@ -243,17 +258,16 @@ impl ClipboardApp {
                                         .cursor_pointer()
                                         .hover(|style| style.bg(cx.theme().secondary_hover))
                                         .child(
-                                            Icon::new(if expanded {
+                                            Icon::new(if image_expanded {
                                                 IconName::ChevronUp
                                             } else {
                                                 IconName::ChevronDown
                                             })
                                             .xsmall(),
                                         )
-                                        .child(if expanded { "收起" } else { "展开" })
+                                        .child(if image_expanded { "收起" } else { "展开" })
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             cx.stop_propagation();
-                                            this.selected_entry_id = Some(id);
                                             this.toggle_image_expansion(id, cx);
                                         })),
                                 )
@@ -265,16 +279,56 @@ impl ClipboardApp {
             }
             _ => None,
         };
+        let is_multiline = entry.is_multiline();
+        let can_expand_text = entry.text_line_count() > COLLAPSED_TEXT_LINES;
         let content = v_flex()
             .flex_1()
             .min_w_0()
-            .justify_center()
-            .child(div().text_size(px(14.)).line_clamp(2).child(title))
+            .h_full()
+            .py_2()
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .text_size(px(14.))
+                    .line_height(px(TEXT_LINE_HEIGHT))
+                    .when(!is_multiline, |this| this.line_clamp(2))
+                    .child(title),
+            )
             .child(
                 h_flex()
+                    .h(px(24.))
+                    .flex_none()
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground)
-                    .when(show_copy_time, |this| this.child(copy_time))
+                    .when(show_copy_time, |this| this.child(copy_time.clone()))
+                    .child(div().flex_1())
+                    .when(can_expand_text, |this| {
+                        this.child(
+                            h_flex()
+                                .id(ElementId::NamedInteger("text-expand".into(), id))
+                                .gap_1()
+                                .px_2()
+                                .py_1()
+                                .rounded_sm()
+                                .cursor_pointer()
+                                .hover(|style| style.bg(cx.theme().secondary_hover))
+                                .child(
+                                    Icon::new(if text_expanded {
+                                        IconName::ChevronUp
+                                    } else {
+                                        IconName::ChevronDown
+                                    })
+                                    .xsmall(),
+                                )
+                                .child(if text_expanded { "收起" } else { "展开" })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_text_expansion(id, cx);
+                                })),
+                        )
+                    })
                     .child(div().flex_1())
                     .when_some(meta, |this, meta| this.child(meta)),
             );
@@ -392,21 +446,43 @@ impl ClipboardApp {
             .into_any_element()
     }
 
-    fn entry_height(entry: &ClipboardEntry, expanded: bool) -> f32 {
-        let ClipboardContent::Image(image) = &entry.content else {
-            return 64.;
-        };
-        if !expanded {
-            return 148.;
+    fn entry_height(entry: &ClipboardEntry, image_expanded: bool, text_expanded: bool) -> f32 {
+        match &entry.content {
+            ClipboardContent::Image(image) => {
+                if !image_expanded {
+                    return 148.;
+                }
+                const EXPANDED_IMAGE_WIDTH: f32 = 800.;
+                const MIN_EXPANDED_IMAGE_HEIGHT: f32 = 180.;
+                const MAX_EXPANDED_IMAGE_HEIGHT: f32 = 600.;
+                const IMAGE_ROW_CHROME_HEIGHT: f32 = 40.;
+                let aspect_height =
+                    EXPANDED_IMAGE_WIDTH * image.height as f32 / image.width.max(1) as f32;
+                aspect_height.clamp(MIN_EXPANDED_IMAGE_HEIGHT, MAX_EXPANDED_IMAGE_HEIGHT)
+                    + IMAGE_ROW_CHROME_HEIGHT
+            }
+            ClipboardContent::Text(_) => {
+                if entry.text_line_count() <= 1 {
+                    return 64.;
+                }
+                let text = match &entry.content {
+                    ClipboardContent::Text(text) => text,
+                    _ => unreachable!(),
+                };
+                let displayed_lines = if text_expanded {
+                    entry.text_line_count()
+                } else {
+                    Self::text_preview(text, COLLAPSED_TEXT_LINES)
+                        .lines()
+                        .count()
+                };
+                displayed_lines as f32 * TEXT_LINE_HEIGHT
+                    + TEXT_VERTICAL_PADDING
+                    + TEXT_FOOTER_HEIGHT
+                    + TEXT_ROW_CHROME_HEIGHT
+            }
+            _ => 64.,
         }
-
-        const EXPANDED_IMAGE_WIDTH: f32 = 800.;
-        const MIN_EXPANDED_IMAGE_HEIGHT: f32 = 180.;
-        const MAX_EXPANDED_IMAGE_HEIGHT: f32 = 600.;
-        const IMAGE_ROW_CHROME_HEIGHT: f32 = 40.;
-        let aspect_height = EXPANDED_IMAGE_WIDTH * image.height as f32 / image.width.max(1) as f32;
-        aspect_height.clamp(MIN_EXPANDED_IMAGE_HEIGHT, MAX_EXPANDED_IMAGE_HEIGHT)
-            + IMAGE_ROW_CHROME_HEIGHT
     }
 
     fn toggle_image_expansion(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -418,6 +494,28 @@ impl ClipboardApp {
 
         self.expanded_image_id = Some(id);
         cx.notify();
+    }
+
+    fn toggle_text_expansion(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.expanded_text_id == Some(id) {
+            self.expanded_text_id = None;
+            cx.notify();
+            return;
+        }
+
+        self.expanded_text_id = Some(id);
+        cx.notify();
+    }
+
+    fn text_preview(text: &str, max_lines: usize) -> String {
+        if max_lines == 0 {
+            return String::new();
+        }
+
+        let mut lines = text.lines();
+        let preview_lines = lines.by_ref().take(max_lines).collect::<Vec<_>>();
+
+        preview_lines.join("\n")
     }
 
     fn copy_entry(
@@ -443,7 +541,9 @@ impl ClipboardApp {
         let storage_for_promote = storage.clone();
         cx.spawn(async move |entity, cx| {
             let result = cx
-                .background_spawn(async move { ClipboardService::copy_content(&storage, id, content) })
+                .background_spawn(
+                    async move { ClipboardService::copy_content(&storage, id, content) },
+                )
                 .await;
             let copied = result.is_ok();
             entity

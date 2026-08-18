@@ -127,7 +127,7 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{storage_test_lock, test_data_directory, StorageHandle};
+    use crate::storage::{StorageHandle, storage_test_lock, test_data_directory};
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
 

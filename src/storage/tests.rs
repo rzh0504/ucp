@@ -69,21 +69,25 @@ fn storage_round_trips_settings_and_clipboard_entries() {
     let database_bytes = fs::read(storage.database_path().unwrap()).unwrap();
     assert_eq!(&database_bytes[..16], b"SQLite format 3\0");
 
-    let schema_version = storage.with_connection(|connection| schema_version(connection)).unwrap();
-    let has_image_rgba =
-        storage.with_connection(|connection| column_exists(connection, "clipboard_entries", "image_rgba"))
-            .unwrap();
-    let has_image_blob =
-        storage.with_connection(|connection| column_exists(connection, "clipboard_entries", "image_blob"))
-            .unwrap();
-    let has_image_format = storage.with_connection(|connection| {
-        column_exists(connection, "clipboard_entries", "image_format")
-    })
-    .unwrap();
-    let has_content_hash = storage.with_connection(|connection| {
-        column_exists(connection, "clipboard_entries", "content_hash")
-    })
-    .unwrap();
+    let schema_version = storage
+        .with_connection(|connection| schema_version(connection))
+        .unwrap();
+    let has_image_rgba = storage
+        .with_connection(|connection| column_exists(connection, "clipboard_entries", "image_rgba"))
+        .unwrap();
+    let has_image_blob = storage
+        .with_connection(|connection| column_exists(connection, "clipboard_entries", "image_blob"))
+        .unwrap();
+    let has_image_format = storage
+        .with_connection(|connection| {
+            column_exists(connection, "clipboard_entries", "image_format")
+        })
+        .unwrap();
+    let has_content_hash = storage
+        .with_connection(|connection| {
+            column_exists(connection, "clipboard_entries", "content_hash")
+        })
+        .unwrap();
 
     assert_eq!(loaded_settings, settings);
     assert_eq!(schema_version, SCHEMA_VERSION);
@@ -108,16 +112,17 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         load_image(&storage, 11).unwrap(),
         Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
     ));
-    let stored_image = storage.with_connection(|connection| {
-        connection
-            .query_row(
-                "SELECT image_blob FROM clipboard_entries WHERE id = 11",
-                [],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .map_err(StorageError::from)
-    })
-    .unwrap();
+    let stored_image = storage
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT image_blob FROM clipboard_entries WHERE id = 11",
+                    [],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .unwrap();
     assert!(stored_image.starts_with(PNG_SIGNATURE));
     let preview_url = match &loaded_history.entry(11).unwrap().content {
         ClipboardContent::Image(image) => image.preview_url.clone().unwrap(),
@@ -138,21 +143,22 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         Some(image) if image.rgba_bytes() == Some([10, 20, 30, 255].as_slice())
     ));
 
-    save_entry(&storage, &ClipboardEntry::new(
-        13,
-        ClipboardContent::Text("hello".to_string()),
-    ))
+    save_entry(
+        &storage,
+        &ClipboardEntry::new(13, ClipboardContent::Text("hello".to_string())),
+    )
     .unwrap();
-    let hello_count = storage.with_connection(|connection| {
-        connection
-            .query_row(
-                "SELECT COUNT(*) FROM clipboard_entries WHERE text_content = 'hello'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(StorageError::from)
-    })
-    .unwrap();
+    let hello_count = storage
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_entries WHERE text_content = 'hello'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .unwrap();
     assert_eq!(hello_count, 1);
 
     delete_entries(&storage, &[10]).unwrap();
@@ -187,7 +193,8 @@ fn age_cleanup_preserves_favorites_when_enabled() {
     save_entry(&storage, &favorite).unwrap();
 
     let removed =
-        delete_entries_older_than(&storage, Local::now() - chrono::Duration::days(30), true).unwrap();
+        delete_entries_older_than(&storage, Local::now() - chrono::Duration::days(30), true)
+            .unwrap();
     let history = load_history(&storage, 10).unwrap();
 
     assert_eq!(removed, 1);
