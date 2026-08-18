@@ -429,6 +429,9 @@ impl Render for ClipboardApp {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         v_flex()
             .track_focus(&self.initial_focus)
+            .on_key_down(cx.listener(|this, event, window, cx| {
+                this.handle_history_key_down(event, window, cx);
+            }))
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)

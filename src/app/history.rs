@@ -165,6 +165,57 @@ impl ClipboardApp {
         )
     }
 
+    pub(super) fn handle_history_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.page != super::AppPage::History
+            || !self.initial_focus.is_focused(window)
+            || event.keystroke.modifiers != Modifiers::none()
+            || self.visible_entries.is_empty()
+        {
+            return;
+        }
+
+        let key = event.keystroke.key.as_str();
+        let Some(next_index) = (match key {
+            "up" => Some(
+                self.navigation_index()
+                    .map_or(self.visible_entries.len() - 1, |index| {
+                        index.saturating_sub(1)
+                    }),
+            ),
+            "down" => self.navigation_index().map_or(Some(0), |index| {
+                Some((index + 1).min(self.visible_entries.len() - 1))
+            }),
+            "home" => Some(0),
+            "end" => Some(self.visible_entries.len() - 1),
+            "escape" => {
+                self.navigation_entry_id = None;
+                cx.stop_propagation();
+                cx.notify();
+                None
+            }
+            _ => return,
+        }) else {
+            return;
+        };
+
+        self.navigation_entry_id = Some(self.visible_entries[next_index].id);
+        self.history_scroll
+            .scroll_to_item(next_index, ScrollStrategy::Center);
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn navigation_index(&self) -> Option<usize> {
+        self.navigation_entry_id
+            .or(self.selected_entry_id)
+            .and_then(|id| self.visible_entries.iter().position(|entry| entry.id == id))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_entry(
         entry: Rc<ClipboardEntry>,
