@@ -8,6 +8,7 @@ use gpui_component::{
     menu::{ContextMenuExt as _, PopupMenuItem},
     scroll::{Scrollbar, ScrollbarMode},
     tab::{Tab, TabBar},
+    tag::Tag,
     v_flex, v_virtual_list,
 };
 use std::rc::Rc;
@@ -321,6 +322,18 @@ impl ClipboardApp {
                                 .text_size(px(11.))
                                 .text_color(muted_foreground)
                                 .when(show_copy_time, |this| this.child(copy_time.clone()))
+                                .when(favorite, |this| {
+                                    this.child(
+                                        Tag::warning()
+                                            .small()
+                                            .rounded_full()
+                                            .ml_2()
+                                            .h(px(14.))
+                                            .py_0()
+                                            .text_size(px(10.))
+                                            .child("收藏"),
+                                    )
+                                })
                                 .child(div().flex_1())
                                 .child(
                                     h_flex()
@@ -377,6 +390,18 @@ impl ClipboardApp {
                     .text_size(px(11.))
                     .text_color(cx.theme().muted_foreground)
                     .when(show_copy_time, |this| this.child(copy_time.clone()))
+                    .when(favorite, |this| {
+                        this.child(
+                            Tag::warning()
+                                .small()
+                                .rounded_full()
+                                .ml_2()
+                                .h(px(14.))
+                                .py_0()
+                                .text_size(px(10.))
+                                .child("收藏"),
+                        )
+                    })
                     .child(div().flex_1())
                     .when(can_expand_text, |this| {
                         this.child(
@@ -498,22 +523,6 @@ impl ClipboardApp {
                 )
                 .child(div().w(px(4.)).flex_none())
                 .child(content)
-            })
-            .when(favorite, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .right_8()
-                        .flex()
-                        .items_center()
-                        .child(
-                            Icon::new(IconName::Heart)
-                                .small()
-                                .text_color(cx.theme().danger),
-                        ),
-                )
             })
             .context_menu(move |menu, _, cx| {
                 if let Some(app) = app.upgrade() {
