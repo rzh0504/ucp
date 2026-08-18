@@ -219,6 +219,7 @@ impl ClipboardApp {
         let move_first = Self::shortcut_item("跳转到第一条", "home");
         let move_last = Self::shortcut_item("跳转到最后一条", "end");
         let clear_navigation = Self::shortcut_item("清除导航", "escape");
+        let delete_selected = Self::shortcut_item("删除选中项", "delete");
 
         let update_app = cx.entity().clone();
         let about = SettingItem::render(move |_, _, cx| {
@@ -357,6 +358,7 @@ impl ClipboardApp {
                             move_first,
                             move_last,
                             clear_navigation,
+                            delete_selected,
                         ])]),
                     SettingPage::new("关于")
                         .icon(IconName::Info)

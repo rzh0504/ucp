@@ -53,6 +53,19 @@ impl ClipboardApp {
             .child(Self::filter_tab(IconName::File, "文件", counts.file))
             .child(Self::filter_tab(IconName::Heart, "收藏", counts.favorite));
         self.visible_entries = self.history.filtered(&self.query, self.filter);
+        let visible_ids = self
+            .visible_entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<std::collections::HashSet<_>>();
+        self.selected_entry_ids
+            .retain(|id| visible_ids.contains(id));
+        if self
+            .selection_anchor_id
+            .is_some_and(|id| !visible_ids.contains(&id))
+        {
+            self.selection_anchor_id = None;
+        }
         let item_sizes = Rc::new(
             self.visible_entries
                 .iter()
@@ -76,7 +89,8 @@ impl ClipboardApp {
                 range
                     .filter_map(|index| {
                         this.visible_entries.get(index).cloned().map(|entry| {
-                            let selected = this.selected_entry_id == Some(entry.id);
+                            let selected = this.selected_entry_ids.contains(&entry.id);
+                            let multiple_selected = this.selected_entry_ids.len() > 1;
                             let image_expanded = this.expanded_image_id == Some(entry.id);
                             let text_expanded = this.expanded_text_id == Some(entry.id);
                             let navigated = this.navigation_entry_id == Some(entry.id)
@@ -87,6 +101,7 @@ impl ClipboardApp {
                                 index + 1,
                                 language,
                                 selected,
+                                multiple_selected,
                                 navigated,
                                 image_expanded,
                                 text_expanded,
@@ -173,13 +188,29 @@ impl ClipboardApp {
     ) {
         if self.page != super::AppPage::History
             || !self.initial_focus.is_focused(window)
-            || event.keystroke.modifiers != Modifiers::none()
             || self.visible_entries.is_empty()
         {
             return;
         }
 
         let key = event.keystroke.key.as_str();
+        if key == "delete" && event.keystroke.modifiers == Modifiers::none() {
+            let mut ids = self.selected_entry_ids.iter().copied().collect::<Vec<_>>();
+            if let Some(id) = self.navigation_entry_id
+                && !ids.contains(&id)
+            {
+                ids.push(id);
+            }
+            if !ids.is_empty() {
+                self.delete_entries(ids, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if event.keystroke.modifiers != Modifiers::none() {
+            return;
+        }
+
         let Some(next_index) = (match key {
             "up" => Some(
                 self.navigation_index()
@@ -212,7 +243,7 @@ impl ClipboardApp {
 
     fn navigation_index(&self) -> Option<usize> {
         self.navigation_entry_id
-            .or(self.selected_entry_id)
+            .or(self.selection_anchor_id)
             .and_then(|id| self.visible_entries.iter().position(|entry| entry.id == id))
     }
 
@@ -222,6 +253,7 @@ impl ClipboardApp {
         position: usize,
         language: AppLanguage,
         selected: bool,
+        multiple_selected: bool,
         navigated: bool,
         image_expanded: bool,
         text_expanded: bool,
@@ -289,7 +321,7 @@ impl ClipboardApp {
                                 .justify_center()
                                 .child(
                                     div()
-                                        .when(!image_expanded, |this| this.w(px(180.)).h(px(100.)))
+                                        .when(!image_expanded, |this| this.w(px(220.)).h(px(140.)))
                                         .when(image_expanded, |this| this.size_full())
                                         .overflow_hidden()
                                         .bg(cx.theme().background)
@@ -403,7 +435,9 @@ impl ClipboardApp {
             .rounded_sm()
             .when(selected, |this| {
                 this.bg(cx.theme().blue.opacity(0.12))
-                    .border_color(cx.theme().blue.opacity(0.78))
+                    .when(!multiple_selected, |this| {
+                        this.border_color(cx.theme().blue.opacity(0.78))
+                    })
             })
             .when(navigated && !selected, |this| {
                 this.border_color(cx.theme().blue.opacity(0.78))
@@ -421,17 +455,48 @@ impl ClipboardApp {
             })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 if (double_click_copy || quick_paste) && event.click_count() == 2 {
-                    this.selected_entry_id = None;
+                    this.selected_entry_ids.clear();
+                    this.selection_anchor_id = None;
                     this.navigation_entry_id = None;
                     this.copy_entry(id, quick_paste, Some(window.window_handle()), cx);
                     return;
                 }
                 this.navigation_entry_id = None;
-                this.selected_entry_id = if this.selected_entry_id == Some(id) {
-                    None
+                let modifiers = event.modifiers();
+                if modifiers.shift {
+                    let anchor_index = this
+                        .selection_anchor_id
+                        .and_then(|anchor_id| {
+                            this.visible_entries
+                                .iter()
+                                .position(|entry| entry.id == anchor_id)
+                        })
+                        .unwrap_or(position - 1);
+                    let clicked_index = position - 1;
+                    let (start, end) = if anchor_index <= clicked_index {
+                        (anchor_index, clicked_index)
+                    } else {
+                        (clicked_index, anchor_index)
+                    };
+                    this.selected_entry_ids = this.visible_entries[start..=end]
+                        .iter()
+                        .map(|entry| entry.id)
+                        .collect();
+                    this.selection_anchor_id.get_or_insert(id);
+                } else if modifiers.secondary() {
+                    if !this.selected_entry_ids.remove(&id) {
+                        this.selected_entry_ids.insert(id);
+                    }
+                    this.selection_anchor_id = Some(id);
                 } else {
-                    Some(id)
-                };
+                    let was_only_selected =
+                        this.selected_entry_ids.len() == 1 && this.selected_entry_ids.contains(&id);
+                    this.selected_entry_ids.clear();
+                    this.selection_anchor_id = if was_only_selected { None } else { Some(id) };
+                    if !was_only_selected {
+                        this.selected_entry_ids.insert(id);
+                    }
+                }
                 cx.notify();
             }))
             .when_some(image_content, |this, image| this.child(image))
@@ -511,7 +576,7 @@ impl ClipboardApp {
         match &entry.content {
             ClipboardContent::Image(image) => {
                 if !image_expanded {
-                    return 148.;
+                    return 180.;
                 }
                 const EXPANDED_IMAGE_WIDTH: f32 = 800.;
                 const MIN_EXPANDED_IMAGE_HEIGHT: f32 = 180.;
@@ -672,36 +737,52 @@ impl ClipboardApp {
     }
 
     fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
-        if self.history.entry(id).is_none() {
+        self.delete_entries(vec![id], cx);
+    }
+
+    fn delete_entries(&mut self, ids: Vec<u64>, cx: &mut Context<Self>) {
+        let ids = ids
+            .into_iter()
+            .filter(|id| self.history.entry(*id).is_some())
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
             return;
         }
 
-        self.storage.suppress_entry_saves(&[id]);
+        self.storage.suppress_entry_saves(&ids);
         self.status = "删除中...".into();
         cx.notify();
         let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
+            let delete_ids = ids.clone();
             let result = cx
-                .background_spawn(async move { storage::delete_entries(&storage, &[id]) })
+                .background_spawn(async move { storage::delete_entries(&storage, &delete_ids) })
                 .await;
             entity
                 .update(cx, |this, cx| {
                     match result {
                         Ok(()) => {
-                            this.history.remove(id);
-                            if this.selected_entry_id == Some(id) {
-                                this.selected_entry_id = None;
+                            for id in &ids {
+                                this.history.remove(*id);
+                                this.selected_entry_ids.remove(id);
                             }
-                            if this.navigation_entry_id == Some(id) {
+                            if this.navigation_entry_id.is_some_and(|id| ids.contains(&id)) {
                                 this.navigation_entry_id = None;
                             }
-                            if this.expanded_image_id == Some(id) {
+                            if this.selection_anchor_id.is_some_and(|id| ids.contains(&id)) {
+                                this.selection_anchor_id = None;
+                            }
+                            if this.expanded_image_id.is_some_and(|id| ids.contains(&id)) {
                                 this.expanded_image_id = None;
                             }
-                            this.status = "已删除".into();
+                            if this.expanded_text_id.is_some_and(|id| ids.contains(&id)) {
+                                this.expanded_text_id = None;
+                                this.expanded_text_scroll_offset = None;
+                            }
+                            this.status = format!("已删除 {} 条记录", ids.len());
                         }
                         Err(error) => {
-                            this.storage.allow_entry_saves(&[id]);
+                            this.storage.allow_entry_saves(&ids);
                             this.status = format!("删除失败：{error}");
                         }
                     }
@@ -747,7 +828,8 @@ impl ClipboardApp {
                             this.history.remove(*id);
                         }
                     }
-                    this.selected_entry_id = None;
+                    this.selected_entry_ids.clear();
+                    this.selection_anchor_id = None;
                     this.navigation_entry_id = None;
                     this.expanded_image_id = None;
                     this.status = match filter {
