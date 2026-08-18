@@ -310,6 +310,11 @@ impl ClipboardApp {
             theme.status_bar_border = rgb(0xdde1e7).into();
         }
 
+        // The native close event hides the window before GPUI receives the mouse-up
+        // event. Keep its pressed state visually neutral when the window is restored.
+        theme.danger_active = theme.title_bar;
+        theme.danger_foreground = theme.foreground;
+
         theme.tokens.background = theme.background.into();
         theme.tokens.muted = theme.muted.into();
         theme.tokens.secondary = theme.secondary.into();
