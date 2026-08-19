@@ -86,7 +86,11 @@ jobs:
           $artifactName = "${{ matrix.artifact_name }}"
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
 
-          $roots = @("target/release/bundle")
+          $roots = if ($env:RUNNER_OS -eq "Windows") {
+            @("target/release/bundle/wxsmsi/bin")
+          } else {
+            @("target/release/bundle")
+          }
           $installerExtensions = @(".msi", ".dmg", ".pkg", ".AppImage", ".deb", ".rpm")
           $allFiles = @()
 
