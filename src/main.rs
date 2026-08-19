@@ -52,4 +52,9 @@ fn main() {
     };
 
     app::run(!silent_startup);
+
+    // GPUI owns detached platform threads that can outlive the event loop.
+    // Ensure an installer never sees a stale UCP process after the UI quits.
+    #[cfg(windows)]
+    std::process::exit(0);
 }
