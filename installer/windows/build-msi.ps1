@@ -23,6 +23,30 @@ $wix = $wix.Replace(
     '<Component Id="MainExecutableComponent" Guid="*" Bitness="always64">'
 )
 $wix = $wix.Replace('Target="[#ucp_exe]"', 'Target="[INSTALLFOLDER]ucp.exe"')
+$wix = $wix.Replace(
+    '<Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER"/>',
+    '<Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER"/>
+    <Property Id="INSTALLFOLDER" Secure="yes">
+      <RegistrySearch Id="InstallFolderSearch" Root="HKLM" Key="Software\UCP\UCP" Name="InstallLocation" Type="raw" Bitness="always64"/>
+    </Property>'
+)
+$wix = $wix.Replace(
+    '<File Id="ucp_exe" Source=',
+    '<RegistryValue Root="HKLM" Key="Software\UCP\UCP" Name="InstallLocation" Type="string" Value="[INSTALLFOLDER]"/>
+          <File Id="ucp_exe" Source='
+)
+if (-not $wix.Contains('StandardDirectory Id="ProgramFiles64Folder"')) {
+    throw "Failed to configure the MSI for 64-bit Program Files."
+}
+if (-not $wix.Contains('MainExecutableComponent" Guid="*" Bitness="always64"')) {
+    throw "Failed to configure the MSI main component as 64-bit."
+}
+if (-not $wix.Contains('Id="InstallFolderSearch"')) {
+    throw "Failed to add the MSI install-folder registry search."
+}
+if (-not $wix.Contains('Name="InstallLocation"')) {
+    throw "Failed to add the MSI install-location registry value."
+}
 Set-Content -LiteralPath $wixFile -Value $wix -Encoding UTF8
 
 $wixProject = Get-Content -LiteralPath $wixProjectFile -Raw
