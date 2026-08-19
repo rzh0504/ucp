@@ -78,6 +78,13 @@ impl ClipboardApp {
                         this.visible_entries.get(index).cloned().map(|entry| {
                             let selected = this.selected_entry_ids.contains(&entry.id);
                             let multiple_selected = this.selected_entry_ids.len() > 1;
+                            let selected_ids = this.selected_entry_ids.iter().copied().collect();
+                            let all_selected_favorite = multiple_selected
+                                && this.selected_entry_ids.iter().all(|selected_id| {
+                                    this.history
+                                        .entry(*selected_id)
+                                        .is_some_and(|selected_entry| selected_entry.favorite)
+                                });
                             let image_expanded = this.expanded_image_id == Some(entry.id);
                             let text_expanded = this.expanded_text_id == Some(entry.id);
                             let navigated = this.navigation_entry_id == Some(entry.id)
@@ -89,6 +96,8 @@ impl ClipboardApp {
                                 language,
                                 selected,
                                 multiple_selected,
+                                selected_ids,
+                                all_selected_favorite,
                                 navigated,
                                 image_expanded,
                                 text_expanded,
@@ -241,6 +250,8 @@ impl ClipboardApp {
         language: AppLanguage,
         selected: bool,
         multiple_selected: bool,
+        selected_ids: Vec<u64>,
+        all_selected_favorite: bool,
         navigated: bool,
         image_expanded: bool,
         text_expanded: bool,
@@ -534,35 +545,77 @@ impl ClipboardApp {
                 let copy_app = app.clone();
                 let favorite_app = app.clone();
                 let delete_app = app.clone();
-                let favorite_label = if favorite { "取消收藏" } else { "收藏" };
-                menu.item(PopupMenuItem::new("复制").icon(IconName::Copy).on_click(
-                    move |_, _, cx| {
-                        if let Some(app) = copy_app.upgrade() {
-                            app.update(cx, |this, cx| this.copy_entry(id, false, None, cx));
-                        }
-                    },
-                ))
-                .item(
-                    PopupMenuItem::new(favorite_label)
-                        .icon(if favorite {
-                            IconName::HeartOff
-                        } else {
-                            IconName::Heart
-                        })
-                        .on_click(move |_, _, cx| {
-                            if let Some(app) = favorite_app.upgrade() {
-                                app.update(cx, |this, cx| this.toggle_favorite(id, cx));
+                if multiple_selected {
+                    let selected_ids_for_favorite = selected_ids.clone();
+                    let selected_ids_for_delete = selected_ids.clone();
+                    let favorite_label = if all_selected_favorite {
+                        "取消收藏"
+                    } else {
+                        "收藏"
+                    };
+                    menu.item(
+                        PopupMenuItem::new(favorite_label)
+                            .icon(if all_selected_favorite {
+                                IconName::HeartOff
+                            } else {
+                                IconName::Heart
+                            })
+                            .on_click(move |_, _, cx| {
+                                if let Some(app) = favorite_app.upgrade() {
+                                    app.update(cx, |this, cx| {
+                                        this.set_favorite_for_entries(
+                                            selected_ids_for_favorite.clone(),
+                                            !all_selected_favorite,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("删除").icon(IconName::Delete).on_click(
+                            move |_, _, cx| {
+                                if let Some(app) = delete_app.upgrade() {
+                                    app.update(cx, |this, cx| {
+                                        this.delete_entries(selected_ids_for_delete.clone(), cx)
+                                    });
+                                }
+                            },
+                        ),
+                    )
+                } else {
+                    let favorite_label = if favorite { "取消收藏" } else { "收藏" };
+                    menu.item(PopupMenuItem::new("复制").icon(IconName::Copy).on_click(
+                        move |_, _, cx| {
+                            if let Some(app) = copy_app.upgrade() {
+                                app.update(cx, |this, cx| this.copy_entry(id, false, None, cx));
                             }
-                        }),
-                )
-                .separator()
-                .item(PopupMenuItem::new("删除").icon(IconName::Delete).on_click(
-                    move |_, _, cx| {
-                        if let Some(app) = delete_app.upgrade() {
-                            app.update(cx, |this, cx| this.delete_entry(id, cx));
-                        }
-                    },
-                ))
+                        },
+                    ))
+                    .item(
+                        PopupMenuItem::new(favorite_label)
+                            .icon(if favorite {
+                                IconName::HeartOff
+                            } else {
+                                IconName::Heart
+                            })
+                            .on_click(move |_, _, cx| {
+                                if let Some(app) = favorite_app.upgrade() {
+                                    app.update(cx, |this, cx| this.toggle_favorite(id, cx));
+                                }
+                            }),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("删除").icon(IconName::Delete).on_click(
+                            move |_, _, cx| {
+                                if let Some(app) = delete_app.upgrade() {
+                                    app.update(cx, |this, cx| this.delete_entry(id, cx));
+                                }
+                            },
+                        ),
+                    )
+                }
             })
             .into_any_element()
     }
@@ -739,6 +792,30 @@ impl ClipboardApp {
             let storage = self.storage.clone();
             cx.background_spawn(async move {
                 let _ = ClipboardService::save_entry(&storage, &updated);
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    fn set_favorite_for_entries(&mut self, ids: Vec<u64>, favorite: bool, cx: &mut Context<Self>) {
+        let mut updated_entries = Vec::new();
+        for id in ids {
+            let already_favorite = self.history.entry(id).is_some_and(|entry| entry.favorite);
+            if already_favorite != favorite
+                && let Some(updated) = self.history.toggle_favorite(id)
+            {
+                self.update_visible_entry(id);
+                updated_entries.push(updated);
+            }
+        }
+
+        if !updated_entries.is_empty() {
+            let storage = self.storage.clone();
+            cx.background_spawn(async move {
+                for entry in updated_entries {
+                    let _ = ClipboardService::save_entry(&storage, &entry);
+                }
             })
             .detach();
         }
