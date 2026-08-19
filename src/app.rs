@@ -363,10 +363,17 @@ impl ClipboardApp {
     }
 
     fn capture(&mut self, content: ClipboardContent, cx: &mut Context<Self>) {
-        if self.monitor_paused || !self.history.would_push_change(&content) {
+        let promote_copied_entries = self.settings.promote_copied_entries;
+        if self.monitor_paused
+            || !self
+                .history
+                .would_push_change_with_promotion(&content, promote_copied_entries)
+        {
             return;
         }
-        let result = self.history.push(content);
+        let result = self
+            .history
+            .push_with_promotion(content, promote_copied_entries);
         let entry = result.entry;
         let result_id = entry.as_ref().map(|entry| entry.id).unwrap_or_default();
         let removed_ids = result.removed_ids;

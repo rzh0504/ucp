@@ -327,7 +327,16 @@ impl ClipboardHistory {
         history
     }
 
+    #[cfg(test)]
     pub fn push(&mut self, content: ClipboardContent) -> PushResult {
+        self.push_with_promotion(content, true)
+    }
+
+    pub fn push_with_promotion(
+        &mut self,
+        content: ClipboardContent,
+        promote_existing: bool,
+    ) -> PushResult {
         let content = content.normalized();
         if content.is_empty() {
             return PushResult::default();
@@ -338,7 +347,7 @@ impl ClipboardHistory {
             .iter()
             .position(|entry| entry.content == content)
         {
-            if !self.should_promote_position(position) {
+            if !promote_existing || !self.should_promote_position(position) {
                 return PushResult::default();
             }
 
@@ -367,7 +376,16 @@ impl ClipboardHistory {
         }
     }
 
+    #[cfg(test)]
     pub fn would_push_change(&self, content: &ClipboardContent) -> bool {
+        self.would_push_change_with_promotion(content, true)
+    }
+
+    pub fn would_push_change_with_promotion(
+        &self,
+        content: &ClipboardContent,
+        promote_existing: bool,
+    ) -> bool {
         let content = content.clone().normalized();
         if content.is_empty() {
             return false;
@@ -376,7 +394,7 @@ impl ClipboardHistory {
         self.entries
             .iter()
             .position(|entry| entry.content == content)
-            .is_none_or(|position| self.should_promote_position(position))
+            .is_none_or(|position| promote_existing && self.should_promote_position(position))
     }
 
     pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<Rc<ClipboardEntry>> {
@@ -835,6 +853,36 @@ mod tests {
         assert!(!history.would_push_change(&ClipboardContent::Text("pinned".to_string())));
         assert!(history.promote(pinned_id).is_none());
         assert_eq!(history.entry(pinned_id).unwrap().captured_at, captured_at);
+    }
+
+    #[test]
+    fn duplicate_capture_can_leave_entry_in_place() {
+        let mut history = ClipboardHistory::new(10);
+        let first_id = history
+            .push(ClipboardContent::Text("first".to_string()))
+            .entry
+            .unwrap()
+            .id;
+        let second_id = history
+            .push(ClipboardContent::Text("second".to_string()))
+            .entry
+            .unwrap()
+            .id;
+
+        assert!(
+            !history.would_push_change_with_promotion(
+                &ClipboardContent::Text("first".to_string()),
+                false
+            )
+        );
+        assert!(
+            history
+                .push_with_promotion(ClipboardContent::Text("first".to_string()), false)
+                .entry
+                .is_none()
+        );
+        assert_eq!(history.position(second_id), Some(0));
+        assert_eq!(history.position(first_id), Some(1));
     }
 
     #[test]
