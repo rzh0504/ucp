@@ -50,8 +50,21 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::http::ConnectTimeout=10 \
+            -o Acquire::https::ConnectTimeout=10 \
+            update
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::http::ConnectTimeout=10 \
+            -o Acquire::https::ConnectTimeout=10 \
+            install -y \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
             libxcb1-dev \
