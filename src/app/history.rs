@@ -743,7 +743,9 @@ impl ClipboardApp {
                             if should_quick_paste {
                                 if let Some(window) = window {
                                     window
-                                        .update(cx, |_, window, _| window.minimize_window())
+                                        .update(cx, |_, window, _| {
+                                            crate::platform::hide_window(window);
+                                        })
                                         .ok();
                                 }
                                 this.status = "正在切换窗口并粘贴...".into();
