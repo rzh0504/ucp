@@ -11,6 +11,7 @@ use gpui_component::{
     tag::Tag,
     v_flex, v_virtual_list,
 };
+use std::path::Path;
 use std::rc::Rc;
 
 const COLLAPSED_TEXT_LINES: usize = 6;
@@ -379,69 +380,150 @@ impl ClipboardApp {
         };
         let is_multiline = entry.is_multiline();
         let can_expand_text = entry.text_line_count() > COLLAPSED_TEXT_LINES;
-        let content = v_flex()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .py_2()
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .text_size(px(14.))
-                    .line_height(px(TEXT_LINE_HEIGHT))
-                    .when(!is_multiline, |this| this.line_clamp(2))
-                    .child(title),
-            )
-            .child(
-                h_flex()
-                    .h(px(24.))
-                    .flex_none()
-                    .text_size(px(11.))
-                    .text_color(cx.theme().muted_foreground)
-                    .when(show_copy_time, |this| this.child(copy_time.clone()))
-                    .when(favorite, |this| {
-                        this.child(
-                            Tag::warning()
-                                .small()
-                                .rounded_full()
-                                .ml_2()
-                                .h(px(14.))
-                                .py_0()
-                                .text_size(px(10.))
-                                .child("收藏"),
+        let content = if let ClipboardContent::Files(files) = &entry.content {
+            let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
+            let file_name = Self::file_name(first_file);
+            let directory = Self::file_directory(first_file);
+            let file_count = crate::i18n::file_count(language, files.len());
+
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .justify_center()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(px(28.))
+                                .rounded_sm()
+                                .bg(cx.theme().secondary)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_color(cx.theme().blue)
+                                .child(Icon::new(IconName::File).small()),
                         )
-                    })
-                    .child(div().flex_1())
-                    .when(can_expand_text, |this| {
-                        this.child(
-                            h_flex()
-                                .id(ElementId::NamedInteger("text-expand".into(), id))
-                                .gap_1()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .text_size(px(14.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .truncate()
+                                .child(file_name),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .rounded_full()
+                                .bg(cx.theme().secondary)
                                 .px_2()
                                 .py_1()
-                                .rounded_sm()
-                                .cursor_pointer()
-                                .hover(|style| style.bg(cx.theme().secondary_hover))
-                                .child(
-                                    Icon::new(if text_expanded {
-                                        IconName::ChevronUp
-                                    } else {
-                                        IconName::ChevronDown
-                                    })
-                                    .xsmall(),
-                                )
-                                .child(if text_expanded { "收起" } else { "展开" })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    cx.stop_propagation();
-                                    this.toggle_text_expansion(id, cx);
-                                })),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .when_some(meta, |this, meta| this.child(meta)),
-            );
+                                .text_size(px(10.))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(file_count),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .pl(px(36.))
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(directory),
+                )
+                .child(
+                    h_flex()
+                        .h(px(18.))
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .when(show_copy_time, |this| this.child(copy_time.clone()))
+                        .when(favorite, |this| {
+                            this.child(
+                                Tag::warning()
+                                    .small()
+                                    .rounded_full()
+                                    .ml_2()
+                                    .h(px(14.))
+                                    .py_0()
+                                    .text_size(px(10.))
+                                    .child("收藏"),
+                            )
+                        }),
+                )
+                .into_any_element()
+        } else {
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .py_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .text_size(px(14.))
+                        .line_height(px(TEXT_LINE_HEIGHT))
+                        .when(!is_multiline, |this| this.line_clamp(2))
+                        .child(title),
+                )
+                .child(
+                    h_flex()
+                        .h(px(24.))
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(cx.theme().muted_foreground)
+                        .when(show_copy_time, |this| this.child(copy_time.clone()))
+                        .when(favorite, |this| {
+                            this.child(
+                                Tag::warning()
+                                    .small()
+                                    .rounded_full()
+                                    .ml_2()
+                                    .h(px(14.))
+                                    .py_0()
+                                    .text_size(px(10.))
+                                    .child("收藏"),
+                            )
+                        })
+                        .child(div().flex_1())
+                        .when(can_expand_text, |this| {
+                            this.child(
+                                h_flex()
+                                    .id(ElementId::NamedInteger("text-expand".into(), id))
+                                    .gap_1()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(cx.theme().secondary_hover))
+                                    .child(
+                                        Icon::new(if text_expanded {
+                                            IconName::ChevronUp
+                                        } else {
+                                            IconName::ChevronDown
+                                        })
+                                        .xsmall(),
+                                    )
+                                    .child(if text_expanded { "收起" } else { "展开" })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.toggle_text_expansion(id, cx);
+                                    })),
+                            )
+                        })
+                        .child(div().flex_1())
+                        .when_some(meta, |this, meta| this.child(meta)),
+                )
+                .into_any_element()
+        };
 
         h_flex()
             .id(ElementId::NamedInteger("entry".into(), id))
@@ -655,7 +737,7 @@ impl ClipboardApp {
                     + TEXT_FOOTER_HEIGHT
                     + TEXT_ROW_CHROME_HEIGHT
             }
-            _ => 64.,
+            ClipboardContent::Files(_) => 76.,
         }
     }
 
@@ -698,6 +780,24 @@ impl ClipboardApp {
         let preview_lines = lines.by_ref().take(max_lines).collect::<Vec<_>>();
 
         preview_lines.join("\n")
+    }
+
+    fn file_name(path: &str) -> String {
+        Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or(path)
+            .to_string()
+    }
+
+    fn file_directory(path: &str) -> String {
+        Path::new(path)
+            .parent()
+            .and_then(|directory| directory.to_str())
+            .filter(|directory| !directory.is_empty())
+            .unwrap_or("文件路径")
+            .to_string()
     }
 
     fn copy_entry(
