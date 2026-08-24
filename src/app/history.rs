@@ -28,6 +28,7 @@ impl ClipboardApp {
         let double_click_copy = self.settings.double_click_copy;
         let quick_paste = self.settings.quick_paste;
         let counts = self.history.counts();
+        let file_icon_paths = self.file_icon_paths.clone();
         let filters = TabBar::new("filters")
             .segmented()
             .large()
@@ -47,6 +48,7 @@ impl ClipboardApp {
                     _ => ClipboardFilter::All,
                 };
                 this.refresh_visible_entries();
+                this.preload_file_icons(cx);
                 cx.notify();
             }))
             .child(Self::filter_tab(IconName::Inbox, "全部", counts.total))
@@ -92,7 +94,7 @@ impl ClipboardApp {
                                 || image_expanded
                                 || text_expanded;
                             Self::render_entry(
-                                entry,
+                                entry.clone(),
                                 index + 1,
                                 language,
                                 selected,
@@ -102,6 +104,7 @@ impl ClipboardApp {
                                 navigated,
                                 image_expanded,
                                 text_expanded,
+                                file_icon_paths.get(&entry.id).cloned(),
                                 (
                                     show_copy_time,
                                     show_text_length,
@@ -175,6 +178,49 @@ impl ClipboardApp {
                 .child(Icon::new(icon).small())
                 .child(format!("{label} {count}")),
         )
+    }
+
+    pub(super) fn preload_file_icons(&mut self, cx: &mut Context<Self>) {
+        const MAX_FILE_ICON_LOADS: usize = 4;
+        let active_loads = self.file_icon_loading.len();
+        let mut started_loads = 0;
+        for entry in &self.visible_entries {
+            if active_loads + started_loads >= MAX_FILE_ICON_LOADS {
+                break;
+            }
+            let ClipboardContent::Files(files) = &entry.content else {
+                continue;
+            };
+            let Some(file) = files.first().cloned() else {
+                continue;
+            };
+            if self.file_icon_paths.contains_key(&entry.id)
+                || self.file_icon_failed.contains(&entry.id)
+                || !self.file_icon_loading.insert(entry.id)
+            {
+                continue;
+            }
+            let id = entry.id;
+            started_loads += 1;
+            cx.spawn(async move |entity, cx| {
+                let icon_path = cx
+                    .background_spawn(async move {
+                        crate::platform::file_icon::icon_path(std::path::Path::new(&file))
+                    })
+                    .await;
+                let _ = entity.update(cx, |this, cx| {
+                    this.file_icon_loading.remove(&id);
+                    if let Some(path) = icon_path {
+                        this.file_icon_paths.insert(id, path);
+                    } else {
+                        this.file_icon_failed.insert(id);
+                    }
+                    this.preload_file_icons(cx);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
     }
 
     pub(super) fn handle_history_key_down(
@@ -256,12 +302,14 @@ impl ClipboardApp {
         navigated: bool,
         image_expanded: bool,
         text_expanded: bool,
+        file_icon_path: Option<std::path::PathBuf>,
         options: (bool, bool, bool, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (show_copy_time, show_text_length, double_click_copy, quick_paste) = options;
         let id = entry.id;
         let is_image = matches!(entry.content, ClipboardContent::Image(_));
+        let is_file = matches!(entry.content, ClipboardContent::Files(_));
         let title = match &entry.content {
             ClipboardContent::Text(text) if text_expanded => text.clone(),
             ClipboardContent::Text(text) => Self::text_preview(text, COLLAPSED_TEXT_LINES),
@@ -383,30 +431,30 @@ impl ClipboardApp {
         let content = if let ClipboardContent::Files(files) = &entry.content {
             let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
             let file_name = Self::file_name(first_file);
-            let directory = Self::file_directory(first_file);
-            let file_count = crate::i18n::file_count(language, files.len());
 
             v_flex()
                 .flex_1()
                 .min_w_0()
                 .h_full()
                 .justify_center()
-                .gap_1()
+                .gap_0()
                 .child(
                     h_flex()
                         .min_w_0()
+                        .h(px(30.))
                         .gap_2()
                         .child(
-                            div()
-                                .flex_none()
-                                .size(px(28.))
-                                .rounded_sm()
-                                .bg(cx.theme().secondary)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_color(cx.theme().blue)
-                                .child(Icon::new(IconName::File).small()),
+                            file_icon_path
+                                .map(|path| {
+                                    img(path)
+                                        .flex_none()
+                                        .size(px(20.))
+                                        .object_fit(ObjectFit::Contain)
+                                        .into_any_element()
+                                })
+                                .unwrap_or_else(|| {
+                                    Icon::new(IconName::File).small().into_any_element()
+                                }),
                         )
                         .child(
                             div()
@@ -416,30 +464,11 @@ impl ClipboardApp {
                                 .font_weight(FontWeight::MEDIUM)
                                 .truncate()
                                 .child(file_name),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .rounded_full()
-                                .bg(cx.theme().secondary)
-                                .px_2()
-                                .py_1()
-                                .text_size(px(10.))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(file_count),
                         ),
                 )
                 .child(
                     h_flex()
-                        .min_w_0()
-                        .pl(px(36.))
-                        .text_size(px(11.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(directory),
-                )
-                .child(
-                    h_flex()
-                        .h(px(18.))
+                        .h(px(22.))
                         .flex_none()
                         .text_size(px(11.))
                         .text_color(cx.theme().muted_foreground)
@@ -616,6 +645,17 @@ impl ClipboardApp {
                 )
                 .child(div().w(px(4.)).flex_none())
                 .child(content)
+                .when(is_file, |this| {
+                    this.child(
+                        div()
+                            .w(px(68.))
+                            .flex_none()
+                            .text_right()
+                            .text_size(px(11.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(entry.size_label_with_language(language)),
+                    )
+                })
             })
             .context_menu(move |menu, _, cx| {
                 if let Some(app) = app.upgrade() {
@@ -788,15 +828,6 @@ impl ClipboardApp {
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
             .unwrap_or(path)
-            .to_string()
-    }
-
-    fn file_directory(path: &str) -> String {
-        Path::new(path)
-            .parent()
-            .and_then(|directory| directory.to_str())
-            .filter(|directory| !directory.is_empty())
-            .unwrap_or("文件路径")
             .to_string()
     }
 

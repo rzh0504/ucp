@@ -154,6 +154,9 @@ struct ClipboardApp {
     expanded_text_id: Option<u64>,
     expanded_text_scroll_offset: Option<Point<Pixels>>,
     visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
+    file_icon_paths: std::collections::HashMap<u64, std::path::PathBuf>,
+    file_icon_loading: std::collections::HashSet<u64>,
+    file_icon_failed: std::collections::HashSet<u64>,
     search: Entity<InputState>,
     initial_focus: FocusHandle,
     window_handle: AnyWindowHandle,
@@ -232,6 +235,7 @@ impl ClipboardApp {
                 if matches!(event, InputEvent::Change) {
                     this.query = search.read(cx).value().to_string();
                     this.refresh_visible_entries();
+                    this.preload_file_icons(cx);
                     cx.notify();
                 }
             }
@@ -262,6 +266,9 @@ impl ClipboardApp {
             expanded_text_id: None,
             expanded_text_scroll_offset: None,
             visible_entries: Vec::new(),
+            file_icon_paths: std::collections::HashMap::new(),
+            file_icon_loading: std::collections::HashSet::new(),
+            file_icon_failed: std::collections::HashSet::new(),
             search,
             initial_focus,
             window_handle,
