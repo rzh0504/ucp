@@ -277,6 +277,7 @@ impl ClipboardApp {
             _subscriptions: subscriptions,
         };
         app.refresh_visible_entries();
+        app.preload_file_icons(cx);
         app.start_clipboard_monitor(update_rx, cx);
         app
     }
