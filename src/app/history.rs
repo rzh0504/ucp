@@ -29,6 +29,7 @@ impl ClipboardApp {
         let quick_paste = self.settings.quick_paste;
         let counts = self.history.counts();
         let file_icon_paths = self.file_icon_paths.clone();
+        let missing_file_entries = self.missing_file_entries.clone();
         let filters = TabBar::new("filters")
             .segmented()
             .large()
@@ -105,6 +106,7 @@ impl ClipboardApp {
                                 image_expanded,
                                 text_expanded,
                                 file_icon_paths.get(&entry.id).cloned(),
+                                missing_file_entries.contains(&entry.id),
                                 (
                                     show_copy_time,
                                     show_text_length,
@@ -201,15 +203,26 @@ impl ClipboardApp {
                 continue;
             }
             let id = entry.id;
+            let files = files.clone();
             started_loads += 1;
             cx.spawn(async move |entity, cx| {
-                let icon_path = cx
+                let (icon_path, missing) = cx
                     .background_spawn(async move {
-                        crate::platform::file_icon::icon_path(std::path::Path::new(&file))
+                        let missing = files
+                            .iter()
+                            .any(|file| !std::path::Path::new(file).try_exists().unwrap_or(false));
+                        let icon_path =
+                            crate::platform::file_icon::icon_path(std::path::Path::new(&file));
+                        (icon_path, missing)
                     })
                     .await;
                 let _ = entity.update(cx, |this, cx| {
                     this.file_icon_loading.remove(&id);
+                    if missing {
+                        this.missing_file_entries.insert(id);
+                    } else {
+                        this.missing_file_entries.remove(&id);
+                    }
                     if let Some(path) = icon_path {
                         this.file_icon_paths.insert(id, path);
                     } else {
@@ -303,6 +316,7 @@ impl ClipboardApp {
         image_expanded: bool,
         text_expanded: bool,
         file_icon_path: Option<std::path::PathBuf>,
+        file_missing: bool,
         options: (bool, bool, bool, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -443,7 +457,13 @@ impl ClipboardApp {
                         .min_w_0()
                         .h(px(30.))
                         .gap_2()
-                        .child(
+                        .child(if file_missing {
+                            Icon::default()
+                                .path("icons/file-missing.svg")
+                                .small()
+                                .text_color(cx.theme().muted_foreground)
+                                .into_any_element()
+                        } else {
                             file_icon_path
                                 .map(|path| {
                                     img(path)
@@ -454,8 +474,8 @@ impl ClipboardApp {
                                 })
                                 .unwrap_or_else(|| {
                                     Icon::new(IconName::File).small().into_any_element()
-                                }),
-                        )
+                                })
+                        })
                         .child(
                             div()
                                 .min_w_0()

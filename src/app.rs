@@ -47,6 +47,11 @@ impl AssetSource for AppAssets {
                 "../assets/icons/pin.svg"
             ))));
         }
+        if path == "icons/file-missing.svg" {
+            return Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/file-missing.svg"
+            ))));
+        }
         self.0.load(path)
     }
 
@@ -54,6 +59,9 @@ impl AssetSource for AppAssets {
         let mut assets = self.0.list(path)?;
         if "icons/pin.svg".starts_with(path) {
             assets.push("icons/pin.svg".into());
+        }
+        if "icons/file-missing.svg".starts_with(path) {
+            assets.push("icons/file-missing.svg".into());
         }
         Ok(assets)
     }
@@ -157,6 +165,7 @@ struct ClipboardApp {
     file_icon_paths: std::collections::HashMap<u64, std::path::PathBuf>,
     file_icon_loading: std::collections::HashSet<u64>,
     file_icon_failed: std::collections::HashSet<u64>,
+    missing_file_entries: std::collections::HashSet<u64>,
     search: Entity<InputState>,
     initial_focus: FocusHandle,
     window_handle: AnyWindowHandle,
@@ -269,6 +278,7 @@ impl ClipboardApp {
             file_icon_paths: std::collections::HashMap::new(),
             file_icon_loading: std::collections::HashSet::new(),
             file_icon_failed: std::collections::HashSet::new(),
+            missing_file_entries: std::collections::HashSet::new(),
             search,
             initial_focus,
             window_handle,
