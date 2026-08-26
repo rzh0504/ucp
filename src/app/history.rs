@@ -28,8 +28,6 @@ impl ClipboardApp {
         let double_click_copy = self.settings.double_click_copy;
         let quick_paste = self.settings.quick_paste;
         let counts = self.history.counts();
-        let file_icon_paths = self.file_icon_paths.clone();
-        let missing_file_entries = self.missing_file_entries.clone();
         let filters = TabBar::new("filters")
             .segmented()
             .large()
@@ -105,8 +103,8 @@ impl ClipboardApp {
                                 navigated,
                                 image_expanded,
                                 text_expanded,
-                                file_icon_paths.get(&entry.id).cloned(),
-                                missing_file_entries.contains(&entry.id),
+                                this.file_icon_paths.get(&entry.id).cloned(),
+                                this.missing_file_entries.contains(&entry.id),
                                 (
                                     show_copy_time,
                                     show_text_length,
@@ -210,9 +208,14 @@ impl ClipboardApp {
                     .background_spawn(async move {
                         let missing = files
                             .iter()
-                            .any(|file| !std::path::Path::new(file).try_exists().unwrap_or(false));
-                        let icon_path =
-                            crate::platform::file_icon::icon_path(std::path::Path::new(&file));
+                            .any(|file| {
+                                matches!(std::path::Path::new(file).try_exists(), Ok(false))
+                            });
+                        let icon_path = if missing {
+                            None
+                        } else {
+                            crate::platform::file_icon::icon_path(std::path::Path::new(&file))
+                        };
                         (icon_path, missing)
                     })
                     .await;
