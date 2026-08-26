@@ -482,6 +482,8 @@ impl ClipboardApp {
                                 .flex_1()
                                 .text_size(px(14.))
                                 .font_weight(FontWeight::MEDIUM)
+                                .text_color(cx.theme().muted_foreground)
+                                .when(!file_missing, |this| this.text_color(cx.theme().foreground))
                                 .truncate()
                                 .child(file_name),
                         ),
