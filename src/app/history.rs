@@ -530,6 +530,7 @@ impl ClipboardApp {
                 .py_2()
                 .child(if text_expanded {
                     div()
+                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                         .relative()
                         .flex_1()
                         .min_h_0()
