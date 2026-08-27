@@ -6,7 +6,7 @@ use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
     input::Input,
     menu::{ContextMenuExt as _, PopupMenuItem},
-    scroll::{Scrollbar, ScrollbarMode},
+    scroll::{ScrollableMask, Scrollbar, ScrollbarMode},
     tab::{Tab, TabBar},
     tag::Tag,
     v_flex, v_virtual_list,
@@ -19,6 +19,8 @@ const TEXT_LINE_HEIGHT: f32 = 24.;
 const TEXT_VERTICAL_PADDING: f32 = 16.;
 const TEXT_FOOTER_HEIGHT: f32 = 24.;
 const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
+const EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
+const COLLAPSED_TEXT_CHARACTER_LIMIT: usize = 240;
 
 impl ClipboardApp {
     pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -103,6 +105,7 @@ impl ClipboardApp {
                                 navigated,
                                 image_expanded,
                                 text_expanded,
+                                this.expanded_text_scroll.clone(),
                                 this.file_icon_paths.get(&entry.id).cloned(),
                                 this.missing_file_entries.contains(&entry.id),
                                 (
@@ -318,6 +321,7 @@ impl ClipboardApp {
         navigated: bool,
         image_expanded: bool,
         text_expanded: bool,
+        text_scroll: ScrollHandle,
         file_icon_path: Option<std::path::PathBuf>,
         file_missing: bool,
         options: (bool, bool, bool, bool),
@@ -444,7 +448,13 @@ impl ClipboardApp {
             _ => None,
         };
         let is_multiline = entry.is_multiline();
-        let can_expand_text = entry.text_line_count() > COLLAPSED_TEXT_LINES;
+        let can_expand_text = match &entry.content {
+            ClipboardContent::Text(text) => {
+                entry.text_line_count() > COLLAPSED_TEXT_LINES
+                    || text.chars().count() > COLLAPSED_TEXT_CHARACTER_LIMIT
+            }
+            _ => false,
+        };
         let content = if let ClipboardContent::Files(files) = &entry.content {
             let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
             let file_name = Self::file_name(first_file);
@@ -518,7 +528,29 @@ impl ClipboardApp {
                 .min_w_0()
                 .h_full()
                 .py_2()
-                .child(
+                .child(if text_expanded {
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            div()
+                                .id(ElementId::NamedInteger("text-scroll".into(), id))
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&text_scroll)
+                                .pr_3()
+                                .text_size(px(14.))
+                                .line_height(px(TEXT_LINE_HEIGHT))
+                                .child(title),
+                        )
+                        .child(
+                            ScrollableMask::new(Axis::Vertical, &text_scroll)
+                                .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
+                        )
+                        .child(Scrollbar::vertical(&text_scroll).mode(ScrollbarMode::Scrolling))
+                        .into_any_element()
+                } else {
                     div()
                         .flex_1()
                         .min_h_0()
@@ -526,8 +558,9 @@ impl ClipboardApp {
                         .text_size(px(14.))
                         .line_height(px(TEXT_LINE_HEIGHT))
                         .when(!is_multiline, |this| this.line_clamp(2))
-                        .child(title),
-                )
+                        .child(title)
+                        .into_any_element()
+                })
                 .child(
                     h_flex()
                         .h(px(24.))
@@ -783,6 +816,9 @@ impl ClipboardApp {
                     + IMAGE_ROW_CHROME_HEIGHT
             }
             ClipboardContent::Text(_) => {
+                if text_expanded {
+                    return EXPANDED_TEXT_ROW_HEIGHT;
+                }
                 if entry.text_line_count() <= 1 {
                     return 64.;
                 }
@@ -790,13 +826,9 @@ impl ClipboardApp {
                     ClipboardContent::Text(text) => text,
                     _ => unreachable!(),
                 };
-                let displayed_lines = if text_expanded {
-                    entry.text_line_count()
-                } else {
-                    Self::text_preview(text, COLLAPSED_TEXT_LINES)
-                        .lines()
-                        .count()
-                };
+                let displayed_lines = Self::text_preview(text, COLLAPSED_TEXT_LINES)
+                    .lines()
+                    .count();
                 displayed_lines as f32 * TEXT_LINE_HEIGHT
                     + TEXT_VERTICAL_PADDING
                     + TEXT_FOOTER_HEIGHT
@@ -832,6 +864,7 @@ impl ClipboardApp {
         }
 
         self.expanded_text_scroll_offset = Some(self.history_scroll.offset());
+        self.expanded_text_scroll.set_offset(point(px(0.), px(0.)));
         self.expanded_text_id = Some(id);
         cx.notify();
     }
