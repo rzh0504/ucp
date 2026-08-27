@@ -209,11 +209,9 @@ impl ClipboardApp {
             cx.spawn(async move |entity, cx| {
                 let (icon_path, missing) = cx
                     .background_spawn(async move {
-                        let missing = files
-                            .iter()
-                            .any(|file| {
-                                matches!(std::path::Path::new(file).try_exists(), Ok(false))
-                            });
+                        let missing = files.iter().any(|file| {
+                            matches!(std::path::Path::new(file).try_exists(), Ok(false))
+                        });
                         let icon_path = if missing {
                             None
                         } else {

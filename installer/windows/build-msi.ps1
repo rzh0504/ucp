@@ -33,8 +33,17 @@ $wix = $wix.Replace(
 $wix = $wix.Replace(
     '<File Id="ucp_exe" Source=',
     '<RegistryValue Root="HKLM" Key="Software\UCP\UCP" Name="InstallLocation" Type="string" Value="[INSTALLFOLDER]"/>
-          <File Id="ucp_exe" Source='
+           <File Id="ucp_exe" Source='
 )
+$releaseExecutable = Join-Path $PWD "target\release\ucp.exe"
+$customAction = @"
+    <Binary Id="PrepareForUpdateBinary" SourceFile="$releaseExecutable" />
+    <CustomAction Id="PrepareForUpdate" BinaryRef="PrepareForUpdateBinary" ExeCommand="--prepare-update" Execute="immediate" Return="check" Impersonate="yes" />
+    <InstallExecuteSequence>
+      <Custom Action="PrepareForUpdate" Before="InstallInitialize" />
+    </InstallExecuteSequence>
+"@
+$wix = $wix.Replace('</Package>', "$customAction`r`n  </Package>")
 if (-not $wix.Contains('StandardDirectory Id="ProgramFiles64Folder"')) {
     throw "Failed to configure the MSI for 64-bit Program Files."
 }
@@ -46,6 +55,15 @@ if (-not $wix.Contains('Id="InstallFolderSearch"')) {
 }
 if (-not $wix.Contains('Name="InstallLocation"')) {
     throw "Failed to add the MSI install-location registry value."
+}
+if (-not $wix.Contains('Id="PrepareForUpdate"')) {
+    throw "Failed to add the update preparation custom action."
+}
+if (-not $wix.Contains('Id="PrepareForUpdateBinary"')) {
+    throw "Failed to embed the update preparation executable."
+}
+if (-not $wix.Contains('Before="InstallInitialize"')) {
+    throw "Failed to schedule the update preparation custom action."
 }
 Set-Content -LiteralPath $wixFile -Value $wix -Encoding UTF8
 
