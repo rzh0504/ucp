@@ -19,9 +19,8 @@ const TEXT_LINE_HEIGHT: f32 = 24.;
 const TEXT_VERTICAL_PADDING: f32 = 16.;
 const TEXT_FOOTER_HEIGHT: f32 = 24.;
 const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
-const SINGLE_LINE_TEXT_ROW_HEIGHT: f32 = 88.;
+const SINGLE_LINE_TEXT_ROW_HEIGHT: f32 = 64.;
 const EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
-const TEXT_EXPANSION_CHAR_THRESHOLD: usize = 240;
 
 impl ClipboardApp {
     pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -332,7 +331,10 @@ impl ClipboardApp {
         let is_file = matches!(entry.content, ClipboardContent::Files(_));
         let title = match &entry.content {
             ClipboardContent::Text(text) if text_expanded => text.clone(),
-            ClipboardContent::Text(text) => Self::text_preview(text, COLLAPSED_TEXT_LINES),
+            ClipboardContent::Text(text) if entry.is_multiline() => {
+                Self::text_preview(text, COLLAPSED_TEXT_LINES)
+            }
+            ClipboardContent::Text(_) => entry.title_with_language(language),
             _ => entry.title_with_language(language),
         };
         let meta = match &entry.content {
@@ -447,10 +449,7 @@ impl ClipboardApp {
             _ => None,
         };
         let can_expand_text = match &entry.content {
-            ClipboardContent::Text(text) => {
-                entry.text_line_count() > COLLAPSED_TEXT_LINES
-                    || text.chars().count() > TEXT_EXPANSION_CHAR_THRESHOLD
-            }
+            ClipboardContent::Text(_) => entry.text_line_count() > COLLAPSED_TEXT_LINES,
             _ => false,
         };
         let content = if let ClipboardContent::Files(files) = &entry.content {
@@ -556,7 +555,7 @@ impl ClipboardApp {
                         .overflow_hidden()
                         .text_size(px(14.))
                         .line_height(px(TEXT_LINE_HEIGHT))
-                        .line_clamp(COLLAPSED_TEXT_LINES)
+                        .when(!entry.is_multiline(), |this| this.truncate())
                         .child(title)
                         .into_any_element()
                 })
@@ -822,18 +821,12 @@ impl ClipboardApp {
                 if text_expanded {
                     return EXPANDED_TEXT_ROW_HEIGHT;
                 }
-                if entry.text_line_count() <= 1
-                    && text.chars().count() <= TEXT_EXPANSION_CHAR_THRESHOLD
-                {
+                if entry.text_line_count() <= 1 {
                     return SINGLE_LINE_TEXT_ROW_HEIGHT;
                 }
-                let displayed_lines = if entry.text_line_count() <= 1 {
-                    COLLAPSED_TEXT_LINES
-                } else {
-                    Self::text_preview(text, COLLAPSED_TEXT_LINES)
-                        .lines()
-                        .count()
-                };
+                let displayed_lines = Self::text_preview(text, COLLAPSED_TEXT_LINES)
+                    .lines()
+                    .count();
                 displayed_lines.max(1) as f32 * TEXT_LINE_HEIGHT
                     + TEXT_VERTICAL_PADDING
                     + TEXT_FOOTER_HEIGHT
