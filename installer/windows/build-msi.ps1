@@ -35,15 +35,10 @@ $wix = $wix.Replace(
     '<RegistryValue Root="HKLM" Key="Software\UCP\UCP" Name="InstallLocation" Type="string" Value="[INSTALLFOLDER]"/>
            <File Id="ucp_exe" Source='
 )
-$releaseExecutable = Join-Path $PWD "target\release\ucp.exe"
-$customAction = @"
-    <Binary Id="PrepareForUpdateBinary" SourceFile="$releaseExecutable" />
-    <CustomAction Id="PrepareForUpdate" BinaryRef="PrepareForUpdateBinary" ExeCommand="--prepare-update" Execute="immediate" Return="check" Impersonate="yes" />
-    <InstallExecuteSequence>
-      <Custom Action="PrepareForUpdate" Before="InstallInitialize" />
-    </InstallExecuteSequence>
+$closeApplication = @"
+    <util:CloseApplication Id="CloseUcpBeforeInstall" Target="ucp.exe" Description="UCP is running. Close it before continuing." Elevated="yes" RebootPrompt="no" Timeout="30" />
 "@
-$wix = $wix.Replace('</Package>', "$customAction`r`n  </Package>")
+$wix = $wix.Replace('</Package>', "$closeApplication`r`n  </Package>")
 if (-not $wix.Contains('StandardDirectory Id="ProgramFiles64Folder"')) {
     throw "Failed to configure the MSI for 64-bit Program Files."
 }
@@ -56,22 +51,26 @@ if (-not $wix.Contains('Id="InstallFolderSearch"')) {
 if (-not $wix.Contains('Name="InstallLocation"')) {
     throw "Failed to add the MSI install-location registry value."
 }
-if (-not $wix.Contains('Id="PrepareForUpdate"')) {
-    throw "Failed to add the update preparation custom action."
-}
-if (-not $wix.Contains('Id="PrepareForUpdateBinary"')) {
-    throw "Failed to embed the update preparation executable."
-}
-if (-not $wix.Contains('Before="InstallInitialize"')) {
-    throw "Failed to schedule the update preparation custom action."
+if (-not $wix.Contains('Id="CloseUcpBeforeInstall"')) {
+    throw "Failed to add the native process shutdown action."
 }
 Set-Content -LiteralPath $wixFile -Value $wix -Encoding UTF8
 
 $wixProject = Get-Content -LiteralPath $wixProjectFile -Raw
 $wixProject = $wixProject.Replace(
+    '</ItemGroup>',
+    @"
+      <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+"@
+)
+$wixProject = $wixProject.Replace(
     '<OutputName>ucp</OutputName>',
     "<OutputName>ucp</OutputName>`r`n    <InstallerPlatform>x64</InstallerPlatform>"
 )
+if (-not $wixProject.Contains('WixToolset.Util.wixext')) {
+    throw "Failed to add the WiX Util extension."
+}
 Set-Content -LiteralPath $wixProjectFile -Value $wixProject -Encoding UTF8
 
 $configuration = "Release"

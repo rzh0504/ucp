@@ -182,59 +182,6 @@ pub fn notify_existing_instance_to_quit() {
 }
 
 #[cfg(windows)]
-pub fn prepare_for_update() -> i32 {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{OpenMutexW, WaitForSingleObject};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        IDOK, MB_ICONERROR, MB_ICONQUESTION, MB_OK, MB_OKCANCEL, MB_SETFOREGROUND, MessageBoxW,
-    };
-
-    let mutex_name = wide_null(MUTEX_NAME);
-    const SYNCHRONIZE: u32 = 0x0010_0000;
-    let handle = unsafe { OpenMutexW(SYNCHRONIZE, 0, mutex_name.as_ptr()) };
-    if handle.is_null() {
-        return 0;
-    }
-
-    let prompt = wide_null(
-        "UCP is currently running. Close UCP and continue the installation?\n\nClick Cancel to stop the installation.",
-    );
-    let title = wide_null("UCP Setup");
-    let response = unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            prompt.as_ptr(),
-            title.as_ptr(),
-            MB_OKCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND,
-        )
-    };
-    if response != IDOK {
-        unsafe { CloseHandle(handle) };
-        return 1602;
-    }
-
-    notify_existing_instance_to_quit();
-    let wait_result = unsafe { WaitForSingleObject(handle, 10_000) };
-    unsafe { CloseHandle(handle) };
-    if wait_result == WAIT_OBJECT_0 || wait_result == WAIT_ABANDONED {
-        return 0;
-    }
-
-    let message = wide_null(
-        "UCP could not be closed. End the remaining UCP process in Task Manager, then run the installer again.",
-    );
-    unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            message.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
-        );
-    }
-    1
-}
-
-#[cfg(windows)]
 pub fn take_activation_request() -> bool {
     ACTIVATION_REQUESTS.swap(0, std::sync::atomic::Ordering::AcqRel) != 0
 }

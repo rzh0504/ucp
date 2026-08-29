@@ -92,6 +92,13 @@ jobs:
         shell: pwsh
         run: .\installer\windows\build-msi.ps1
 
+      - name: Prepare Windows standalone executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Copy-Item -LiteralPath target/release/ucp.exe -Destination release-assets/ucp-windows.exe -Force
+
       - name: Collect installer artifacts
         shell: pwsh
         run: |
@@ -137,6 +144,10 @@ jobs:
               throw "Multiple installer artifacts have the same extension: $($file.Extension)"
             }
             Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+          }
+
+          if ($env:RUNNER_OS -eq "Windows" -and (Test-Path -LiteralPath "release-assets/ucp-windows.exe")) {
+            Write-Output "Prepared standalone Windows executable."
           }
 
           Get-ChildItem -LiteralPath release-assets -File | Select-Object Name, Length

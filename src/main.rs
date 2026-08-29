@@ -37,11 +37,6 @@ fn main() {
     }
 
     #[cfg(windows)]
-    if args.iter().any(|argument| argument == "--prepare-update") {
-        std::process::exit(platform::single_instance::prepare_for_update());
-    }
-
-    #[cfg(windows)]
     let _single_instance = match platform::single_instance::acquire() {
         platform::single_instance::SingleInstance::Primary(guard) => {
             platform::single_instance::start_activation_listener();
