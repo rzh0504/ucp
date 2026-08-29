@@ -14,12 +14,13 @@ use gpui_component::{
 use std::path::Path;
 use std::rc::Rc;
 
-const COLLAPSED_TEXT_LINES: usize = 6;
+const COLLAPSED_TEXT_LINES: usize = 4;
 const TEXT_LINE_HEIGHT: f32 = 24.;
 const TEXT_VERTICAL_PADDING: f32 = 16.;
 const TEXT_FOOTER_HEIGHT: f32 = 24.;
 const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
 const SINGLE_LINE_TEXT_ROW_HEIGHT: f32 = 64.;
+const TEXT_WIDTH_UNITS_PER_PREVIEW_LINE: usize = 130;
 const EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
 
 impl ClipboardApp {
@@ -331,10 +332,7 @@ impl ClipboardApp {
         let is_file = matches!(entry.content, ClipboardContent::Files(_));
         let title = match &entry.content {
             ClipboardContent::Text(text) if text_expanded => text.clone(),
-            ClipboardContent::Text(text) if entry.is_multiline() => {
-                Self::text_preview(text, COLLAPSED_TEXT_LINES)
-            }
-            ClipboardContent::Text(_) => entry.title_with_language(language),
+            ClipboardContent::Text(text) => text.clone(),
             _ => entry.title_with_language(language),
         };
         let meta = match &entry.content {
@@ -449,8 +447,12 @@ impl ClipboardApp {
             _ => None,
         };
         let can_expand_text = match &entry.content {
-            ClipboardContent::Text(_) => entry.text_line_count() > COLLAPSED_TEXT_LINES,
+            ClipboardContent::Text(text) => Self::text_line_estimate(text) > COLLAPSED_TEXT_LINES,
             _ => false,
+        };
+        let collapsed_text_lines = match &entry.content {
+            ClipboardContent::Text(text) => Self::collapsed_text_lines(text),
+            _ => 0,
         };
         let content = if let ClipboardContent::Files(files) = &entry.content {
             let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
@@ -550,12 +552,14 @@ impl ClipboardApp {
                         .into_any_element()
                 } else {
                     div()
-                        .flex_1()
                         .min_h_0()
+                        .flex_none()
+                        .h(px(collapsed_text_lines as f32 * TEXT_LINE_HEIGHT))
                         .overflow_hidden()
                         .text_size(px(14.))
                         .line_height(px(TEXT_LINE_HEIGHT))
-                        .when(!entry.is_multiline(), |this| this.truncate())
+                        .line_clamp(COLLAPSED_TEXT_LINES)
+                        .text_ellipsis()
                         .child(title)
                         .into_any_element()
                 })
@@ -821,13 +825,11 @@ impl ClipboardApp {
                 if text_expanded {
                     return EXPANDED_TEXT_ROW_HEIGHT;
                 }
-                if entry.text_line_count() <= 1 {
+                let collapsed_text_lines = Self::collapsed_text_lines(text);
+                if collapsed_text_lines == 1 {
                     return SINGLE_LINE_TEXT_ROW_HEIGHT;
                 }
-                let displayed_lines = Self::text_preview(text, COLLAPSED_TEXT_LINES)
-                    .lines()
-                    .count();
-                displayed_lines.max(1) as f32 * TEXT_LINE_HEIGHT
+                collapsed_text_lines as f32 * TEXT_LINE_HEIGHT
                     + TEXT_VERTICAL_PADDING
                     + TEXT_FOOTER_HEIGHT
                     + TEXT_ROW_CHROME_HEIGHT
@@ -867,15 +869,25 @@ impl ClipboardApp {
         cx.notify();
     }
 
-    fn text_preview(text: &str, max_lines: usize) -> String {
-        if max_lines == 0 {
-            return String::new();
+    fn collapsed_text_lines(text: &str) -> usize {
+        Self::text_line_estimate(text).clamp(1, COLLAPSED_TEXT_LINES)
+    }
+
+    fn text_line_estimate(text: &str) -> usize {
+        let text = text.trim_end_matches(['\r', '\n']);
+        if text.is_empty() {
+            return 1;
         }
 
-        let mut lines = text.lines();
-        let preview_lines = lines.by_ref().take(max_lines).collect::<Vec<_>>();
-
-        preview_lines.join("\n")
+        text.lines()
+            .map(|line| {
+                line.chars()
+                    .map(|character| if character.is_ascii() { 1 } else { 2 })
+                    .sum::<usize>()
+                    .div_ceil(TEXT_WIDTH_UNITS_PER_PREVIEW_LINE)
+                    .max(1)
+            })
+            .sum()
     }
 
     fn file_name(path: &str) -> String {
@@ -1131,5 +1143,31 @@ impl ClipboardApp {
         })
         .detach();
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClipboardApp;
+
+    #[test]
+    fn english_command_that_fits_one_line_stays_compact() {
+        assert_eq!(
+            ClipboardApp::text_line_estimate(
+                "watchxec --restart --watch src --watch assets --watch Cargo.toml --exts rs,toml,png,svg,ico -- cargo run"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn wide_characters_reserve_more_lines_than_ascii() {
+        assert_eq!(ClipboardApp::text_line_estimate(&"中".repeat(65)), 1);
+        assert_eq!(ClipboardApp::text_line_estimate(&"中".repeat(66)), 2);
+    }
+
+    #[test]
+    fn explicit_lines_are_estimated_independently() {
+        assert_eq!(ClipboardApp::text_line_estimate("short\nshort\nshort"), 3);
     }
 }

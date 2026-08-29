@@ -121,7 +121,7 @@ pub fn load_history(
 ) -> Result<ClipboardHistory, StorageError> {
     storage.with_connection(|connection| {
         let mut statement = connection.prepare(
-            "SELECT e.id, e.kind, e.text_content, e.image_width, e.image_height, e.image_preview_url, \
+            "SELECT e.id, e.kind, e.text_content, e.image_width, e.image_height, e.image_preview_url, e.content_hash, \
                     e.captured_at_millis, e.pinned, e.favorite, \
                     GROUP_CONCAT(f.path, '\x1F') as file_paths \
              FROM clipboard_entries e \
@@ -134,7 +134,7 @@ pub fn load_history(
             .query_map([], |row| {
                 let id = row.get::<_, i64>(0)? as u64;
                 let kind = row.get::<_, String>(1)?;
-                let captured_at_millis = row.get::<_, i64>(6)?;
+                let captured_at_millis = row.get::<_, i64>(7)?;
                 let captured_at = Local
                     .timestamp_millis_opt(captured_at_millis)
                     .single()
@@ -149,10 +149,11 @@ pub fn load_history(
                         height: row.get::<_, Option<i64>>(4)?.unwrap_or_default().max(0) as usize,
                         bytes: None,
                         preview_url: row.get(5)?,
+                        content_hash: row.get(6)?,
                     }),
                     "file" => {
                         let file_paths = row
-                            .get::<_, Option<String>>(9)?
+                            .get::<_, Option<String>>(10)?
                             .map(|paths| paths.split('\x1F').map(String::from).collect())
                             .unwrap_or_default();
                         ClipboardContent::Files(file_paths)
@@ -164,8 +165,8 @@ pub fn load_history(
                     id,
                     content,
                     captured_at,
-                    pinned: row.get::<_, i64>(7)? != 0,
-                    favorite: row.get::<_, i64>(8)? != 0,
+                    pinned: row.get::<_, i64>(8)? != 0,
+                    favorite: row.get::<_, i64>(9)? != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -200,6 +201,7 @@ pub fn load_image(
                             height,
                             bytes: None,
                             preview_url: None,
+                            content_hash: None,
                         }))
                 },
             )
@@ -509,7 +511,10 @@ fn open_connection() -> Result<Connection, StorageError> {
 fn content_hash_for_entry(entry: &ClipboardEntry, image_blob: Option<&[u8]>) -> Option<String> {
     match &entry.content {
         ClipboardContent::Text(text) => content_hash_from_parts("text", Some(text), None, &[]),
-        ClipboardContent::Image(_) => content_hash_from_parts("image", None, image_blob, &[]),
+        ClipboardContent::Image(image) => image
+            .content_hash
+            .clone()
+            .or_else(|| content_hash_from_parts("image", None, image_blob, &[])),
         ClipboardContent::Files(files) => content_hash_from_parts("file", None, None, files),
     }
 }

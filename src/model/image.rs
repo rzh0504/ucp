@@ -1,6 +1,7 @@
 use image::{
     ColorType, ImageBuffer, ImageEncoder, Rgba, codecs::png::PngEncoder, imageops::FilterType,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 const IMAGE_PREVIEW_MAX_WIDTH: usize = 1440;
@@ -13,6 +14,7 @@ pub struct ClipboardImage {
     pub height: usize,
     pub bytes: Option<Arc<Vec<u8>>>,
     pub preview_url: Option<String>,
+    pub content_hash: Option<String>,
 }
 
 impl PartialEq for ClipboardImage {
@@ -23,7 +25,7 @@ impl PartialEq for ClipboardImage {
 
         match (&self.bytes, &other.bytes) {
             (Some(left), Some(right)) => left == right,
-            _ => self.preview_url.is_some() && self.preview_url == other.preview_url,
+            _ => self.content_hash.is_some() && self.content_hash == other.content_hash,
         }
     }
 }
@@ -32,11 +34,13 @@ impl Eq for ClipboardImage {}
 
 impl ClipboardImage {
     pub fn from_rgba(width: usize, height: usize, bytes: Vec<u8>) -> Self {
+        let content_hash = image_content_hash(width, height, &bytes);
         Self {
             width,
             height,
             bytes: Some(Arc::new(bytes)),
             preview_url: None,
+            content_hash: Some(content_hash),
         }
     }
 
@@ -49,21 +53,26 @@ impl ClipboardImage {
         if bytes.starts_with(PNG_SIGNATURE) {
             let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
             let (width, height) = image.dimensions();
+            let bytes = image.into_raw();
+            let content_hash = image_content_hash(width as usize, height as usize, &bytes);
 
             return Some(Self {
                 width: width as usize,
                 height: height as usize,
-                bytes: Some(Arc::new(image.into_raw())),
+                bytes: Some(Arc::new(bytes)),
                 preview_url,
+                content_hash: Some(content_hash),
             });
         }
 
         let expected_len = width.checked_mul(height)?.checked_mul(4)?;
+        let content_hash = image_content_hash(width, height, &bytes);
         (bytes.len() == expected_len).then(|| Self {
             width,
             height,
             bytes: Some(Arc::new(bytes)),
             preview_url,
+            content_hash: Some(content_hash),
         })
     }
 
@@ -87,6 +96,16 @@ impl ClipboardImage {
         self.to_png_bytes()
             .or_else(|| self.rgba_bytes().map(Vec::from))
     }
+}
+
+fn image_content_hash(width: usize, height: usize, bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"image");
+    hasher.update(width.to_le_bytes());
+    hasher.update(height.to_le_bytes());
+    hasher.update(bytes.len().to_le_bytes());
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 fn encode_png(bytes: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
@@ -164,17 +183,20 @@ mod tests {
 
     #[test]
     fn metadata_only_image_matches_full_image_by_preview() {
+        let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
         let full = ClipboardImage {
             width: 2,
             height: 1,
-            bytes: Some(Arc::new(vec![255, 0, 0, 255, 0, 255, 0, 255])),
+            bytes: Some(Arc::new(bytes.clone())),
             preview_url: Some("preview".to_string()),
+            content_hash: Some(image_content_hash(2, 1, &bytes)),
         };
         let metadata_only = ClipboardImage {
             width: 2,
             height: 1,
             bytes: None,
             preview_url: Some("preview".to_string()),
+            content_hash: Some(image_content_hash(2, 1, &bytes)),
         };
 
         assert_eq!(metadata_only, full);
