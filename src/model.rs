@@ -13,9 +13,6 @@ pub const MIN_BACKGROUND_OPACITY: u8 = 45;
 pub const HISTORY_LIMIT_OPTIONS: [usize; 5] = [50, 100, 200, 500, 1000];
 pub const AUTO_CLEANUP_DAY_OPTIONS: [Option<u16>; 4] = [Some(7), Some(30), Some(60), None];
 
-const TEXT_LIST_PREVIEW_CHAR_LIMIT: usize = 500;
-const TEXT_LIST_PREVIEW_CHAR_LIMIT_MULTILINE: usize = 1500;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppLanguage {
     Chinese,
@@ -173,10 +170,6 @@ impl ClipboardContent {
         }
     }
 
-    pub fn is_multiline(&self) -> bool {
-        self.text_line_count() > 1
-    }
-
     pub fn normalized(self) -> Self {
         match self {
             Self::Text(text) => Self::Text(text),
@@ -193,10 +186,7 @@ impl ClipboardContent {
 
     pub fn title_with_language(&self, language: AppLanguage) -> String {
         match self {
-            Self::Text(text) => {
-                let is_multiline = self.is_multiline();
-                text_title(text, is_multiline)
-            }
+            Self::Text(text) => text.clone(),
             Self::Image(_) => crate::i18n::tr(language).image.to_string(),
             Self::Files(files) => {
                 if files.len() == 1 {
@@ -265,10 +255,6 @@ impl ClipboardEntry {
 
     pub fn size_label_with_language(&self, language: AppLanguage) -> String {
         self.content.size_label_with_language(language)
-    }
-
-    pub fn is_multiline(&self) -> bool {
-        self.content.is_multiline()
     }
 
     pub fn text_line_count(&self) -> usize {
@@ -644,29 +630,6 @@ fn sort_rc_entries(entries: &mut [Rc<ClipboardEntry>]) {
     });
 }
 
-fn text_title(text: &str, is_multiline: bool) -> String {
-    let char_limit = if is_multiline {
-        TEXT_LIST_PREVIEW_CHAR_LIMIT_MULTILINE
-    } else {
-        TEXT_LIST_PREVIEW_CHAR_LIMIT
-    };
-
-    let (preview, is_oversized) = text_prefix(text, char_limit);
-    if !is_oversized {
-        return text.to_string();
-    }
-
-    format!("{preview}...")
-}
-
-fn text_prefix(text: &str, char_limit: usize) -> (&str, bool) {
-    let Some((cutoff, _)) = text.char_indices().nth(char_limit) else {
-        return (text, false);
-    };
-
-    (&text[..cutoff], true)
-}
-
 fn format_bytes(bytes: usize) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
@@ -715,42 +678,6 @@ mod tests {
             entry.content,
             ClipboardContent::Text(saved_text) if saved_text == text
         ));
-    }
-
-    #[test]
-    fn oversized_text_title_is_shortened_for_list_rendering() {
-        let text = format!("{}tail", "a".repeat(TEXT_CONTENT_CHAR_LIMIT));
-        let title = ClipboardContent::Text(text).title_with_language(AppLanguage::English);
-
-        assert_eq!(
-            title.chars().count(),
-            TEXT_LIST_PREVIEW_CHAR_LIMIT + "...".chars().count()
-        );
-        assert!(title.ends_with("..."));
-        assert!(
-            title
-                .trim_end_matches("...")
-                .chars()
-                .all(|character| character == 'a')
-        );
-    }
-
-    #[test]
-    fn oversized_text_title_preserves_character_boundaries() {
-        let text = format!("{}界外", "好".repeat(TEXT_CONTENT_CHAR_LIMIT));
-        let title = ClipboardContent::Text(text).title_with_language(AppLanguage::Chinese);
-
-        assert_eq!(
-            title.chars().count(),
-            TEXT_LIST_PREVIEW_CHAR_LIMIT + "...".chars().count()
-        );
-        assert!(title.ends_with("..."));
-        assert!(
-            title
-                .trim_end_matches("...")
-                .chars()
-                .all(|character| character == '好')
-        );
     }
 
     #[test]

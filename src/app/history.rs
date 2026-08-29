@@ -19,8 +19,9 @@ const TEXT_LINE_HEIGHT: f32 = 24.;
 const TEXT_VERTICAL_PADDING: f32 = 16.;
 const TEXT_FOOTER_HEIGHT: f32 = 24.;
 const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
+const SINGLE_LINE_TEXT_ROW_HEIGHT: f32 = 88.;
 const EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
-const COLLAPSED_TEXT_CHARACTER_LIMIT: usize = 240;
+const TEXT_EXPANSION_CHAR_THRESHOLD: usize = 240;
 
 impl ClipboardApp {
     pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -445,11 +446,10 @@ impl ClipboardApp {
             }
             _ => None,
         };
-        let is_multiline = entry.is_multiline();
         let can_expand_text = match &entry.content {
             ClipboardContent::Text(text) => {
                 entry.text_line_count() > COLLAPSED_TEXT_LINES
-                    || text.chars().count() > COLLAPSED_TEXT_CHARACTER_LIMIT
+                    || text.chars().count() > TEXT_EXPANSION_CHAR_THRESHOLD
             }
             _ => false,
         };
@@ -556,7 +556,7 @@ impl ClipboardApp {
                         .overflow_hidden()
                         .text_size(px(14.))
                         .line_height(px(TEXT_LINE_HEIGHT))
-                        .when(!is_multiline, |this| this.line_clamp(2))
+                        .line_clamp(COLLAPSED_TEXT_LINES)
                         .child(title)
                         .into_any_element()
                 })
@@ -815,20 +815,26 @@ impl ClipboardApp {
                     + IMAGE_ROW_CHROME_HEIGHT
             }
             ClipboardContent::Text(_) => {
-                if text_expanded {
-                    return EXPANDED_TEXT_ROW_HEIGHT;
-                }
-                if entry.text_line_count() <= 1 {
-                    return 64.;
-                }
                 let text = match &entry.content {
                     ClipboardContent::Text(text) => text,
                     _ => unreachable!(),
                 };
-                let displayed_lines = Self::text_preview(text, COLLAPSED_TEXT_LINES)
-                    .lines()
-                    .count();
-                displayed_lines as f32 * TEXT_LINE_HEIGHT
+                if text_expanded {
+                    return EXPANDED_TEXT_ROW_HEIGHT;
+                }
+                if entry.text_line_count() <= 1
+                    && text.chars().count() <= TEXT_EXPANSION_CHAR_THRESHOLD
+                {
+                    return SINGLE_LINE_TEXT_ROW_HEIGHT;
+                }
+                let displayed_lines = if entry.text_line_count() <= 1 {
+                    COLLAPSED_TEXT_LINES
+                } else {
+                    Self::text_preview(text, COLLAPSED_TEXT_LINES)
+                        .lines()
+                        .count()
+                };
+                displayed_lines.max(1) as f32 * TEXT_LINE_HEIGHT
                     + TEXT_VERTICAL_PADDING
                     + TEXT_FOOTER_HEIGHT
                     + TEXT_ROW_CHROME_HEIGHT
