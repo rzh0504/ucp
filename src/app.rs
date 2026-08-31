@@ -520,7 +520,7 @@ impl Render for ClipboardApp {
                     .min_h_0()
                     .overflow_hidden()
                     .child(if page == AppPage::History {
-                        self.render_history(cx).into_any_element()
+                        self.render_history(window, cx).into_any_element()
                     } else {
                         self.render_settings(cx).into_any_element()
                     }),

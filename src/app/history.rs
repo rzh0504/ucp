@@ -22,15 +22,29 @@ const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
 const SINGLE_LINE_TEXT_ROW_HEIGHT: f32 = 64.;
 const TEXT_WIDTH_UNITS_PER_PREVIEW_LINE: usize = 130;
 const MAX_EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
+const COLLAPSED_IMAGE_ROW_HEIGHT: f32 = 180.;
+const COLLAPSED_IMAGE_MAX_WIDTH: f32 = 220.;
+const COLLAPSED_IMAGE_MAX_HEIGHT: f32 = 140.;
+const EXPANDED_IMAGE_MAX_WIDTH: f32 = 800.;
+const EXPANDED_IMAGE_MAX_HEIGHT: f32 = 600.;
+const MIN_EXPANDED_IMAGE_AREA_HEIGHT: f32 = 180.;
+const IMAGE_ROW_CHROME_HEIGHT: f32 = 40.;
+const IMAGE_ROW_HORIZONTAL_SPACE: f32 = 100.;
 
 impl ClipboardApp {
-    pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_history(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let language = self.settings.language;
         let show_copy_time = self.settings.show_copy_time;
         let show_text_length = self.settings.show_text_length;
         let double_click_copy = self.settings.double_click_copy;
         let quick_paste = self.settings.quick_paste;
         let counts = self.history.counts();
+        let image_max_width = (window.viewport_size().width.as_f32() - IMAGE_ROW_HORIZONTAL_SPACE)
+            .clamp(1., EXPANDED_IMAGE_MAX_WIDTH);
         let filters = TabBar::new("filters")
             .segmented()
             .large()
@@ -68,6 +82,7 @@ impl ClipboardApp {
                             entry,
                             self.expanded_image_id == Some(entry.id),
                             self.expanded_text_id == Some(entry.id),
+                            image_max_width,
                         )),
                     )
                 })
@@ -106,6 +121,7 @@ impl ClipboardApp {
                                 navigated,
                                 image_expanded,
                                 text_expanded,
+                                image_max_width,
                                 this.expanded_text_scroll.clone(),
                                 this.file_icon_paths.get(&entry.id).cloned(),
                                 this.missing_file_entries.contains(&entry.id),
@@ -320,6 +336,7 @@ impl ClipboardApp {
         navigated: bool,
         image_expanded: bool,
         text_expanded: bool,
+        image_max_width: f32,
         text_scroll: ScrollHandle,
         file_icon_path: Option<std::path::PathBuf>,
         file_missing: bool,
@@ -343,10 +360,16 @@ impl ClipboardApp {
         let copy_time = crate::i18n::relative_time(language, entry.captured_at);
         let favorite = entry.favorite;
         let app = cx.entity().downgrade();
-        let row_height = Self::entry_height(&entry, image_expanded, text_expanded);
+        let row_height = Self::entry_height(&entry, image_expanded, text_expanded, image_max_width);
         let muted_foreground = cx.theme().muted_foreground;
         let image_content = match &entry.content {
             ClipboardContent::Image(image) => {
+                let (preview_width, preview_height) = Self::image_display_size(
+                    image.width,
+                    image.height,
+                    image_expanded,
+                    image_max_width,
+                );
                 let placeholder = move || {
                     div()
                         .size_full()
@@ -388,8 +411,9 @@ impl ClipboardApp {
                                 .justify_center()
                                 .child(
                                     div()
-                                        .when(!image_expanded, |this| this.w(px(220.)).h(px(140.)))
-                                        .when(image_expanded, |this| this.size_full())
+                                        .w(px(preview_width))
+                                        .h(px(preview_height))
+                                        .flex_none()
                                         .overflow_hidden()
                                         .bg(cx.theme().background)
                                         .child(preview),
@@ -817,20 +841,20 @@ impl ClipboardApp {
             .into_any_element()
     }
 
-    fn entry_height(entry: &ClipboardEntry, image_expanded: bool, text_expanded: bool) -> f32 {
+    fn entry_height(
+        entry: &ClipboardEntry,
+        image_expanded: bool,
+        text_expanded: bool,
+        image_max_width: f32,
+    ) -> f32 {
         match &entry.content {
             ClipboardContent::Image(image) => {
                 if !image_expanded {
-                    return 180.;
+                    return COLLAPSED_IMAGE_ROW_HEIGHT;
                 }
-                const EXPANDED_IMAGE_WIDTH: f32 = 800.;
-                const MIN_EXPANDED_IMAGE_HEIGHT: f32 = 180.;
-                const MAX_EXPANDED_IMAGE_HEIGHT: f32 = 600.;
-                const IMAGE_ROW_CHROME_HEIGHT: f32 = 40.;
-                let aspect_height =
-                    EXPANDED_IMAGE_WIDTH * image.height as f32 / image.width.max(1) as f32;
-                aspect_height.clamp(MIN_EXPANDED_IMAGE_HEIGHT, MAX_EXPANDED_IMAGE_HEIGHT)
-                    + IMAGE_ROW_CHROME_HEIGHT
+                let (_, image_height) =
+                    Self::image_display_size(image.width, image.height, true, image_max_width);
+                image_height.max(MIN_EXPANDED_IMAGE_AREA_HEIGHT) + IMAGE_ROW_CHROME_HEIGHT
             }
             ClipboardContent::Text(_) => {
                 let text = match &entry.content {
@@ -848,6 +872,29 @@ impl ClipboardApp {
             }
             ClipboardContent::Files(_) => 76.,
         }
+    }
+
+    fn image_display_size(
+        width: usize,
+        height: usize,
+        expanded: bool,
+        image_max_width: f32,
+    ) -> (f32, f32) {
+        let width = width.max(1) as f32;
+        let height = height.max(1) as f32;
+        let max_width = if expanded {
+            image_max_width
+        } else {
+            image_max_width.min(COLLAPSED_IMAGE_MAX_WIDTH)
+        };
+        let max_height = if expanded {
+            EXPANDED_IMAGE_MAX_HEIGHT
+        } else {
+            COLLAPSED_IMAGE_MAX_HEIGHT
+        };
+        let scale = (max_width / width).min(max_height / height).min(1.);
+
+        (width * scale, height * scale)
     }
 
     fn toggle_image_expansion(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -1203,7 +1250,7 @@ mod tests {
     fn expanded_text_height_tracks_its_content() {
         let entry = ClipboardEntry::new(1, ClipboardContent::Text("1\n2\n3\n4\n5\n6".to_string()));
 
-        assert_eq!(ClipboardApp::entry_height(&entry, false, true), 192.);
+        assert_eq!(ClipboardApp::entry_height(&entry, false, true, 800.), 192.);
         assert!(!ClipboardApp::expanded_text_overflows("1\n2\n3\n4\n5\n6"));
     }
 
@@ -1216,9 +1263,31 @@ mod tests {
         let entry = ClipboardEntry::new(1, ClipboardContent::Text(text.clone()));
 
         assert_eq!(
-            ClipboardApp::entry_height(&entry, false, true),
+            ClipboardApp::entry_height(&entry, false, true, 800.),
             MAX_EXPANDED_TEXT_ROW_HEIGHT
         );
         assert!(ClipboardApp::expanded_text_overflows(&text));
+    }
+
+    #[test]
+    fn tall_image_preview_preserves_aspect_ratio() {
+        let collapsed = ClipboardApp::image_display_size(342, 723, false, 800.);
+        let expanded = ClipboardApp::image_display_size(342, 723, true, 800.);
+
+        assert!((collapsed.0 / collapsed.1 - 342. / 723.).abs() < f32::EPSILON);
+        assert_eq!(collapsed.1, 140.);
+        assert!((expanded.0 / expanded.1 - 342. / 723.).abs() < f32::EPSILON);
+        assert_eq!(expanded.1, 600.);
+    }
+
+    #[test]
+    fn image_preview_never_upscales_or_exceeds_available_width() {
+        assert_eq!(
+            ClipboardApp::image_display_size(50, 100, true, 800.),
+            (50., 100.)
+        );
+
+        let narrow_window = ClipboardApp::image_display_size(1600, 900, true, 400.);
+        assert_eq!(narrow_window, (400., 225.));
     }
 }
