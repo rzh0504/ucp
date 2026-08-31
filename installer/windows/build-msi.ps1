@@ -36,7 +36,7 @@ $wix = $wix.Replace(
            <File Id="ucp_exe" Source='
 )
 $closeApplication = @"
-    <util:CloseApplication Id="CloseUcpBeforeInstall" Target="ucp.exe" Description="UCP is running. Close it before continuing." Elevated="yes" RebootPrompt="no" Timeout="30" />
+    <util:CloseApplication Id="CloseUcpBeforeInstall" Target="ucp.exe" Description="UCP is running. Close it before continuing." RebootPrompt="no" Timeout="30" />
 "@
 $wix = $wix.Replace('</Package>', "$closeApplication`r`n  </Package>")
 if (-not $wix.Contains('StandardDirectory Id="ProgramFiles64Folder"')) {
