@@ -21,7 +21,7 @@ const TEXT_FOOTER_HEIGHT: f32 = 24.;
 const TEXT_ROW_CHROME_HEIGHT: f32 = 8.;
 const SINGLE_LINE_TEXT_ROW_HEIGHT: f32 = 64.;
 const TEXT_WIDTH_UNITS_PER_PREVIEW_LINE: usize = 130;
-const EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
+const MAX_EXPANDED_TEXT_ROW_HEIGHT: f32 = 448.;
 
 impl ClipboardApp {
     pub(super) fn render_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -454,6 +454,10 @@ impl ClipboardApp {
             ClipboardContent::Text(text) => Self::collapsed_text_lines(text),
             _ => 0,
         };
+        let expanded_text_overflows = match &entry.content {
+            ClipboardContent::Text(text) => text_expanded && Self::expanded_text_overflows(text),
+            _ => false,
+        };
         let content = if let ClipboardContent::Files(files) = &entry.content {
             let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
             let file_name = Self::file_name(first_file);
@@ -528,28 +532,39 @@ impl ClipboardApp {
                 .h_full()
                 .py_2()
                 .child(if text_expanded {
-                    div()
-                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-                        .relative()
-                        .flex_1()
-                        .min_h_0()
-                        .child(
-                            div()
-                                .id(ElementId::NamedInteger("text-scroll".into(), id))
-                                .size_full()
-                                .overflow_y_scroll()
-                                .track_scroll(&text_scroll)
-                                .pr_3()
-                                .text_size(px(14.))
-                                .line_height(px(TEXT_LINE_HEIGHT))
-                                .child(title),
-                        )
-                        .child(
-                            ScrollableMask::new(Axis::Vertical, &text_scroll)
-                                .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
-                        )
-                        .child(Scrollbar::vertical(&text_scroll).mode(ScrollbarMode::Scrolling))
-                        .into_any_element()
+                    if expanded_text_overflows {
+                        div()
+                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .child(
+                                div()
+                                    .id(ElementId::NamedInteger("text-scroll".into(), id))
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&text_scroll)
+                                    .pr_3()
+                                    .text_size(px(14.))
+                                    .line_height(px(TEXT_LINE_HEIGHT))
+                                    .child(title),
+                            )
+                            .child(
+                                ScrollableMask::new(Axis::Vertical, &text_scroll)
+                                    .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
+                            )
+                            .child(Scrollbar::vertical(&text_scroll).mode(ScrollbarMode::Scrolling))
+                            .into_any_element()
+                    } else {
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .pr_3()
+                            .text_size(px(14.))
+                            .line_height(px(TEXT_LINE_HEIGHT))
+                            .child(title)
+                            .into_any_element()
+                    }
                 } else {
                     div()
                         .min_h_0()
@@ -823,16 +838,13 @@ impl ClipboardApp {
                     _ => unreachable!(),
                 };
                 if text_expanded {
-                    return EXPANDED_TEXT_ROW_HEIGHT;
+                    return Self::expanded_text_row_height(text);
                 }
                 let collapsed_text_lines = Self::collapsed_text_lines(text);
                 if collapsed_text_lines == 1 {
                     return SINGLE_LINE_TEXT_ROW_HEIGHT;
                 }
-                collapsed_text_lines as f32 * TEXT_LINE_HEIGHT
-                    + TEXT_VERTICAL_PADDING
-                    + TEXT_FOOTER_HEIGHT
-                    + TEXT_ROW_CHROME_HEIGHT
+                Self::text_row_height(collapsed_text_lines)
             }
             ClipboardContent::Files(_) => 76.,
         }
@@ -869,8 +881,23 @@ impl ClipboardApp {
         cx.notify();
     }
 
+    fn expanded_text_row_height(text: &str) -> f32 {
+        Self::text_row_height(Self::text_line_estimate(text)).min(MAX_EXPANDED_TEXT_ROW_HEIGHT)
+    }
+
+    fn expanded_text_overflows(text: &str) -> bool {
+        Self::text_row_height(Self::text_line_estimate(text)) > MAX_EXPANDED_TEXT_ROW_HEIGHT
+    }
+
     fn collapsed_text_lines(text: &str) -> usize {
         Self::text_line_estimate(text).clamp(1, COLLAPSED_TEXT_LINES)
+    }
+
+    fn text_row_height(line_count: usize) -> f32 {
+        line_count as f32 * TEXT_LINE_HEIGHT
+            + TEXT_VERTICAL_PADDING
+            + TEXT_FOOTER_HEIGHT
+            + TEXT_ROW_CHROME_HEIGHT
     }
 
     fn text_line_estimate(text: &str) -> usize {
@@ -1148,7 +1175,8 @@ impl ClipboardApp {
 
 #[cfg(test)]
 mod tests {
-    use super::ClipboardApp;
+    use super::{ClipboardApp, MAX_EXPANDED_TEXT_ROW_HEIGHT};
+    use crate::model::{ClipboardContent, ClipboardEntry};
 
     #[test]
     fn english_command_that_fits_one_line_stays_compact() {
@@ -1169,5 +1197,28 @@ mod tests {
     #[test]
     fn explicit_lines_are_estimated_independently() {
         assert_eq!(ClipboardApp::text_line_estimate("short\nshort\nshort"), 3);
+    }
+
+    #[test]
+    fn expanded_text_height_tracks_its_content() {
+        let entry = ClipboardEntry::new(1, ClipboardContent::Text("1\n2\n3\n4\n5\n6".to_string()));
+
+        assert_eq!(ClipboardApp::entry_height(&entry, false, true), 192.);
+        assert!(!ClipboardApp::expanded_text_overflows("1\n2\n3\n4\n5\n6"));
+    }
+
+    #[test]
+    fn expanded_text_height_is_capped_and_scrollable() {
+        let text = (1..=17)
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let entry = ClipboardEntry::new(1, ClipboardContent::Text(text.clone()));
+
+        assert_eq!(
+            ClipboardApp::entry_height(&entry, false, true),
+            MAX_EXPANDED_TEXT_ROW_HEIGHT
+        );
+        assert!(ClipboardApp::expanded_text_overflows(&text));
     }
 }
