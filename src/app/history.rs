@@ -306,6 +306,27 @@ impl ClipboardApp {
                 cx.notify();
                 None
             }
+            "enter" => {
+                let target = self.navigation_entry_id.or_else(|| {
+                    if self.selected_entry_ids.len() == 1 {
+                        self.selected_entry_ids.iter().next().copied()
+                    } else {
+                        None
+                    }
+                });
+                if let Some(id) = target
+                    .filter(|id| self.visible_entries.iter().any(|entry| entry.id == *id))
+                {
+                    self.selected_entry_ids.clear();
+                    self.selection_anchor_id = None;
+                    self.navigation_entry_id = None;
+                    let quick_paste = self.settings.quick_paste;
+                    self.copy_entry(id, quick_paste, Some(window.window_handle()), cx);
+                }
+                cx.stop_propagation();
+                cx.notify();
+                None
+            }
             _ => return,
         }) else {
             return;
@@ -973,7 +994,7 @@ impl ClipboardApp {
             .to_string()
     }
 
-    fn copy_entry(
+    pub(super) fn copy_entry(
         &mut self,
         id: u64,
         allow_quick_paste: bool,

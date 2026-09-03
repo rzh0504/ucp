@@ -241,12 +241,27 @@ impl ClipboardApp {
         initial_focus.focus(window, cx);
         let subscriptions = vec![cx.subscribe_in(&search, window, {
             let search = search.clone();
-            move |this, _, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.query = search.read(cx).value().to_string();
-                    this.refresh_visible_entries();
-                    this.preload_file_icons(cx);
-                    cx.notify();
+            move |this, _, event: &InputEvent, window, cx| {
+                match event {
+                    InputEvent::Change => {
+                        this.query = search.read(cx).value().to_string();
+                        this.refresh_visible_entries();
+                        this.preload_file_icons(cx);
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { .. } => {
+                        let Some(entry) = this.visible_entries.first().cloned() else {
+                            return;
+                        };
+                        let id = entry.id;
+                        this.selected_entry_ids.clear();
+                        this.selection_anchor_id = None;
+                        this.navigation_entry_id = None;
+                        let quick_paste = this.settings.quick_paste;
+                        let window_handle = window.window_handle();
+                        this.copy_entry(id, quick_paste, Some(window_handle), cx);
+                    }
+                    _ => {}
                 }
             }
         })];
