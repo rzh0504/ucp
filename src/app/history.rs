@@ -4,6 +4,7 @@ use crate::model::{
 };
 use crate::services::ClipboardService;
 use gpui::{prelude::FluentBuilder as _, *};
+use gpui_base::SelectableText;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
     input::Input,
@@ -16,6 +17,7 @@ use gpui_component::{
 };
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 const COLLAPSED_TEXT_LINES: usize = 4;
 const TEXT_LINE_HEIGHT: f32 = 24.;
@@ -60,6 +62,21 @@ fn estimate_scan_prefix(text: &str) -> &str {
         end -= 1;
     }
     &text[..end]
+}
+
+/// Fades expanded entry content in. The row height itself must never animate:
+/// the virtual list derives it per frame, so only opacity moves.
+fn expand_reveal<E>(name: &'static str, id: u64, element: E) -> AnyElement
+where
+    E: IntoElement + Styled + 'static,
+{
+    element
+        .with_animation(
+            ElementId::NamedInteger(name.into(), id),
+            Animation::new(Duration::from_millis(150)).with_easing(ease_out_quint()),
+            |element, delta| element.opacity(delta),
+        )
+        .into_any_element()
 }
 
 impl ClipboardApp {
@@ -456,31 +473,34 @@ impl ClipboardApp {
                             .into_any_element()
                     })
                     .unwrap_or_else(placeholder);
+                let preview_area = div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .p_2()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(px(preview_width))
+                            .h(px(preview_height))
+                            .flex_none()
+                            .overflow_hidden()
+                            .bg(cx.theme().background)
+                            .child(preview),
+                    );
                 Some(
                     v_flex()
                         .flex_1()
                         .min_w_0()
                         .h_full()
                         .overflow_hidden()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_hidden()
-                                .p_2()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    div()
-                                        .w(px(preview_width))
-                                        .h(px(preview_height))
-                                        .flex_none()
-                                        .overflow_hidden()
-                                        .bg(cx.theme().background)
-                                        .child(preview),
-                                ),
-                        )
+                        .child(if image_expanded {
+                            expand_reveal("image-reveal", id, preview_area)
+                        } else {
+                            preview_area.into_any_element()
+                        })
                         .child(
                             h_flex()
                                 .h(px(24.))
@@ -617,38 +637,61 @@ impl ClipboardApp {
                 .h_full()
                 .py_2()
                 .child(if text_expanded {
+                    // Expanded text is a reading surface: its own clicks stop
+                    // here so drag-selecting text never toggles the row
+                    // selection underneath.
                     if expanded_text_overflows {
-                        div()
-                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .child(
-                                div()
-                                    .id(ElementId::NamedInteger("text-scroll".into(), id))
-                                    .size_full()
-                                    .overflow_y_scroll()
-                                    .track_scroll(&text_scroll)
-                                    .pr_3()
-                                    .text_size(px(14.))
-                                    .line_height(px(TEXT_LINE_HEIGHT))
-                                    .child(title),
-                            )
-                            .child(
-                                ScrollableMask::new(Axis::Vertical, &text_scroll)
-                                    .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
-                            )
-                            .child(Scrollbar::vertical(&text_scroll).mode(ScrollbarMode::Scrolling))
-                            .into_any_element()
+                        expand_reveal(
+                            "text-reveal",
+                            id,
+                            div()
+                                .id(ElementId::NamedInteger("text-expanded".into(), id))
+                                .on_click(|_, _, cx| cx.stop_propagation())
+                                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .child(
+                                    div()
+                                        .id(ElementId::NamedInteger("text-scroll".into(), id))
+                                        .size_full()
+                                        .overflow_y_scroll()
+                                        .track_scroll(&text_scroll)
+                                        .pr_3()
+                                        .text_size(px(14.))
+                                        .line_height(px(TEXT_LINE_HEIGHT))
+                                        .child(SelectableText::new(
+                                            ElementId::NamedInteger("entry-text".into(), id),
+                                            title,
+                                        )),
+                                )
+                                .child(
+                                    ScrollableMask::new(Axis::Vertical, &text_scroll).id(
+                                        ElementId::NamedInteger("text-scroll-mask".into(), id),
+                                    ),
+                                )
+                                .child(
+                                    Scrollbar::vertical(&text_scroll)
+                                        .mode(ScrollbarMode::Scrolling),
+                                ),
+                        )
                     } else {
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .pr_3()
-                            .text_size(px(14.))
-                            .line_height(px(TEXT_LINE_HEIGHT))
-                            .child(title)
-                            .into_any_element()
+                        expand_reveal(
+                            "text-reveal",
+                            id,
+                            div()
+                                .id(ElementId::NamedInteger("text-expanded".into(), id))
+                                .on_click(|_, _, cx| cx.stop_propagation())
+                                .flex_1()
+                                .min_h_0()
+                                .pr_3()
+                                .text_size(px(14.))
+                                .line_height(px(TEXT_LINE_HEIGHT))
+                                .child(SelectableText::new(
+                                    ElementId::NamedInteger("entry-text".into(), id),
+                                    title,
+                                )),
+                        )
                     }
                 } else {
                     div()
