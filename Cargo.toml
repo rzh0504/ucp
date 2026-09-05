@@ -9,10 +9,10 @@ license-file = "LICENSE"
 arboard = "3"
 async-channel = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-gpui = { git = "https://github.com/zed-industries/zed", features = ["test-support"] }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+gpui = { package = "gpui-pre", version = "0.3" }
+gpui_platform = { package = "gpui-pre-platform", version = "0.3", features = ["font-kit", "x11", "wayland"] }
+gpui-component = "0.6"
+gpui-kit-assets = "0.6"
 smol = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -21,6 +21,9 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "2"
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "0.3", features = ["test-support"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5", features = ["monitor"] }

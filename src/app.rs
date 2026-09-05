@@ -15,7 +15,7 @@ use gpui_component::{
     status_bar::StatusBar,
     v_flex,
 };
-use gpui_component_assets::Assets;
+use gpui_kit_assets::Assets;
 use std::borrow::Cow;
 
 mod history;
