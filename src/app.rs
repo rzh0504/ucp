@@ -6,7 +6,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
     ActiveTheme as _, FocusableExt as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode,
-    TitleBar, WindowExt as _,
+    ThemeTokens, TitleBar, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
@@ -352,11 +352,12 @@ impl ClipboardApp {
         theme.danger_active = theme.title_bar;
         theme.danger_foreground = theme.foreground;
 
-        theme.tokens.background = theme.background.into();
-        theme.tokens.muted = theme.muted.into();
-        theme.tokens.secondary = theme.secondary.into();
-        theme.tokens.accent = theme.accent.into();
-        theme.tokens.status_bar = theme.status_bar.into();
+        // Rebuild every component token from the overridden colors, then project
+        // the theme onto the Base layer. Components such as the segmented TabBar
+        // read tokens, and Base-owned elements (scrollbars, text selection,
+        // resize handles) only see palette changes through `sync_base`.
+        theme.tokens = ThemeTokens::from(theme.colors);
+        Theme::sync_base(cx);
     }
 
     fn apply_theme(theme: crate::model::AppTheme, cx: &mut App) {
