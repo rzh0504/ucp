@@ -4,7 +4,6 @@ use crate::model::{
 };
 use crate::services::ClipboardService;
 use gpui::{prelude::FluentBuilder as _, *};
-use gpui_base::SelectableText;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
     input::Input,
@@ -637,16 +636,11 @@ impl ClipboardApp {
                 .h_full()
                 .py_2()
                 .child(if text_expanded {
-                    // Expanded text is a reading surface: its own clicks stop
-                    // here so drag-selecting text never toggles the row
-                    // selection underneath.
                     if expanded_text_overflows {
                         expand_reveal(
                             "text-reveal",
                             id,
                             div()
-                                .id(ElementId::NamedInteger("text-expanded".into(), id))
-                                .on_click(|_, _, cx| cx.stop_propagation())
                                 .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                                 .relative()
                                 .flex_1()
@@ -660,10 +654,7 @@ impl ClipboardApp {
                                         .pr_3()
                                         .text_size(px(14.))
                                         .line_height(px(TEXT_LINE_HEIGHT))
-                                        .child(SelectableText::new(
-                                            ElementId::NamedInteger("entry-text".into(), id),
-                                            title,
-                                        )),
+                                        .child(title),
                                 )
                                 .child(
                                     ScrollableMask::new(Axis::Vertical, &text_scroll).id(
@@ -680,17 +671,12 @@ impl ClipboardApp {
                             "text-reveal",
                             id,
                             div()
-                                .id(ElementId::NamedInteger("text-expanded".into(), id))
-                                .on_click(|_, _, cx| cx.stop_propagation())
                                 .flex_1()
                                 .min_h_0()
                                 .pr_3()
                                 .text_size(px(14.))
                                 .line_height(px(TEXT_LINE_HEIGHT))
-                                .child(SelectableText::new(
-                                    ElementId::NamedInteger("entry-text".into(), id),
-                                    title,
-                                )),
+                                .child(title),
                         )
                     }
                 } else {

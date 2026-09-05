@@ -7239,7 +7239,6 @@ dependencies = [
  "async-channel",
  "chrono",
  "clipboard-win",
- "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
  "gpui-pre",
