@@ -146,6 +146,7 @@ struct ClipboardApp {
     storage: ClipboardStorage,
     settings: AppSettings,
     history: ClipboardHistory,
+    history_loading: bool,
     query: String,
     filter: ClipboardFilter,
     page: AppPage,
@@ -224,8 +225,9 @@ impl ClipboardApp {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (storage, settings, history) =
+        let (storage, settings) =
             ClipboardService::initialize().expect("Failed to initialize clipboard service");
+        let history = ClipboardHistory::from_entries(settings.history_limit, Vec::new());
         #[cfg(windows)]
         platform::single_instance::configure_global_hotkey(&settings.global_show_shortcut);
         let theme_mode = if matches!(settings.theme, crate::model::AppTheme::Dark) {
@@ -275,6 +277,7 @@ impl ClipboardApp {
             storage,
             settings,
             history,
+            history_loading: true,
             query: String::new(),
             filter: ClipboardFilter::All,
             page: AppPage::History,
@@ -303,10 +306,43 @@ impl ClipboardApp {
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
-        app.refresh_visible_entries();
-        app.preload_file_icons(cx);
-        app.start_clipboard_monitor(update_rx, cx);
+        app.load_history(update_rx, cx);
         app
+    }
+
+    /// Loads the persisted history off the UI thread, then starts consuming
+    /// clipboard updates. Events that arrive while loading wait in the
+    /// channel, so no capture races the initial load.
+    fn load_history(&mut self, updates: async_channel::Receiver<()>, cx: &mut Context<Self>) {
+        let storage = self.storage.clone();
+        cx.spawn(async move |entity, cx| {
+            let entries = cx
+                .background_spawn(async move { ClipboardService::load_history_entries(&storage) })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    match entries {
+                        Ok(entries) => {
+                            this.history = ClipboardHistory::from_entries(
+                                this.settings.history_limit,
+                                entries,
+                            );
+                        }
+                        Err(error) => {
+                            let message = error.to_localized_string(this.settings.language);
+                            this.status = message.clone();
+                            this.show_error("历史加载失败", message, cx);
+                        }
+                    }
+                    this.history_loading = false;
+                    this.refresh_visible_entries();
+                    this.preload_file_icons(cx);
+                    this.start_clipboard_monitor(updates, cx);
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
     }
 
     fn apply_palette(cx: &mut App) {
@@ -517,6 +553,7 @@ impl ClipboardApp {
 impl Render for ClipboardApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page;
+        let counts = self.history.counts();
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
         v_flex()
@@ -536,14 +573,14 @@ impl Render for ClipboardApp {
                     .min_h_0()
                     .overflow_hidden()
                     .child(if page == AppPage::History {
-                        self.render_history(window, cx).into_any_element()
+                        self.render_history(counts, window, cx).into_any_element()
                     } else {
                         self.render_settings(cx).into_any_element()
                     }),
             )
             .child(
                 StatusBar::new()
-                    .left(format!("{} 条记录", self.history.counts().total))
+                    .left(format!("{} 条记录", counts.total))
                     .right(
                         h_flex()
                             .gap_1()

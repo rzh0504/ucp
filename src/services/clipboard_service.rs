@@ -34,21 +34,24 @@ pub enum ClipboardError {
 }
 
 impl ClipboardService {
-    pub fn initialize() -> Result<
-        (
-            ClipboardStorage,
-            crate::model::AppSettings,
-            ClipboardHistory,
-        ),
-        ClipboardError,
-    > {
+    /// Opens storage and loads the settings the window needs before first
+    /// paint. The history itself is loaded separately via
+    /// [`Self::load_history_entries`] so the heavy read stays off the UI
+    /// thread.
+    pub fn initialize() -> Result<(ClipboardStorage, crate::model::AppSettings), ClipboardError> {
         let storage = storage::StorageHandle::new().map_err(ClipboardError::StorageError)?;
         let settings = storage::load_settings(&storage)
             .map_err(ClipboardError::StorageError)?
             .normalized();
-        let history = storage::load_history(&storage, settings.history_limit)
-            .map_err(ClipboardError::StorageError)?;
-        Ok((storage, settings, history))
+        Ok((storage, settings))
+    }
+
+    /// Loads every persisted entry. Runs on a background thread; the caller
+    /// builds the (thread-bound) history from the result.
+    pub fn load_history_entries(
+        storage: &ClipboardStorage,
+    ) -> Result<Vec<ClipboardEntry>, ClipboardError> {
+        storage::load_entries(storage).map_err(ClipboardError::StorageError)
     }
 
     pub fn suppress_entry_saves(storage: &ClipboardStorage, ids: &[u64]) {

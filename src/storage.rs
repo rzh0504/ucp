@@ -8,7 +8,9 @@ mod tests;
 use schema::{column_exists, schema_version};
 pub use settings::{load_settings, save_settings};
 
-use crate::model::{ClipboardContent, ClipboardEntry, ClipboardHistory, ClipboardImage};
+use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
+#[cfg(test)]
+use crate::model::ClipboardHistory;
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use sha2::{Digest, Sha256};
@@ -115,10 +117,23 @@ impl StorageHandle {
     }
 }
 
+#[cfg(test)]
 pub fn load_history(
     storage: &StorageHandle,
     capacity: usize,
 ) -> Result<ClipboardHistory, StorageError> {
+    Ok(ClipboardHistory::from_entries(
+        capacity,
+        load_entries(storage)?,
+    ))
+}
+
+/// Loads the persisted entries without building a [`ClipboardHistory`].
+///
+/// The history holds `Rc` entries and cannot cross threads, so callers that
+/// load off the UI thread take the plain entries and build the history where
+/// it is consumed.
+pub fn load_entries(storage: &StorageHandle) -> Result<Vec<ClipboardEntry>, StorageError> {
     storage.with_connection(|connection| {
         let mut statement = connection.prepare(
             "SELECT e.id, e.kind, e.text_content, e.image_width, e.image_height, e.image_preview_url, e.content_hash, \
@@ -171,7 +186,7 @@ pub fn load_history(
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(ClipboardHistory::from_entries(capacity, entries))
+        Ok(entries)
     })
 }
 
