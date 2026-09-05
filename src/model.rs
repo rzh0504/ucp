@@ -177,6 +177,18 @@ impl ClipboardContent {
         }
     }
 
+    /// Returns the normalized form for comparison without cloning content.
+    ///
+    /// Normalization only ever rewrites file lists (see [`Self::normalized`]),
+    /// so text and image content borrow. Duplicate detection runs this on
+    /// every clipboard event; cloning multi-megabyte text there is wasted work.
+    pub fn normalized_ref(&self) -> std::borrow::Cow<'_, Self> {
+        match self {
+            Self::Files(_) => std::borrow::Cow::Owned(self.clone().normalized()),
+            Self::Text(_) | Self::Image(_) => std::borrow::Cow::Borrowed(self),
+        }
+    }
+
     pub fn title_with_language(&self, language: AppLanguage) -> String {
         match self {
             Self::Text(text) => text.clone(),
@@ -361,14 +373,14 @@ impl ClipboardHistory {
         content: &ClipboardContent,
         promote_existing: bool,
     ) -> bool {
-        let content = content.clone().normalized();
+        let content = content.normalized_ref();
         if content.is_empty() {
             return false;
         }
 
         self.entries
             .iter()
-            .position(|entry| entry.content == content)
+            .position(|entry| entry.content == *content)
             .is_none_or(|position| promote_existing && self.should_promote_position(position))
     }
 
@@ -591,12 +603,47 @@ fn matches_filter(entry: &ClipboardEntry, filter: ClipboardFilter) -> bool {
 
 fn content_matches_query(content: &ClipboardContent, normalized_query: &str) -> bool {
     match content {
-        ClipboardContent::Text(text) => text.to_lowercase().contains(normalized_query),
+        ClipboardContent::Text(text) => contains_ignore_case(text, normalized_query),
         ClipboardContent::Files(files) => files
             .iter()
-            .any(|file| file.to_lowercase().contains(normalized_query)),
+            .any(|file| contains_ignore_case(file, normalized_query)),
         ClipboardContent::Image(_) => false,
     }
+}
+
+/// Case-insensitive substring search against an already lowercased needle.
+///
+/// Search runs on every keystroke over every entry, so this folds the
+/// haystack char by char instead of allocating a lowercased copy of
+/// arbitrarily large clipboard text. Matches start at character boundaries;
+/// a needle can no longer start inside one character's multi-char lowercase
+/// expansion, which no practical query does.
+fn contains_ignore_case(haystack: &str, needle_lower: &str) -> bool {
+    if needle_lower.is_empty() {
+        return true;
+    }
+
+    haystack
+        .char_indices()
+        .any(|(start, _)| matches_at_ignore_case(&haystack[start..], needle_lower))
+}
+
+fn matches_at_ignore_case(haystack: &str, needle_lower: &str) -> bool {
+    let mut needle = needle_lower.chars();
+    let mut expected = needle.next();
+    for character in haystack.chars() {
+        for folded in character.to_lowercase() {
+            match expected {
+                Some(wanted) if folded == wanted => expected = needle.next(),
+                Some(_) => return false,
+                None => return true,
+            }
+        }
+        if expected.is_none() {
+            return true;
+        }
+    }
+    expected.is_none()
 }
 
 fn sort_entries(entries: &mut [Rc<ClipboardEntry>]) {
@@ -841,6 +888,30 @@ mod tests {
         let search_results = history.filtered("5", ClipboardFilter::All);
         assert_eq!(search_results.len(), 1);
         assert_eq!(search_results[0].kind(), ClipboardKind::Text);
+    }
+
+    #[test]
+    fn search_matches_case_insensitively_without_lowercasing_entries() {
+        let mut history = ClipboardHistory::new(10);
+        history.push(ClipboardContent::Text("Hello World 世界".into()));
+        history.push(ClipboardContent::Files(vec!["C:/Docs/Report.PDF".into()]));
+
+        assert_eq!(history.filtered("hello", ClipboardFilter::All).len(), 1);
+        assert_eq!(history.filtered("WORLD", ClipboardFilter::All).len(), 1);
+        assert_eq!(history.filtered("世界", ClipboardFilter::All).len(), 1);
+        assert_eq!(history.filtered("report.pdf", ClipboardFilter::All).len(), 1);
+        assert_eq!(history.filtered("planet", ClipboardFilter::All).len(), 0);
+    }
+
+    #[test]
+    fn file_content_is_normalized_before_duplicate_detection() {
+        let mut history = ClipboardHistory::new(10);
+        history.push(ClipboardContent::Files(vec!["C:/a.txt".into()]));
+
+        assert!(!history.would_push_change(&ClipboardContent::Files(vec![
+            " C:/a.txt ".into(),
+            "  ".into(),
+        ])));
     }
 
     #[test]

@@ -6,16 +6,16 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
     ActiveTheme as _, FocusableExt as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode,
-    TitleBar, WindowExt as _,
+    ThemeRegistry, TitleBar, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
     input::{InputEvent, InputState},
-    notification::Notification,
+    notification::{Notification, NotificationDelivery},
     status_bar::StatusBar,
     v_flex,
 };
-use gpui_component_assets::Assets;
+use gpui_kit_assets::Assets;
 use std::borrow::Cow;
 
 mod history;
@@ -70,7 +70,10 @@ impl AssetSource for AppAssets {
 pub fn run(visible: bool) {
     let app = gpui_platform::application().with_assets(AppAssets(Assets));
     app.run(move |cx| {
+        // Required on Windows before system notifications can be posted.
+        cx.set_app_identity("dev.ucp.clipboard", "UCP");
         gpui_component::init(cx);
+        ClipboardApp::install_themes(cx);
         #[cfg(windows)]
         let tray = platform::tray::create().ok();
         #[cfg(windows)]
@@ -146,6 +149,7 @@ struct ClipboardApp {
     storage: ClipboardStorage,
     settings: AppSettings,
     history: ClipboardHistory,
+    history_loading: bool,
     query: String,
     filter: ClipboardFilter,
     page: AppPage,
@@ -224,8 +228,9 @@ impl ClipboardApp {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (storage, settings, history) =
+        let (storage, settings) =
             ClipboardService::initialize().expect("Failed to initialize clipboard service");
+        let history = ClipboardHistory::from_entries(settings.history_limit, Vec::new());
         #[cfg(windows)]
         platform::single_instance::configure_global_hotkey(&settings.global_show_shortcut);
         let theme_mode = if matches!(settings.theme, crate::model::AppTheme::Dark) {
@@ -234,7 +239,6 @@ impl ClipboardApp {
             ThemeMode::Light
         };
         Theme::change(theme_mode, Some(window), cx);
-        Self::apply_palette(cx);
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史..."));
         let initial_focus = cx.focus_handle();
         let window_handle = window.window_handle();
@@ -275,6 +279,7 @@ impl ClipboardApp {
             storage,
             settings,
             history,
+            history_loading: true,
             query: String::new(),
             filter: ClipboardFilter::All,
             page: AppPage::History,
@@ -303,60 +308,72 @@ impl ClipboardApp {
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
-        app.refresh_visible_entries();
-        app.preload_file_icons(cx);
-        app.start_clipboard_monitor(update_rx, cx);
+        app.load_history(update_rx, cx);
         app
     }
 
-    fn apply_palette(cx: &mut App) {
+    /// Loads the persisted history off the UI thread, then starts consuming
+    /// clipboard updates. Events that arrive while loading wait in the
+    /// channel, so no capture races the initial load.
+    fn load_history(&mut self, updates: async_channel::Receiver<()>, cx: &mut Context<Self>) {
+        let storage = self.storage.clone();
+        cx.spawn(async move |entity, cx| {
+            let entries = cx
+                .background_spawn(async move { ClipboardService::load_history_entries(&storage) })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    match entries {
+                        Ok(entries) => {
+                            this.history = ClipboardHistory::from_entries(
+                                this.settings.history_limit,
+                                entries,
+                            );
+                        }
+                        Err(error) => {
+                            let message = error.to_localized_string(this.settings.language);
+                            this.status = message.clone();
+                            this.show_error("历史加载失败", message, cx);
+                        }
+                    }
+                    this.history_loading = false;
+                    this.refresh_visible_entries();
+                    this.preload_file_icons(cx);
+                    this.start_clipboard_monitor(updates, cx);
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Registers the bundled palette as proper theme configs, so
+    /// `Theme::change` applies colors, legacy tokens, and the Base-layer
+    /// projection (scrollbars, text selection) in one step.
+    ///
+    /// In the configs, `danger.active.background` mirrors the title bar and
+    /// `danger.foreground` the foreground: the native close event hides the
+    /// window before GPUI receives the mouse-up event, and this keeps the
+    /// close button's pressed state visually neutral when the window is
+    /// restored.
+    fn install_themes(cx: &mut App) {
+        let (light, dark) = {
+            let registry = ThemeRegistry::global_mut(cx);
+            registry
+                .load_themes_from_str(include_str!("../assets/themes/ucp.json"))
+                .expect("bundled theme must parse");
+            (
+                registry.themes().get("UCP Light").cloned(),
+                registry.themes().get("UCP Dark").cloned(),
+            )
+        };
         let theme = Theme::global_mut(cx);
-        if theme.is_dark() {
-            theme.background = rgb(0x181a1d).into();
-            theme.foreground = rgb(0xe7e9ec).into();
-            theme.muted = rgb(0x25282d).into();
-            theme.muted_foreground = rgb(0x9ba1aa).into();
-            theme.secondary = rgb(0x272a2f).into();
-            theme.secondary_hover = rgb(0x30343a).into();
-            theme.accent = rgb(0x2d3137).into();
-            theme.border = rgb(0x34383f).into();
-            theme.input = rgb(0x3b4048).into();
-            theme.colors.list = rgb(0x1d1f23).into();
-            theme.tab_bar_segmented = rgb(0x23262a).into();
-            theme.tab_active = rgb(0x34383f).into();
-            theme.title_bar = rgb(0x202226).into();
-            theme.title_bar_border = rgb(0x34383f).into();
-            theme.status_bar = rgb(0x202226).into();
-            theme.status_bar_border = rgb(0x34383f).into();
-        } else {
-            theme.background = rgb(0xf7f8fa).into();
-            theme.foreground = rgb(0x20242a).into();
-            theme.muted = rgb(0xeff1f4).into();
-            theme.muted_foreground = rgb(0x68707c).into();
-            theme.secondary = rgb(0xf0f2f5).into();
-            theme.secondary_hover = rgb(0xe7eaf0).into();
-            theme.accent = rgb(0xe9edf2).into();
-            theme.border = rgb(0xdde1e7).into();
-            theme.input = rgb(0xcfd5dd).into();
-            theme.colors.list = rgb(0xffffff).into();
-            theme.tab_bar_segmented = rgb(0xeff1f4).into();
-            theme.tab_active = rgb(0xffffff).into();
-            theme.title_bar = rgb(0xf1f3f6).into();
-            theme.title_bar_border = rgb(0xdde1e7).into();
-            theme.status_bar = rgb(0xf1f3f6).into();
-            theme.status_bar_border = rgb(0xdde1e7).into();
+        if let Some(light) = light {
+            theme.light_theme = light;
         }
-
-        // The native close event hides the window before GPUI receives the mouse-up
-        // event. Keep its pressed state visually neutral when the window is restored.
-        theme.danger_active = theme.title_bar;
-        theme.danger_foreground = theme.foreground;
-
-        theme.tokens.background = theme.background.into();
-        theme.tokens.muted = theme.muted.into();
-        theme.tokens.secondary = theme.secondary.into();
-        theme.tokens.accent = theme.accent.into();
-        theme.tokens.status_bar = theme.status_bar.into();
+        if let Some(dark) = dark {
+            theme.dark_theme = dark;
+        }
     }
 
     fn apply_theme(theme: crate::model::AppTheme, cx: &mut App) {
@@ -366,7 +383,6 @@ impl ClipboardApp {
             ThemeMode::Light
         };
         Theme::change(mode, None, cx);
-        Self::apply_palette(cx);
     }
 
     fn start_clipboard_monitor(
@@ -497,6 +513,14 @@ impl ClipboardApp {
         let notification = Notification::error(message).title(title);
         self.window_handle
             .update(cx, move |_, window, cx| {
+                // Errors raised while the window is hidden in the tray or in
+                // the background would go unseen as in-app toasts, so those
+                // also reach the OS notification center.
+                let notification = if window.is_window_active() {
+                    notification
+                } else {
+                    notification.delivery(NotificationDelivery::InAppAndSystem)
+                };
                 window.push_notification(notification, cx);
             })
             .ok();
@@ -516,6 +540,7 @@ impl ClipboardApp {
 impl Render for ClipboardApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page;
+        let counts = self.history.counts();
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
         v_flex()
@@ -535,14 +560,14 @@ impl Render for ClipboardApp {
                     .min_h_0()
                     .overflow_hidden()
                     .child(if page == AppPage::History {
-                        self.render_history(window, cx).into_any_element()
+                        self.render_history(counts, window, cx).into_any_element()
                     } else {
                         self.render_settings(cx).into_any_element()
                     }),
             )
             .child(
                 StatusBar::new()
-                    .left(format!("{} 条记录", self.history.counts().total))
+                    .left(format!("{} 条记录", counts.total))
                     .right(
                         h_flex()
                             .gap_1()
@@ -562,6 +587,11 @@ impl Render for ClipboardApp {
                                         ),
                                     )
                                     .tooltip(if self.always_on_top {
+                                        "取消置顶"
+                                    } else {
+                                        "窗口置顶"
+                                    })
+                                    .accessibility_label(if self.always_on_top {
                                         "取消置顶"
                                     } else {
                                         "窗口置顶"
@@ -587,6 +617,11 @@ impl Render for ClipboardApp {
                                         .small(),
                                     )
                                     .tooltip(if page == AppPage::History {
+                                        "设置"
+                                    } else {
+                                        "返回历史"
+                                    })
+                                    .accessibility_label(if page == AppPage::History {
                                         "设置"
                                     } else {
                                         "返回历史"
@@ -640,6 +675,7 @@ impl Render for ClipboardApp {
                                                 .text_color(cx.theme().danger),
                                         )
                                         .tooltip("清空历史")
+                                        .accessibility_label(confirm_text)
                                         .on_click(move |_, window, cx| {
                                             let app = app.clone();
                                             window.open_alert_dialog(cx, move |alert, _, _| {

@@ -23,9 +23,16 @@ impl PartialEq for ClipboardImage {
             return false;
         }
 
-        match (&self.bytes, &other.bytes) {
+        // Every image built by this process carries a content hash, so
+        // equality never has to compare multi-megabyte pixel buffers.
+        // Duplicate detection walks the whole history per capture, which
+        // makes the byte path a fallback for hand-built values only.
+        match (&self.content_hash, &other.content_hash) {
             (Some(left), Some(right)) => left == right,
-            _ => self.content_hash.is_some() && self.content_hash == other.content_hash,
+            _ => match (&self.bytes, &other.bytes) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right) || left == right,
+                _ => false,
+            },
         }
     }
 }
@@ -179,6 +186,16 @@ mod tests {
         assert_eq!(image_preview_dimensions(2000, 100), Some((1440, 72)));
         assert_eq!(image_preview_dimensions(32, 16), Some((32, 16)));
         assert_eq!(image_preview_dimensions(0, 16), None);
+    }
+
+    #[test]
+    fn images_with_same_dimensions_but_different_pixels_are_not_equal() {
+        let red = ClipboardImage::from_rgba(1, 1, vec![255, 0, 0, 255]);
+        let green = ClipboardImage::from_rgba(1, 1, vec![0, 255, 0, 255]);
+        let red_again = ClipboardImage::from_rgba(1, 1, vec![255, 0, 0, 255]);
+
+        assert_ne!(red, green);
+        assert_eq!(red, red_again);
     }
 
     #[test]

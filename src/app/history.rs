@@ -1,18 +1,23 @@
 use super::ClipboardApp;
-use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter};
+use crate::model::{
+    AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, HistoryCounts,
+};
 use crate::services::ClipboardService;
 use gpui::{prelude::FluentBuilder as _, *};
+use gpui_base::SelectableText;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
     input::Input,
     menu::{ContextMenuExt as _, PopupMenuItem},
     scroll::{ScrollableMask, Scrollbar, ScrollbarMode},
+    spinner::Spinner,
     tab::{Tab, TabBar},
     tag::Tag,
     v_flex, v_virtual_list,
 };
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 const COLLAPSED_TEXT_LINES: usize = 4;
 const TEXT_LINE_HEIGHT: f32 = 24.;
@@ -31,9 +36,53 @@ const MIN_EXPANDED_IMAGE_AREA_HEIGHT: f32 = 180.;
 const IMAGE_ROW_CHROME_HEIGHT: f32 = 40.;
 const IMAGE_ROW_HORIZONTAL_SPACE: f32 = 100.;
 
+/// Line estimates above this cap cannot change any row height: the expanded
+/// row height saturates at [`MAX_EXPANDED_TEXT_ROW_HEIGHT`], so the estimator
+/// stops scanning once the cap is reached.
+const TEXT_LINE_ESTIMATE_CAP: usize = ((MAX_EXPANDED_TEXT_ROW_HEIGHT
+    - TEXT_VERTICAL_PADDING
+    - TEXT_FOOTER_HEIGHT
+    - TEXT_ROW_CHROME_HEIGHT)
+    / TEXT_LINE_HEIGHT) as usize
+    + 1;
+
+/// The line estimator never needs to look past this many bytes: 16 newlines
+/// alone reach [`TEXT_LINE_ESTIMATE_CAP`], and otherwise at least 8173 content
+/// bytes yield at least 4086 width units — over 31 estimated lines. Row
+/// heights are recomputed every frame for every visible entry, so the scan
+/// must stay bounded no matter how large a clipboard text is.
+const TEXT_ESTIMATE_SCAN_LIMIT: usize = 8 * 1024;
+
+fn estimate_scan_prefix(text: &str) -> &str {
+    if text.len() <= TEXT_ESTIMATE_SCAN_LIMIT {
+        return text;
+    }
+    let mut end = TEXT_ESTIMATE_SCAN_LIMIT;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// Fades expanded entry content in. The row height itself must never animate:
+/// the virtual list derives it per frame, so only opacity moves.
+fn expand_reveal<E>(name: &'static str, id: u64, element: E) -> AnyElement
+where
+    E: IntoElement + Styled + 'static,
+{
+    element
+        .with_animation(
+            ElementId::NamedInteger(name.into(), id),
+            Animation::new(Duration::from_millis(150)).with_easing(ease_out_quint()),
+            |element, delta| element.opacity(delta),
+        )
+        .into_any_element()
+}
+
 impl ClipboardApp {
     pub(super) fn render_history(
         &mut self,
+        counts: HistoryCounts,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -42,7 +91,6 @@ impl ClipboardApp {
         let show_text_length = self.settings.show_text_length;
         let double_click_copy = self.settings.double_click_copy;
         let quick_paste = self.settings.quick_paste;
-        let counts = self.history.counts();
         let image_max_width = (window.viewport_size().width.as_f32() - IMAGE_ROW_HORIZONTAL_SPACE)
             .clamp(1., EXPANDED_IMAGE_MAX_WIDTH);
         let filters = TabBar::new("filters")
@@ -141,7 +189,17 @@ impl ClipboardApp {
         .track_scroll(&self.history_scroll)
         .size_full();
 
-        let content = if self.visible_entries.is_empty() {
+        let content = if self.history_loading {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_color(cx.theme().muted_foreground)
+                .child(Spinner::new())
+                .child(div().text_sm().child("正在加载剪贴板历史..."))
+                .into_any_element()
+        } else if self.visible_entries.is_empty() {
             v_flex()
                 .size_full()
                 .items_center()
@@ -415,31 +473,34 @@ impl ClipboardApp {
                             .into_any_element()
                     })
                     .unwrap_or_else(placeholder);
+                let preview_area = div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .p_2()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(px(preview_width))
+                            .h(px(preview_height))
+                            .flex_none()
+                            .overflow_hidden()
+                            .bg(cx.theme().background)
+                            .child(preview),
+                    );
                 Some(
                     v_flex()
                         .flex_1()
                         .min_w_0()
                         .h_full()
                         .overflow_hidden()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_hidden()
-                                .p_2()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    div()
-                                        .w(px(preview_width))
-                                        .h(px(preview_height))
-                                        .flex_none()
-                                        .overflow_hidden()
-                                        .bg(cx.theme().background)
-                                        .child(preview),
-                                ),
-                        )
+                        .child(if image_expanded {
+                            expand_reveal("image-reveal", id, preview_area)
+                        } else {
+                            preview_area.into_any_element()
+                        })
                         .child(
                             h_flex()
                                 .h(px(24.))
@@ -491,18 +552,17 @@ impl ClipboardApp {
             }
             _ => None,
         };
-        let can_expand_text = match &entry.content {
-            ClipboardContent::Text(text) => Self::text_line_estimate(text) > COLLAPSED_TEXT_LINES,
-            _ => false,
+        // One bounded scan serves all three of the row's text measurements.
+        let text_lines = match &entry.content {
+            ClipboardContent::Text(text) => Some(Self::text_line_estimate(text)),
+            _ => None,
         };
-        let collapsed_text_lines = match &entry.content {
-            ClipboardContent::Text(text) => Self::collapsed_text_lines(text),
-            _ => 0,
-        };
-        let expanded_text_overflows = match &entry.content {
-            ClipboardContent::Text(text) => text_expanded && Self::expanded_text_overflows(text),
-            _ => false,
-        };
+        let can_expand_text = text_lines.is_some_and(|lines| lines > COLLAPSED_TEXT_LINES);
+        let collapsed_text_lines =
+            text_lines.map_or(0, |lines| lines.clamp(1, COLLAPSED_TEXT_LINES));
+        let expanded_text_overflows = text_expanded
+            && text_lines
+                .is_some_and(|lines| Self::text_row_height(lines) > MAX_EXPANDED_TEXT_ROW_HEIGHT);
         let content = if let ClipboardContent::Files(files) = &entry.content {
             let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
             let file_name = Self::file_name(first_file);
@@ -577,38 +637,61 @@ impl ClipboardApp {
                 .h_full()
                 .py_2()
                 .child(if text_expanded {
+                    // Expanded text is a reading surface: its own clicks stop
+                    // here so drag-selecting text never toggles the row
+                    // selection underneath.
                     if expanded_text_overflows {
-                        div()
-                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .child(
-                                div()
-                                    .id(ElementId::NamedInteger("text-scroll".into(), id))
-                                    .size_full()
-                                    .overflow_y_scroll()
-                                    .track_scroll(&text_scroll)
-                                    .pr_3()
-                                    .text_size(px(14.))
-                                    .line_height(px(TEXT_LINE_HEIGHT))
-                                    .child(title),
-                            )
-                            .child(
-                                ScrollableMask::new(Axis::Vertical, &text_scroll)
-                                    .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
-                            )
-                            .child(Scrollbar::vertical(&text_scroll).mode(ScrollbarMode::Scrolling))
-                            .into_any_element()
+                        expand_reveal(
+                            "text-reveal",
+                            id,
+                            div()
+                                .id(ElementId::NamedInteger("text-expanded".into(), id))
+                                .on_click(|_, _, cx| cx.stop_propagation())
+                                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .child(
+                                    div()
+                                        .id(ElementId::NamedInteger("text-scroll".into(), id))
+                                        .size_full()
+                                        .overflow_y_scroll()
+                                        .track_scroll(&text_scroll)
+                                        .pr_3()
+                                        .text_size(px(14.))
+                                        .line_height(px(TEXT_LINE_HEIGHT))
+                                        .child(SelectableText::new(
+                                            ElementId::NamedInteger("entry-text".into(), id),
+                                            title,
+                                        )),
+                                )
+                                .child(
+                                    ScrollableMask::new(Axis::Vertical, &text_scroll).id(
+                                        ElementId::NamedInteger("text-scroll-mask".into(), id),
+                                    ),
+                                )
+                                .child(
+                                    Scrollbar::vertical(&text_scroll)
+                                        .mode(ScrollbarMode::Scrolling),
+                                ),
+                        )
                     } else {
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .pr_3()
-                            .text_size(px(14.))
-                            .line_height(px(TEXT_LINE_HEIGHT))
-                            .child(title)
-                            .into_any_element()
+                        expand_reveal(
+                            "text-reveal",
+                            id,
+                            div()
+                                .id(ElementId::NamedInteger("text-expanded".into(), id))
+                                .on_click(|_, _, cx| cx.stop_propagation())
+                                .flex_1()
+                                .min_h_0()
+                                .pr_3()
+                                .text_size(px(14.))
+                                .line_height(px(TEXT_LINE_HEIGHT))
+                                .child(SelectableText::new(
+                                    ElementId::NamedInteger("entry-text".into(), id),
+                                    title,
+                                )),
+                        )
                     }
                 } else {
                     div()
@@ -953,6 +1036,7 @@ impl ClipboardApp {
         Self::text_row_height(Self::text_line_estimate(text)).min(MAX_EXPANDED_TEXT_ROW_HEIGHT)
     }
 
+    #[cfg(test)]
     fn expanded_text_overflows(text: &str) -> bool {
         Self::text_row_height(Self::text_line_estimate(text)) > MAX_EXPANDED_TEXT_ROW_HEIGHT
     }
@@ -974,15 +1058,24 @@ impl ClipboardApp {
             return 1;
         }
 
-        text.lines()
-            .map(|line| {
-                line.chars()
-                    .map(|character| if character.is_ascii() { 1 } else { 2 })
-                    .sum::<usize>()
-                    .div_ceil(TEXT_WIDTH_UNITS_PER_PREVIEW_LINE)
-                    .max(1)
-            })
-            .sum()
+        let text = estimate_scan_prefix(text);
+        let mut lines = 0;
+        for line in text.lines() {
+            let unit_budget =
+                (TEXT_LINE_ESTIMATE_CAP - lines) * TEXT_WIDTH_UNITS_PER_PREVIEW_LINE;
+            let mut units = 0;
+            for character in line.chars() {
+                units += if character.is_ascii() { 1 } else { 2 };
+                if units >= unit_budget {
+                    return TEXT_LINE_ESTIMATE_CAP;
+                }
+            }
+            lines += units.div_ceil(TEXT_WIDTH_UNITS_PER_PREVIEW_LINE).max(1);
+            if lines >= TEXT_LINE_ESTIMATE_CAP {
+                return TEXT_LINE_ESTIMATE_CAP;
+            }
+        }
+        lines
     }
 
     fn file_name(path: &str) -> String {
@@ -1243,7 +1336,7 @@ impl ClipboardApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardApp, MAX_EXPANDED_TEXT_ROW_HEIGHT};
+    use super::{ClipboardApp, MAX_EXPANDED_TEXT_ROW_HEIGHT, TEXT_LINE_ESTIMATE_CAP};
     use crate::model::{ClipboardContent, ClipboardEntry};
 
     #[test]
@@ -1288,6 +1381,27 @@ mod tests {
             MAX_EXPANDED_TEXT_ROW_HEIGHT
         );
         assert!(ClipboardApp::expanded_text_overflows(&text));
+    }
+
+    #[test]
+    fn huge_texts_are_estimated_with_a_bounded_scan() {
+        let single_line = "a".repeat(4 * 1024 * 1024);
+        assert_eq!(
+            ClipboardApp::text_line_estimate(&single_line),
+            TEXT_LINE_ESTIMATE_CAP
+        );
+        let entry = ClipboardEntry::new(1, ClipboardContent::Text(single_line.clone()));
+        assert_eq!(
+            ClipboardApp::entry_height(&entry, false, true, 800.),
+            MAX_EXPANDED_TEXT_ROW_HEIGHT
+        );
+        assert!(ClipboardApp::expanded_text_overflows(&single_line));
+
+        let many_lines = "行\n".repeat(500_000);
+        assert_eq!(
+            ClipboardApp::text_line_estimate(&many_lines),
+            TEXT_LINE_ESTIMATE_CAP
+        );
     }
 
     #[test]
