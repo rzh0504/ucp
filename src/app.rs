@@ -148,6 +148,8 @@ pub fn run(visible: bool) {
 struct ClipboardApp {
     storage: ClipboardStorage,
     settings: AppSettings,
+    settings_save_task: Option<Task<()>>,
+    settings_save_revision: u64,
     history: ClipboardHistory,
     history_loading: bool,
     query: String,
@@ -278,6 +280,8 @@ impl ClipboardApp {
         let mut app = Self {
             storage,
             settings,
+            settings_save_task: None,
+            settings_save_revision: 0,
             history,
             history_loading: true,
             query: String::new(),
@@ -495,13 +499,37 @@ impl ClipboardApp {
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         self.settings = self.settings.clone().normalized();
-        if let Err(error) = ClipboardService::save_settings(&self.storage, &self.settings) {
-            let message = error.to_string();
-            self.status = message.clone();
-            self.show_error("设置保存失败", message, cx);
-        } else {
-            self.status = "设置已保存".into();
-        }
+        let settings = self.settings.clone();
+        let storage = self.storage.clone();
+        let previous_save = self.settings_save_task.take();
+        self.settings_save_revision += 1;
+        let revision = self.settings_save_revision;
+        self.status = "正在保存设置...".into();
+        self.settings_save_task = Some(cx.spawn(async move |entity, cx| {
+            if let Some(previous_save) = previous_save {
+                previous_save.await;
+            }
+            let result = cx
+                .background_spawn(async move { ClipboardService::save_settings(&storage, &settings) })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    if revision != this.settings_save_revision {
+                        return;
+                    }
+                    match result {
+                        Ok(()) => this.status = "设置已保存".into(),
+                        Err(error) => {
+                            let message = error.to_localized_string(this.settings.language);
+                            this.status = message.clone();
+                            this.show_error("设置保存失败", message, cx);
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+        }));
+        cx.notify();
     }
 
     fn show_error(
