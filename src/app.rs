@@ -120,21 +120,21 @@ pub fn run(visible: bool) {
                             || platform::single_instance::take_activation_request();
                         let should_quit = platform::tray::take_quit_request()
                             || platform::single_instance::take_quit_request();
-                        cx.update(|cx| {
-                            if should_quit {
-                                cx.quit();
-                            } else if should_show {
-                                if let Some(hwnd) = hwnd {
-                                    platform::windows::show_window(hwnd);
-                                }
-                                cx.activate(true);
-                                window
-                                    .update(cx, |_, window, _| window.activate_window())
-                                    .ok();
-                            }
-                        });
                         if should_quit {
+                            cx.update(|cx| cx.quit());
                             break;
+                        }
+                        if should_show {
+                            window
+                                .update(cx, |_, window, _| window.refresh())
+                                .ok();
+                            if let Some(hwnd) = hwnd {
+                                platform::windows::show_window(hwnd);
+                            }
+                            cx.update(|cx| cx.activate(true));
+                            window
+                                .update(cx, |_, window, _| window.activate_window())
+                                .ok();
                         }
                     }
                 })

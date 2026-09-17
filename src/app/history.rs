@@ -1114,12 +1114,28 @@ impl ClipboardApp {
                                 .detach();
                             }
                             if should_quick_paste {
-                                if let Some(window) = window {
-                                    window
-                                        .update(cx, |_, window, _| {
+                                if let Some(window) = window
+                                    && window
+                                        .update(cx, |_, window, cx| {
+                                            this.search.update(cx, |search, cx| {
+                                                search.set_value("", window, cx);
+                                            });
                                             crate::platform::hide_window(window);
                                         })
-                                        .ok();
+                                        .is_ok()
+                                {
+                                    this.query.clear();
+                                    this.selected_entry_ids.clear();
+                                    this.selection_anchor_id = None;
+                                    this.navigation_entry_id = None;
+                                    this.expanded_image_id = None;
+                                    this.expanded_image_scroll_offset = None;
+                                    this.expanded_text_id = None;
+                                    this.expanded_text_scroll_offset = None;
+                                    this.refresh_visible_entries();
+                                    this.history_scroll.set_offset(point(px(0.), px(0.)));
+                                    this.history_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                    this.preload_file_icons(cx);
                                 }
                                 this.status = "正在切换窗口并粘贴...".into();
                             } else {
