@@ -174,17 +174,6 @@ impl ClipboardService {
             })
     }
 
-    #[cfg(not(windows))]
-    pub fn open_file_location(_path: &Path) -> Result<(), ClipboardError> {
-        Err(ClipboardError::FileAccessError {
-            path: _path.display().to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "opening file location is not supported on this platform",
-            ),
-        })
-    }
-
     /// 删除条目（返回实际删除的 ID）
     pub fn delete_entries(
         storage: &crate::storage::StorageHandle,

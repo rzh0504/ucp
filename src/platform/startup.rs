@@ -1,5 +1,6 @@
 use crate::error::StartupError;
 
+#[cfg(any(windows, target_os = "linux"))]
 const APP_RUN_VALUE: &str = "UCP";
 #[cfg(windows)]
 const LEGACY_APP_RUN_VALUE: &str = "UCP Clipboard";

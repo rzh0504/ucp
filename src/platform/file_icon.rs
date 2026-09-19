@@ -116,7 +116,7 @@ unsafe fn icon_to_rgba(
     if copied == 0 {
         return None;
     }
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Some((width, height, pixels))

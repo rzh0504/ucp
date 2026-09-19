@@ -84,7 +84,7 @@ pub fn run(visible: bool) {
             ..TitleBar::window_options()
         };
         cx.spawn(async move |cx| {
-            let window = cx
+            let _window = cx
                 .open_window(options, |window, cx| {
                     window.set_window_title("UCP");
                     let view = cx.new(|cx| ClipboardApp::new(window, cx));
@@ -93,12 +93,12 @@ pub fn run(visible: bool) {
                 .expect("Failed to open GPUI window");
             #[cfg(windows)]
             {
-                let hwnd = window
+                let hwnd = _window
                     .update(cx, |_, window, _| platform::windows::window_handle(window))
                     .ok()
                     .flatten();
                 if has_tray && hwnd.is_some() {
-                    window
+                    _window
                         .update(cx, |_, window, cx| {
                             window.on_window_should_close(cx, move |_, _| {
                                 if let Some(hwnd) = hwnd {
@@ -125,14 +125,14 @@ pub fn run(visible: bool) {
                             break;
                         }
                         if should_show {
-                            window
+                            _window
                                 .update(cx, |_, window, _| window.refresh())
                                 .ok();
                             if let Some(hwnd) = hwnd {
                                 platform::windows::show_window(hwnd);
                             }
                             cx.update(|cx| cx.activate(true));
-                            window
+                            _window
                                 .update(cx, |_, window, _| window.activate_window())
                                 .ok();
                         }
