@@ -6,6 +6,10 @@
       "colors": {
         "background": "#f7f8fa",
         "foreground": "#20242a",
+        "primary.background": "#2563eb",
+        "primary.foreground": "#ffffff",
+        "button.primary.background": "#2563eb",
+        "button.primary.foreground": "#ffffff",
         "muted.background": "#eff1f4",
         "muted.foreground": "#68707c",
         "secondary.background": "#f0f2f5",
@@ -33,6 +37,10 @@
       "colors": {
         "background": "#181a1d",
         "foreground": "#e7e9ec",
+        "primary.background": "#2563eb",
+        "primary.foreground": "#ffffff",
+        "button.primary.background": "#2563eb",
+        "button.primary.foreground": "#ffffff",
         "muted.background": "#25282d",
         "muted.foreground": "#9ba1aa",
         "secondary.background": "#272a2f",
