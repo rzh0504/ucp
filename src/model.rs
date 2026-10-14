@@ -545,6 +545,15 @@ impl ClipboardHistory {
         self.entries.len() != before
     }
 
+    /// Applies an immutable deletion snapshot, preserving captures added later.
+    pub fn remove_entries(&mut self, ids: &[u64]) {
+        let ids = ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        self.entries.retain(|entry| !ids.contains(&entry.id));
+    }
+
     pub fn clear(&mut self) {
         self.entries.clear();
     }

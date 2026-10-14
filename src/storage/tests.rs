@@ -3,6 +3,7 @@ use crate::model::{
     AppLanguage, AppSettings, AppTheme, ClipboardContent, ClipboardEntry, ClipboardImage,
     DEFAULT_BACKGROUND_OPACITY,
 };
+use crate::services::persistence::StorageWriter;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -211,4 +212,273 @@ fn unique_test_directory() -> PathBuf {
         .unwrap()
         .as_nanos();
     env::temp_dir().join(format!("ucp-storage-test-{}-{nanos}", std::process::id()))
+}
+
+// Holds the global directory override until all queued work has completed.
+struct TestStorage {
+    storage: StorageHandle,
+    directory: PathBuf,
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+impl TestStorage {
+    fn new() -> Self {
+        let guard = storage_test_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let directory = unique_test_directory();
+        Self {
+            storage: StorageHandle::new_for_test(directory.clone()),
+            directory,
+            _guard: guard,
+        }
+    }
+}
+
+impl Drop for TestStorage {
+    fn drop(&mut self) {
+        *test_data_directory().lock().unwrap() = None;
+        let _ = fs::remove_dir_all(&self.directory);
+    }
+}
+
+fn text_entry(id: u64, text: &str) -> ClipboardEntry {
+    ClipboardEntry::new(id, ClipboardContent::Text(text.into()))
+}
+
+#[test]
+fn writer_fifo_preserves_rapid_favorites_captures_and_promotions() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    let writer = StorageWriter::new(storage.clone());
+    let clone = writer.clone();
+    let first = text_entry(100, "first");
+    let promoted_at = Local::now() + chrono::Duration::hours(1);
+    let save = writer.save(first, vec![]);
+    let favorite = clone.set_favorites(vec![(100, true)]);
+    let capture = writer.save(text_entry(101, "second"), vec![]);
+    let unfavorite = writer.set_favorites(vec![(100, false)]);
+    let promote = clone.promote(100, promoted_at);
+    let refavorite = writer.set_favorites(vec![(100, true)]);
+    // Await in reverse order: submission, not awaiting order, defines FIFO.
+    refavorite.recv_blocking().unwrap().unwrap();
+    promote.recv_blocking().unwrap().unwrap();
+    unfavorite.recv_blocking().unwrap().unwrap();
+    capture.recv_blocking().unwrap().unwrap();
+    favorite.recv_blocking().unwrap().unwrap();
+    save.recv_blocking().unwrap().unwrap();
+    let entries = load_entries(storage).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].id, 100);
+    assert!(entries[0].favorite);
+    assert_eq!(
+        entries[0].captured_at.timestamp_millis(),
+        promoted_at.timestamp_millis()
+    );
+
+    let delete = writer.delete(vec![100]);
+    let late_favorite = writer.set_favorites(vec![(100, true)]);
+    let late_promote = writer.promote(100, Local::now());
+    late_promote.recv_blocking().unwrap().unwrap();
+    late_favorite.recv_blocking().unwrap().unwrap();
+    delete.recv_blocking().unwrap().unwrap();
+    assert_eq!(load_entries(storage).unwrap()[0].id, 101);
+    drop(clone);
+    drop(writer);
+}
+
+#[test]
+fn save_merges_duplicate_under_submitted_id_and_delete_uses_that_id() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    let mut old = text_entry(1, "same content");
+    old.favorite = true;
+    old.pinned = true;
+    save_entry(storage, &old).unwrap();
+    // Exercise a collision with BOTH an existing target ID and a unique hash.
+    save_entry(storage, &text_entry(2, "previous content")).unwrap();
+    let writer = StorageWriter::new(storage.clone());
+    writer
+        .save(text_entry(2, "same content"), vec![])
+        .recv_blocking()
+        .unwrap()
+        .unwrap();
+    let entries = load_entries(storage).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, 2);
+    assert!(entries[0].pinned && entries[0].favorite);
+    writer.delete(vec![2]).recv_blocking().unwrap().unwrap();
+    assert!(load_entries(storage).unwrap().is_empty());
+}
+
+#[test]
+fn metadata_only_duplicate_image_retains_blob_and_preview() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    let mut original = ClipboardEntry::new(
+        20,
+        ClipboardContent::Image(ClipboardImage::from_rgba(1, 1, vec![1, 2, 3, 255])),
+    );
+    original.favorite = true;
+    save_entry(storage, &original).unwrap();
+    let mut metadata = load_entries(storage).unwrap().remove(0);
+    metadata.id = 21;
+    metadata.favorite = false;
+    if let ClipboardContent::Image(image) = &mut metadata.content {
+        image.preview_url = None;
+    }
+    let preview = save_entry(storage, &metadata).unwrap().unwrap();
+    let entries = load_entries(storage).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, 21);
+    assert!(entries[0].favorite);
+    assert!(image_cache::exists(Some(&preview)));
+    assert_eq!(
+        load_image(storage, 21).unwrap().unwrap().rgba_bytes(),
+        Some([1, 2, 3, 255].as_slice())
+    );
+    assert!(load_image(storage, 20).unwrap().is_none());
+
+    // Missing preview metadata on the same ID must also retain the cache.
+    save_entry(storage, &metadata).unwrap();
+    assert!(image_cache::exists(Some(&preview)));
+    let loaded = load_entries(storage).unwrap();
+    assert!(matches!(
+        &loaded[0].content,
+        ClipboardContent::Image(image) if image.preview_url.as_deref() == Some(preview.as_str())
+    ));
+    delete_entries(storage, &[21]).unwrap();
+    assert!(!image_cache::exists(Some(&preview)));
+}
+
+#[test]
+fn capacity_prunes_database_before_recapture_delete_and_reload() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    let timestamp = Local::now();
+    for id in 1..=5 {
+        let mut entry = text_entry(id, &format!("text {id}"));
+        entry.captured_at = timestamp;
+        entry.pinned = id == 1;
+        entry.favorite = id == 2;
+        save_entry(storage, &entry).unwrap();
+    }
+    let loaded = load_entries_with_capacity(storage, 3).unwrap();
+    assert_eq!(
+        loaded.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        vec![1, 5, 2]
+    );
+    assert_eq!(load_entries(storage).unwrap().len(), 3);
+
+    // Recapture content pruned from SQLite under a new authoritative ID.
+    let writer = StorageWriter::new(storage.clone());
+    let capture = writer.save(text_entry(6, "text 3"), vec![5]);
+    let delete = writer.delete(vec![6]);
+    delete.recv_blocking().unwrap().unwrap();
+    capture.recv_blocking().unwrap().unwrap();
+    let reloaded = StorageHandle::new_for_test(fixture.directory.clone());
+    let loaded = load_entries(&reloaded).unwrap();
+    assert_eq!(
+        loaded.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    // Protected rows may exceed even zero capacity.
+    assert_eq!(load_entries_with_capacity(&reloaded, 0).unwrap().len(), 2);
+}
+
+#[test]
+fn snapshot_delete_does_not_clear_a_later_capture() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    let writer = StorageWriter::new(storage.clone());
+    let first = writer.save(text_entry(1, "before clear"), vec![]);
+    let clear = writer.delete(vec![1]);
+    let later = writer.save(text_entry(2, "after clear"), vec![]);
+    later.recv_blocking().unwrap().unwrap();
+    clear.recv_blocking().unwrap().unwrap();
+    first.recv_blocking().unwrap().unwrap();
+    let loaded = load_entries(storage).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id, 2);
+}
+
+#[test]
+fn worker_drains_after_last_writer_drops_and_ignores_abandoned_replies() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    let writer = StorageWriter::new(storage.clone());
+    drop(writer.save(text_entry(1, "abandoned reply"), vec![]));
+    let settings = AppSettings {
+        history_limit: 123,
+        ..AppSettings::default()
+    }
+    .normalized();
+    let saved_settings = writer.save_settings(settings.clone());
+    let last = writer.save(text_entry(2, "last queued capture"), vec![]);
+    drop(writer);
+    last.recv_blocking().unwrap().unwrap();
+    saved_settings.recv_blocking().unwrap().unwrap();
+    assert_eq!(load_entries(storage).unwrap().len(), 2);
+    assert_eq!(load_settings(storage).unwrap(), settings);
+}
+
+#[test]
+fn writer_propagates_database_errors_and_continues_after_failure() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    save_entry(
+        storage,
+        &text_entry(9, "must not be evicted on save failure"),
+    )
+    .unwrap();
+    storage
+        .with_connection(|connection| {
+            connection.execute_batch(
+                "CREATE TRIGGER reject_capture BEFORE INSERT ON clipboard_entries \
+                 BEGIN SELECT RAISE(ABORT, 'test rejection'); END;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let writer = StorageWriter::new(storage.clone());
+    assert!(matches!(
+        writer
+            .save(text_entry(1, "fails"), vec![9])
+            .recv_blocking()
+            .unwrap(),
+        Err(StorageError::Database(_))
+    ));
+    assert_eq!(load_entries(storage).unwrap()[0].id, 9);
+    storage
+        .with_connection(|connection| {
+            connection.execute_batch(
+                "DROP TRIGGER reject_capture; \
+                 CREATE TRIGGER reject_delete BEFORE DELETE ON clipboard_entries \
+                 BEGIN SELECT RAISE(ABORT, 'test eviction rejection'); END;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(matches!(
+        writer
+            .save(text_entry(2, "saved before eviction fails"), vec![9])
+            .recv_blocking()
+            .unwrap(),
+        Err(StorageError::Database(_))
+    ));
+    assert_eq!(load_entries(storage).unwrap().len(), 2);
+    storage
+        .with_connection(|connection| {
+            connection.execute_batch("DROP TRIGGER reject_delete;")?;
+            Ok(())
+        })
+        .unwrap();
+    writer
+        .save(text_entry(3, "works"), vec![9, 2])
+        .recv_blocking()
+        .unwrap()
+        .unwrap();
+    let loaded = load_entries(storage).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id, 3);
 }

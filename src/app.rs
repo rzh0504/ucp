@@ -1,8 +1,10 @@
 use crate::model::{AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory};
 use crate::platform;
+use crate::services::persistence::StorageWriter;
 use crate::services::{ClipboardService, ClipboardStorage};
 use crate::updater::{self, UpdateCheck, UpdateInfo};
 use gpui_kit::assets::Assets;
+use gpui_kit::base::Disableable as _;
 use gpui_kit::component::{
     ActiveTheme as _, FocusableExt as _, Icon, IconName, Sizable as _, Theme, ThemeMode,
     ThemeRegistry, TitleBar, WindowExt as _,
@@ -155,6 +157,8 @@ pub fn run(visible: bool) {
 
 struct ClipboardApp {
     storage: ClipboardStorage,
+    storage_writer: StorageWriter,
+    persistence_error: Option<String>,
     settings: AppSettings,
     history: ClipboardHistory,
     history_loading: bool,
@@ -238,6 +242,7 @@ impl ClipboardApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (storage, settings) =
             ClipboardService::initialize().expect("Failed to initialize clipboard service");
+        let storage_writer = StorageWriter::new(storage.clone());
         let history = ClipboardHistory::from_entries(settings.history_limit, Vec::new());
         #[cfg(windows)]
         platform::single_instance::configure_global_hotkey(&settings.global_show_shortcut);
@@ -283,6 +288,8 @@ impl ClipboardApp {
         .ok();
         let mut app = Self {
             storage,
+            storage_writer,
+            persistence_error: None,
             settings,
             history,
             history_loading: true,
@@ -323,9 +330,12 @@ impl ClipboardApp {
     /// channel, so no capture races the initial load.
     fn load_history(&mut self, updates: async_channel::Receiver<()>, cx: &mut Context<Self>) {
         let storage = self.storage.clone();
+        let capacity = self.settings.history_limit;
         cx.spawn(async move |entity, cx| {
             let entries = cx
-                .background_spawn(async move { ClipboardService::load_history_entries(&storage) })
+                .background_spawn(async move {
+                    ClipboardService::load_history_entries(&storage, capacity)
+                })
                 .await;
             entity
                 .update(cx, |this, cx| {
@@ -340,6 +350,11 @@ impl ClipboardApp {
                             let message = error.to_localized_string(this.settings.language);
                             this.status = message.clone();
                             this.show_error("历史加载失败", message, cx);
+                            // Never start capturing with an empty history/ID allocator
+                            // after a failed load of an existing database.
+                            this.monitor_paused = true;
+                            cx.notify();
+                            return;
                         }
                     }
                     this.history_loading = false;
@@ -436,35 +451,55 @@ impl ClipboardApp {
         let removed_ids = result.removed_ids;
         self.update_visible_entry(result_id);
         self.remove_visible_entries(&removed_ids);
-        let storage = self.storage.clone();
-        cx.spawn(async move |entity, cx| {
-            let saved_preview = cx
-                .background_spawn(async move {
-                    let saved_preview = entry
-                        .as_ref()
-                        .map(|e| ClipboardService::save_entry(&storage, e))
-                        .transpose()
-                        .ok()
-                        .flatten()
-                        .flatten();
-                    if !removed_ids.is_empty() {
-                        let _ = ClipboardService::delete_stored_entries(&storage, &removed_ids);
+        if let Some(entry) = entry {
+            // Submission happens on the UI thread, before awaiting the reply.
+            // The worker therefore observes the same order as user actions.
+            let reply = self.storage_writer.save(entry, removed_ids);
+            self.persist(
+                reply,
+                move |this, preview, cx| {
+                    if let Some(preview_url) = preview
+                        && this.history.set_image_preview_url(result_id, preview_url)
+                    {
+                        this.update_visible_entry(result_id);
+                        cx.notify();
                     }
-                    saved_preview
+                },
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    fn persist<T: Send + 'static>(
+        &self,
+        reply: async_channel::Receiver<Result<T, crate::storage::StorageError>>,
+        on_success: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |entity, cx| {
+            let result = reply
+                .recv()
+                .await
+                .unwrap_or(Err(crate::storage::StorageError::WorkerUnavailable));
+            entity
+                .update(cx, |this, cx| match result {
+                    Ok(value) => on_success(this, value, cx),
+                    Err(error) => this.report_persistence_error(error.to_string(), cx),
                 })
-                .await;
-            if let Some(preview_url) = saved_preview {
-                entity
-                    .update(cx, |this, cx| {
-                        if this.history.set_image_preview_url(result_id, preview_url) {
-                            this.update_visible_entry(result_id);
-                            cx.notify();
-                        }
-                    })
-                    .ok();
-            }
+                .ok();
         })
         .detach();
+    }
+
+    fn report_persistence_error(&mut self, message: String, cx: &mut Context<Self>) {
+        // An unrelated later success cannot restore a previously failed write.
+        // Keep the unsaved indicator and avoid a toast storm during disk failure.
+        if self.persistence_error.is_none() {
+            self.show_error("存储写入失败", message.clone(), cx);
+        }
+        self.persistence_error = Some(message.clone());
+        self.status = message;
         cx.notify();
     }
 
@@ -501,13 +536,15 @@ impl ClipboardApp {
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         self.settings = self.settings.clone().normalized();
-        if let Err(error) = ClipboardService::save_settings(&self.storage, &self.settings) {
-            let message = error.to_string();
-            self.status = message.clone();
-            self.show_error("设置保存失败", message, cx);
-        } else {
-            self.status = "设置已保存".into();
-        }
+        let reply = self.storage_writer.save_settings(self.settings.clone());
+        self.persist(
+            reply,
+            |this, (), cx| {
+                this.status = "设置已保存".into();
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     fn show_error(
@@ -571,7 +608,11 @@ impl Render for ClipboardApp {
             )
             .child(
                 StatusBar::new()
-                    .left(format!("{} 条记录", counts.total))
+                    .left(if self.persistence_error.is_some() {
+                        format!("{} 条记录 · 存储写入失败，部分改动未保存", counts.total)
+                    } else {
+                        format!("{} 条记录", counts.total)
+                    })
                     .right(
                         h_flex()
                             .gap_1()
@@ -645,7 +686,7 @@ impl Render for ClipboardApp {
                                 let (title, description, confirm_text) = match filter {
                                     ClipboardFilter::All => (
                                         "清空全部历史记录？",
-                                        "此操作将永久删除全部剪贴板历史，且无法撤销。",
+                                        "此操作将永久删除当前历史，且无法撤销。执行期间的新记录会保留。",
                                         "清空全部",
                                     ),
                                     ClipboardFilter::Text => (
@@ -672,6 +713,7 @@ impl Render for ClipboardApp {
                                 this.child(
                                     Button::new("status-clear")
                                         .ghost()
+                                        .disabled(self.history_loading)
                                         .large()
                                         .child(
                                             Icon::new(IconName::Delete)

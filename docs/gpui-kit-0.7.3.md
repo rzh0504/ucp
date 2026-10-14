@@ -78,6 +78,35 @@ headless tests cannot validate them.
       tiled-window menu placement.
 - [ ] On macOS: verify native title-bar controls and application activation.
 
-Persistence ordering, clear/capture races, canonical IDs, row measurement caches,
-Unicode search semantics and other performance/UX review findings are separate
-follow-up work, not fixes claimed by this dependency migration.
+## Optimization phases
+
+### Phase 1 — dependency migration (completed)
+
+Commit `4859e1a` contains the isolated migration and its five headless UI probes.
+The native checklist above remains unverified.
+
+### Phase 2 — persistence consistency (completed)
+
+- UI actions synchronously enqueue work on one FIFO storage worker, then await
+  replies without blocking GPUI. Favorite and promotion commands update only
+  their own fields, rather than replaying stale full-entry snapshots.
+- Clear/delete apply the same ID snapshot to storage and memory. New entries
+  captured after that snapshot survive; destructive actions wait for loading.
+- Deduplication preserves the submitted ID and protected/image metadata.
+  Initial loading persists capacity pruning while retaining the pre-pruning ID
+  high-water mark for the in-memory allocator. Schema and data directory remain
+  unchanged.
+- Settings writes use the same queue. Persistence failures use the notification
+  path and leave a visible unsaved-data warning; unrelated successful writes do
+  not silently dismiss a previous failure.
+- Removed the unused full-table clear path.
+
+Validation: `cargo test` passed all 50 tests, including eight new storage/worker
+regressions; `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`
+passed on Windows x86_64 MSVC. Native clipboard/visual checks remain unverified.
+
+### Phase 3 — responsive initialization, search and rendering (in progress)
+
+Move database initialization off the UI thread, use consistent linear-time
+Unicode search, and bound/cache text-related rendering work. This phase is not
+included in the Phase 2 completion claim.

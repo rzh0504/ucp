@@ -50,8 +50,13 @@ impl ClipboardService {
     /// builds the (thread-bound) history from the result.
     pub fn load_history_entries(
         storage: &ClipboardStorage,
+        capacity: usize,
     ) -> Result<Vec<ClipboardEntry>, ClipboardError> {
-        storage::load_entries(storage).map_err(ClipboardError::StorageError)
+        // Keep the pre-prune high watermark: ClipboardHistory computes next_id
+        // before applying its identical capacity rule, including protected rows.
+        let entries = storage::load_entries(storage).map_err(ClipboardError::StorageError)?;
+        storage::prune_to_capacity(storage, capacity).map_err(ClipboardError::StorageError)?;
+        Ok(entries)
     }
 
     pub fn suppress_entry_saves(storage: &ClipboardStorage, ids: &[u64]) {
@@ -101,28 +106,8 @@ impl ClipboardService {
         storage::save_entry(storage, entry).map_err(ClipboardError::StorageError)
     }
 
-    pub fn save_settings(
-        storage: &crate::storage::StorageHandle,
-        settings: &crate::model::AppSettings,
-    ) -> Result<(), ClipboardError> {
-        storage::save_settings(storage, settings).map_err(ClipboardError::StorageError)
-    }
-
     pub fn image_preview_path(preview_url: Option<&str>) -> Option<PathBuf> {
         storage::image_preview_path(preview_url)
-    }
-
-    pub fn delete_stored_entries(
-        storage: &crate::storage::StorageHandle,
-        ids: &[u64],
-    ) -> Result<(), ClipboardError> {
-        storage::delete_entries(storage, ids).map_err(ClipboardError::StorageError)
-    }
-
-    pub fn clear_stored_history(
-        storage: &crate::storage::StorageHandle,
-    ) -> Result<(), ClipboardError> {
-        storage::clear_history(storage).map_err(ClipboardError::StorageError)
     }
 
     /// 验证文件是否存在

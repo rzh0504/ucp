@@ -1089,7 +1089,6 @@ impl ClipboardApp {
         self.status = "复制中...".into();
         cx.notify();
         let storage = self.storage.clone();
-        let storage_for_promote = storage.clone();
         cx.spawn(async move |entity, cx| {
             let result = cx
                 .background_spawn(
@@ -1103,11 +1102,8 @@ impl ClipboardApp {
                         Ok(()) => {
                             if should_promote && let Some(updated) = this.history.promote(id) {
                                 this.update_visible_entry(id);
-                                let storage = storage_for_promote.clone();
-                                cx.background_spawn(async move {
-                                    let _ = ClipboardService::save_entry(&storage, &updated);
-                                })
-                                .detach();
+                                let reply = this.storage_writer.promote(id, updated.captured_at);
+                                this.persist(reply, |_, (), _| {}, cx);
                             }
                             if should_quick_paste {
                                 if let Some(window) = window {
@@ -1160,11 +1156,10 @@ impl ClipboardApp {
     fn toggle_favorite(&mut self, id: u64, cx: &mut Context<Self>) {
         if let Some(updated) = self.history.toggle_favorite(id) {
             self.update_visible_entry(id);
-            let storage = self.storage.clone();
-            cx.background_spawn(async move {
-                let _ = ClipboardService::save_entry(&storage, &updated);
-            })
-            .detach();
+            let reply = self
+                .storage_writer
+                .set_favorites(vec![(id, updated.favorite)]);
+            self.persist(reply, |_, (), _| {}, cx);
         }
         cx.notify();
     }
@@ -1177,18 +1172,13 @@ impl ClipboardApp {
                 && let Some(updated) = self.history.toggle_favorite(id)
             {
                 self.update_visible_entry(id);
-                updated_entries.push(updated);
+                updated_entries.push((updated.id, updated.favorite));
             }
         }
 
         if !updated_entries.is_empty() {
-            let storage = self.storage.clone();
-            cx.background_spawn(async move {
-                for entry in updated_entries {
-                    let _ = ClipboardService::save_entry(&storage, &entry);
-                }
-            })
-            .detach();
+            let reply = self.storage_writer.set_favorites(updated_entries);
+            self.persist(reply, |_, (), _| {}, cx);
         }
         cx.notify();
     }
@@ -1198,6 +1188,9 @@ impl ClipboardApp {
     }
 
     fn delete_entries(&mut self, ids: Vec<u64>, cx: &mut Context<Self>) {
+        if self.history_loading {
+            return;
+        }
         let ids = ids
             .into_iter()
             .filter(|id| self.history.entry(*id).is_some())
@@ -1209,20 +1202,18 @@ impl ClipboardApp {
         ClipboardService::suppress_entry_saves(&self.storage, &ids);
         self.status = "删除中...".into();
         cx.notify();
-        let storage = self.storage.clone();
+        let reply = self.storage_writer.delete(ids.clone());
         cx.spawn(async move |entity, cx| {
-            let delete_ids = ids.clone();
-            let result = cx
-                .background_spawn(async move {
-                    ClipboardService::delete_stored_entries(&storage, &delete_ids)
-                })
-                .await;
+            let result = reply
+                .recv()
+                .await
+                .unwrap_or(Err(crate::storage::StorageError::WorkerUnavailable));
             entity
                 .update(cx, |this, cx| {
                     match result {
                         Ok(()) => {
+                            this.history.remove_entries(&ids);
                             for id in &ids {
-                                this.history.remove(*id);
                                 this.selected_entry_ids.remove(id);
                             }
                             this.remove_visible_entries(&ids);
@@ -1245,8 +1236,7 @@ impl ClipboardApp {
                         Err(error) => {
                             ClipboardService::allow_entry_saves(&this.storage, &ids);
                             let message = error.to_string();
-                            this.status = message.clone();
-                            this.show_error("删除失败", message, cx);
+                            this.report_persistence_error(message, cx);
                         }
                     }
                     cx.notify();
@@ -1257,62 +1247,10 @@ impl ClipboardApp {
     }
 
     pub(super) fn clear_current_filter(&mut self, cx: &mut Context<Self>) {
-        let filter = self.filter;
-        let ids = self.history.deletable_ids_for_filter(filter, false);
-        ClipboardService::suppress_entry_saves(&self.storage, &ids);
-        self.status = "清空中...".into();
-        let storage = self.storage.clone();
-        cx.spawn(async move |entity, cx| {
-            let result = cx
-                .background_spawn({
-                    let ids = ids.clone();
-                    async move {
-                        if filter == ClipboardFilter::All {
-                            ClipboardService::clear_stored_history(&storage)
-                        } else {
-                            ClipboardService::delete_stored_entries(&storage, &ids)
-                        }
-                    }
-                })
-                .await;
-            entity
-                .update(cx, |this, cx| {
-                    if let Err(error) = result {
-                        ClipboardService::allow_entry_saves(&this.storage, &ids);
-                        let message = error.to_string();
-                        this.status = message.clone();
-                        this.show_error("清空失败", message, cx);
-                        cx.notify();
-                        return;
-                    }
-
-                    if filter == ClipboardFilter::All {
-                        this.history.clear();
-                    } else {
-                        for id in &ids {
-                            this.history.remove(*id);
-                        }
-                    }
-                    this.remove_visible_entries(&ids);
-                    this.selected_entry_ids.clear();
-                    this.selection_anchor_id = None;
-                    this.navigation_entry_id = None;
-                    this.expanded_image_id = None;
-                    this.expanded_image_scroll_offset = None;
-                    this.status = match filter {
-                        ClipboardFilter::All => "全部历史已清空",
-                        ClipboardFilter::Text => "文本记录已清空",
-                        ClipboardFilter::Image => "图片记录已清空",
-                        ClipboardFilter::File => "文件记录已清空",
-                        ClipboardFilter::Favorite => "收藏记录已清空",
-                    }
-                    .into();
-                    cx.notify();
-                })
-                .ok();
-        })
-        .detach();
-        cx.notify();
+        // Clear exactly the records present at confirmation time. Both storage
+        // and memory remove the same IDs; later captures must not be wiped out.
+        let ids = self.history.deletable_ids_for_filter(self.filter, false);
+        self.delete_entries(ids, cx);
     }
 }
 
