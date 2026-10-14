@@ -91,7 +91,7 @@ pub fn run(visible: bool) {
             ..TitleBar::window_options()
         };
         cx.spawn(async move |cx| {
-            let window = cx
+            let _window = cx
                 .update(|cx| {
                     // Kit supplies the Base Root, window chrome, and all overlays.
                     gpui_kit::open_window(options, cx, |window, cx| {
@@ -103,12 +103,12 @@ pub fn run(visible: bool) {
                 .0;
             #[cfg(windows)]
             {
-                let hwnd = window
+                let hwnd = _window
                     .update(cx, |_, window, _| platform::windows::window_handle(window))
                     .ok()
                     .flatten();
                 if has_tray && hwnd.is_some() {
-                    window
+                    _window
                         .update(cx, |_, window, cx| {
                             window.on_window_should_close(cx, move |_, _| {
                                 if let Some(hwnd) = hwnd {
@@ -130,21 +130,19 @@ pub fn run(visible: bool) {
                             || platform::single_instance::take_activation_request();
                         let should_quit = platform::tray::take_quit_request()
                             || platform::single_instance::take_quit_request();
-                        cx.update(|cx| {
-                            if should_quit {
-                                cx.quit();
-                            } else if should_show {
-                                if let Some(hwnd) = hwnd {
-                                    platform::windows::show_window(hwnd);
-                                }
-                                cx.activate(true);
-                                window
-                                    .update(cx, |_, window, _| window.activate_window())
-                                    .ok();
-                            }
-                        });
                         if should_quit {
+                            cx.update(|cx| cx.quit());
                             break;
+                        }
+                        if should_show {
+                            _window.update(cx, |_, window, _| window.refresh()).ok();
+                            if let Some(hwnd) = hwnd {
+                                platform::windows::show_window(hwnd);
+                            }
+                            cx.update(|cx| cx.activate(true));
+                            _window
+                                .update(cx, |_, window, _| window.activate_window())
+                                .ok();
                         }
                     }
                 })
@@ -176,6 +174,7 @@ struct ClipboardApp {
     storage_session: Option<StorageSession>,
     persistence_error: Option<String>,
     settings: AppSettings,
+    settings_save_revision: u64,
     history: ClipboardHistory,
     history_loading: bool,
     startup_error: Option<String>,
@@ -360,6 +359,7 @@ impl ClipboardApp {
             storage_session: None,
             persistence_error: None,
             settings,
+            settings_save_revision: 0,
             history,
             history_loading: false,
             startup_error: None,
@@ -685,15 +685,21 @@ impl ClipboardApp {
             return;
         };
         self.settings = self.settings.clone().normalized();
+        self.settings_save_revision += 1;
+        let revision = self.settings_save_revision;
+        self.status = "正在保存设置...".into();
         let reply = session.writer.save_settings(self.settings.clone());
         self.persist(
             reply,
-            |this, (), cx| {
-                this.status = "设置已保存".into();
-                cx.notify();
+            move |this, (), cx| {
+                if revision == this.settings_save_revision {
+                    this.status = "设置已保存".into();
+                    cx.notify();
+                }
             },
             cx,
         );
+        cx.notify();
     }
 
     fn show_error(

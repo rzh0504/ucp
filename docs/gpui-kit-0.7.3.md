@@ -149,6 +149,18 @@ bounds, cancellation, Unicode matching, cache reuse/pruning, actual GPUI text
 wrapping and real SQLite failure/ordering cases. No FPS, latency, memory or
 startup-time benchmark is claimed; the native checklist remains unverified.
 
+### Integration with main
+
+Merged `origin/main` at `cf2ea27` into the upgrade branch. Retained the 0.4.1
+version, updated palettes, Explorer argument handling, cross-platform CI and
+quick-paste/reopen reset behavior. Window creation uses Kit's automatic Root
+with the cross-platform `_window` binding. Settings keep the FIFO writer and
+main's revision guard, without retaining a second task-chain write mechanism.
+Updated the auto-merged quick-paste path to pass the context when refreshing
+background search. Windows validation passed all 74 tests, formatting,
+`cargo clippy --locked --all-targets -- -D warnings` and the locked release build.
+Linux/macOS CI and native behavior were not run locally.
+
 Remaining boundaries: exact character count still performs one full scan on
 first display of an uncached entry; explicit expansion still lays out full text.
 Cache rebuilds on data/font/width changes are not constant-time. Graceful draining

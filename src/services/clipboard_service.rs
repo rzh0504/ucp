@@ -143,38 +143,16 @@ impl ClipboardService {
     #[cfg(windows)]
     #[allow(dead_code)]
     pub fn open_file_location(path: &Path) -> Result<(), ClipboardError> {
-        // 验证路径不包含危险字符
-        let path_str = path.to_string_lossy();
-        if path_str.contains('\0') {
-            return Err(ClipboardError::FileAccessError {
-                path: path_str.to_string(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "file path contains null bytes",
-                ),
-            });
-        }
+        use std::os::windows::process::CommandExt as _;
 
-        std::process::Command::new("explorer")
-            .arg("/select,")
-            .arg(path.as_os_str())
+        std::process::Command::new("explorer.exe")
+            .raw_arg(explorer_selection_argument(path)?)
             .spawn()
             .map(|_| ())
             .map_err(|source| ClipboardError::FileAccessError {
                 path: path.display().to_string(),
                 source,
             })
-    }
-
-    #[cfg(not(windows))]
-    pub fn open_file_location(_path: &Path) -> Result<(), ClipboardError> {
-        Err(ClipboardError::FileAccessError {
-            path: _path.display().to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "opening file location is not supported on this platform",
-            ),
-        })
     }
 
     /// 删除条目（返回实际删除的 ID）
@@ -234,6 +212,77 @@ impl ClipboardService {
         };
 
         Ok(count)
+    }
+}
+
+#[cfg(windows)]
+fn explorer_selection_argument(path: &Path) -> Result<std::ffi::OsString, ClipboardError> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    if path.as_os_str().is_empty()
+        || path
+            .as_os_str()
+            .encode_wide()
+            .any(|unit| unit == 0 || unit == u16::from(b'"'))
+    {
+        return Err(ClipboardError::FileAccessError {
+            path: path.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "file path is empty or contains null bytes or double quotes",
+            ),
+        });
+    }
+
+    let mut argument = std::ffi::OsString::from("/select,\"");
+    argument.push(path.as_os_str());
+    argument.push("\"");
+    Ok(argument)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explorer_selection_quotes_paths_with_special_characters() {
+        for path in [
+            r"C:\Docs\file.txt",
+            r"C:\My Documents\报告.txt",
+            r"C:\Docs\a,b=c.txt",
+            r"\\server\share\My Documents\file.txt",
+            r"C:\Docs\",
+        ] {
+            assert_eq!(
+                explorer_selection_argument(Path::new(path)).unwrap(),
+                std::ffi::OsString::from(format!("/select,\"{path}\""))
+            );
+        }
+    }
+
+    #[test]
+    fn explorer_selection_rejects_invalid_paths() {
+        for path in ["", "C:\\bad\0.txt", "C:\\bad\".txt"] {
+            assert!(matches!(
+                explorer_selection_argument(Path::new(path)),
+                Err(ClipboardError::FileAccessError { source, .. })
+                    if source.kind() == std::io::ErrorKind::InvalidInput
+            ));
+        }
+    }
+
+    #[test]
+    fn explorer_selection_preserves_non_unicode_paths() {
+        use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+
+        let path = std::ffi::OsString::from_wide(&[67, 58, 92, 0xd800]);
+        let argument = explorer_selection_argument(Path::new(&path)).unwrap();
+        let expected = "/select,\""
+            .encode_utf16()
+            .chain(path.encode_wide())
+            .chain("\"".encode_utf16())
+            .collect::<Vec<_>>();
+        assert_eq!(argument.encode_wide().collect::<Vec<_>>(), expected);
     }
 }
 
