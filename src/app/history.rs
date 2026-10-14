@@ -1,8 +1,11 @@
 use super::ClipboardApp;
 use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, HistoryCounts};
 use crate::services::ClipboardService;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
+    button::Button,
+    h_flex,
     input::Input,
     menu::{ContextMenuExt as _, PopupMenuItem},
     scroll::{ScrollableMask, Scrollbar, ScrollbarMode},
@@ -12,8 +15,10 @@ use gpui_kit::component::{
     v_flex, v_virtual_list,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 const COLLAPSED_TEXT_LINES: usize = 4;
@@ -43,12 +48,163 @@ const TEXT_LINE_ESTIMATE_CAP: usize = ((MAX_EXPANDED_TEXT_ROW_HEIGHT
     / TEXT_LINE_HEIGHT) as usize
     + 1;
 
-/// The line estimator never needs to look past this many bytes: 16 newlines
-/// alone reach [`TEXT_LINE_ESTIMATE_CAP`], and otherwise at least 8173 content
-/// bytes yield at least 4086 width units — over 31 estimated lines. Row
-/// heights are recomputed every frame for every visible entry, so the scan
-/// must stay bounded no matter how large a clipboard text is.
+/// Hard byte budget for collapsed rendering and fallback line estimation.
+/// Truncated prefixes conservatively keep expansion available; neither shaping
+/// nor trimming a collapsed row can inspect the unbounded clipboard suffix.
 const TEXT_ESTIMATE_SCAN_LIMIT: usize = 8 * 1024;
+// Row padding/borders, number, spacer, and the two 8px gaps. Expanded text
+// reserves another 12px for its scrollbar.
+const TEXT_ROW_HORIZONTAL_SPACE: f32 = 116.;
+const TEXT_SCROLLBAR_SPACE: f32 = 12.;
+
+#[derive(Clone, PartialEq)]
+struct TextLayoutKey {
+    width: Pixels,
+    font: Font,
+}
+
+#[derive(Clone, PartialEq)]
+struct RowLayoutKey {
+    text: TextLayoutKey,
+    image_width: f32,
+    expanded_image: Option<u64>,
+    expanded_text: Option<u64>,
+}
+
+struct CachedText {
+    preview: SharedString,
+    truncated: bool,
+    layout: Option<(TextLayoutKey, usize)>,
+    character_count: Option<usize>,
+}
+
+#[derive(Clone)]
+struct TextRowPresentation {
+    title: SharedString,
+    lines: usize,
+    truncated: bool,
+    character_count: Option<usize>,
+}
+
+/// Entry content is immutable by id. Metadata-only entry replacements therefore
+/// keep these bounded previews; changing the visible sequence invalidates sizes.
+#[derive(Default)]
+pub(super) struct HistoryRenderCache {
+    available_width: Option<Pixels>,
+    texts: HashMap<u64, CachedText>,
+    sizes: Option<(RowLayoutKey, Rc<Vec<Size<Pixels>>>)>,
+    // Only the explicitly expanded row may retain a full clipboard string.
+    expanded: Option<(u64, SharedString)>,
+}
+
+impl HistoryRenderCache {
+    /// Invalidate visible row sizes, but retain text metadata across searches.
+    /// `entries` is the active history, not just the current filter's results.
+    pub(super) fn invalidate_rows(&mut self, entries: &[Arc<ClipboardEntry>]) {
+        self.sizes = None;
+        let ids: HashSet<_> = entries.iter().map(|entry| entry.id).collect();
+        self.texts.retain(|id, _| ids.contains(id));
+        if self
+            .expanded
+            .as_ref()
+            .is_some_and(|(id, _)| !ids.contains(id))
+        {
+            self.expanded = None;
+        }
+    }
+
+    fn text(&mut self, id: u64, text: &str) -> &mut CachedText {
+        self.texts.entry(id).or_insert_with(|| {
+            let prefix = estimate_scan_prefix(text);
+            CachedText {
+                // Trim only the bounded prefix, never a potentially huge suffix.
+                preview: prefix.trim_end_matches(['\r', '\n']).to_owned().into(),
+                truncated: prefix.len() < text.len(),
+                layout: None,
+                character_count: None,
+            }
+        })
+    }
+
+    fn text_lines(&mut self, id: u64, text: &str, key: &TextLayoutKey, window: &Window) -> usize {
+        let cached = self.text(id, text);
+        if let Some((old_key, lines)) = &cached.layout
+            && old_key == key
+        {
+            return *lines;
+        }
+        let run = TextRun {
+            len: cached.preview.len(),
+            font: key.font.clone(),
+            color: black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let lines = window
+            .text_system()
+            .shape_text(
+                cached.preview.clone(),
+                px(14.),
+                &[run],
+                Some(key.width),
+                Some(TEXT_LINE_ESTIMATE_CAP),
+            )
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|line| line.wrap_boundaries.len() + 1)
+                    .sum::<usize>()
+                    .clamp(1, TEXT_LINE_ESTIMATE_CAP)
+            })
+            .unwrap_or_else(|_| ClipboardApp::text_line_estimate(&cached.preview));
+        // An omitted suffix may contain more lines even if the prefix ends in
+        // whitespace. Keep expansion/scrolling available without scanning it.
+        let lines = if cached.truncated {
+            TEXT_LINE_ESTIMATE_CAP
+        } else {
+            lines
+        };
+        cached.layout = Some((key.clone(), lines));
+        lines
+    }
+
+    fn presentation(
+        &mut self,
+        entry: &ClipboardEntry,
+        expanded: bool,
+        show_length: bool,
+    ) -> Option<TextRowPresentation> {
+        let ClipboardContent::Text(text) = &entry.content else {
+            return None;
+        };
+        let cached = self.text(entry.id, text);
+        let character_count = if show_length {
+            // This exact count is computed at most once per cached entry, and
+            // never during the full-list row sizing pass.
+            Some(
+                *cached
+                    .character_count
+                    .get_or_insert_with(|| text.chars().count()),
+            )
+        } else {
+            None
+        };
+        let mut presentation = TextRowPresentation {
+            title: cached.preview.clone(),
+            lines: cached.layout.as_ref().map_or(1, |(_, lines)| *lines),
+            truncated: cached.truncated,
+            character_count,
+        };
+        if expanded {
+            if self.expanded.as_ref().is_none_or(|(id, _)| *id != entry.id) {
+                self.expanded = Some((entry.id, text.clone().into()));
+            }
+            presentation.title = self.expanded.as_ref().unwrap().1.clone();
+        }
+        Some(presentation)
+    }
+}
 
 fn estimate_scan_prefix(text: &str) -> &str {
     if text.len() <= TEXT_ESTIMATE_SCAN_LIMIT {
@@ -88,8 +244,13 @@ impl ClipboardApp {
         let show_text_length = self.settings.show_text_length;
         let double_click_copy = self.settings.double_click_copy;
         let quick_paste = self.settings.quick_paste;
-        let image_max_width = (window.viewport_size().width.as_f32() - IMAGE_ROW_HORIZONTAL_SPACE)
-            .clamp(1., EXPANDED_IMAGE_MAX_WIDTH);
+        let available_width = self
+            .history_render_cache
+            .available_width
+            .unwrap_or(window.viewport_size().width)
+            .as_f32();
+        let image_max_width =
+            (available_width - IMAGE_ROW_HORIZONTAL_SPACE).clamp(1., EXPANDED_IMAGE_MAX_WIDTH);
         let filters = TabBar::new("filters")
             .segmented()
             .large()
@@ -108,7 +269,7 @@ impl ClipboardApp {
                     4 => ClipboardFilter::Favorite,
                     _ => ClipboardFilter::All,
                 };
-                this.refresh_visible_entries();
+                this.refresh_visible_entries(cx);
                 this.preload_file_icons(cx);
                 cx.notify();
             }))
@@ -117,22 +278,57 @@ impl ClipboardApp {
             .child(Self::filter_tab(IconName::Frame, "图片", counts.image))
             .child(Self::filter_tab(IconName::File, "文件", counts.file))
             .child(Self::filter_tab(IconName::Heart, "收藏", counts.favorite));
-        let item_sizes = Rc::new(
-            self.visible_entries
+        let layout_key = RowLayoutKey {
+            text: TextLayoutKey {
+                width: px(
+                    (available_width - TEXT_ROW_HORIZONTAL_SPACE - TEXT_SCROLLBAR_SPACE).max(1.),
+                ),
+                font: window.text_style().font(),
+            },
+            image_width: image_max_width,
+            expanded_image: self.expanded_image_id,
+            expanded_text: self.expanded_text_id,
+        };
+        if !self
+            .history_render_cache
+            .sizes
+            .as_ref()
+            .is_some_and(|(key, _)| key == &layout_key)
+        {
+            let sizes = self
+                .visible_entries
                 .iter()
                 .map(|entry| {
-                    size(
-                        px(0.),
-                        px(Self::entry_height(
+                    let height = match &entry.content {
+                        ClipboardContent::Text(text) => {
+                            let lines = self.history_render_cache.text_lines(
+                                entry.id,
+                                text,
+                                &layout_key.text,
+                                window,
+                            );
+                            Self::measured_text_row_height(
+                                lines,
+                                self.expanded_text_id == Some(entry.id),
+                            )
+                        }
+                        _ => Self::entry_height(
                             entry,
                             self.expanded_image_id == Some(entry.id),
-                            self.expanded_text_id == Some(entry.id),
+                            false,
                             image_max_width,
-                        )),
-                    )
+                        ),
+                    };
+                    size(px(0.), px(height))
                 })
-                .collect(),
-        );
+                .collect();
+            self.history_render_cache.sizes = Some((layout_key, Rc::new(sizes)));
+        }
+        if self.expanded_text_id.is_none() {
+            self.history_render_cache.expanded = None;
+        }
+        let item_sizes = self.history_render_cache.sizes.as_ref().unwrap().1.clone();
+        let rendered_sizes = item_sizes.clone();
         let list = v_virtual_list(
             cx.entity().clone(),
             "history-list",
@@ -152,6 +348,11 @@ impl ClipboardApp {
                                 });
                             let image_expanded = this.expanded_image_id == Some(entry.id);
                             let text_expanded = this.expanded_text_id == Some(entry.id);
+                            let text = this.history_render_cache.presentation(
+                                &entry,
+                                text_expanded,
+                                show_text_length,
+                            );
                             let navigated = this.navigation_entry_id == Some(entry.id)
                                 || image_expanded
                                 || text_expanded;
@@ -167,6 +368,8 @@ impl ClipboardApp {
                                 image_expanded,
                                 text_expanded,
                                 image_max_width,
+                                rendered_sizes[index].height.as_f32(),
+                                text,
                                 this.expanded_text_scroll.clone(),
                                 this.file_icon_paths.get(&entry.id).cloned(),
                                 this.missing_file_entries.contains(&entry.id),
@@ -186,7 +389,21 @@ impl ClipboardApp {
         .track_scroll(&self.history_scroll)
         .size_full();
 
-        let content = if self.history_loading {
+        let content = if let Some(error) = self.startup_error.as_ref() {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child("无法加载剪贴板历史")
+                .child(div().text_sm().child(error.clone()))
+                .child(
+                    Button::new("retry-startup")
+                        .label("重试")
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_startup(cx))),
+                )
+                .into_any_element()
+        } else if self.history_loading || self.search_pending {
             v_flex()
                 .size_full()
                 .items_center()
@@ -194,7 +411,11 @@ impl ClipboardApp {
                 .gap_2()
                 .text_color(cx.theme().muted_foreground)
                 .child(Spinner::new())
-                .child(div().text_sm().child("正在加载剪贴板历史..."))
+                .child(div().text_sm().child(if self.search_pending {
+                    "正在搜索..."
+                } else {
+                    "正在加载剪贴板历史..."
+                }))
                 .into_any_element()
         } else if self.visible_entries.is_empty() {
             v_flex()
@@ -221,9 +442,21 @@ impl ClipboardApp {
                 .into_any_element()
         };
 
+        let app = cx.entity().downgrade();
         v_flex()
             .size_full()
             .bg(cx.theme().colors.list)
+            // Observe the actual Kit content bounds, including native/CSD
+            // insets, instead of assuming content fills the window viewport.
+            .on_prepaint(move |bounds, _, cx| {
+                app.update(cx, |this, cx| {
+                    if this.history_render_cache.available_width != Some(bounds.size.width) {
+                        this.history_render_cache.available_width = Some(bounds.size.width);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
             .child(
                 h_flex()
                     .px_4()
@@ -402,7 +635,7 @@ impl ClipboardApp {
 
     #[allow(clippy::too_many_arguments)]
     fn render_entry(
-        entry: Rc<ClipboardEntry>,
+        entry: Arc<ClipboardEntry>,
         position: usize,
         language: AppLanguage,
         selected: bool,
@@ -413,30 +646,33 @@ impl ClipboardApp {
         image_expanded: bool,
         text_expanded: bool,
         image_max_width: f32,
+        row_height: f32,
+        text: Option<TextRowPresentation>,
         text_scroll: ScrollHandle,
         file_icon_path: Option<std::path::PathBuf>,
         file_missing: bool,
         options: (bool, bool, bool, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (show_copy_time, show_text_length, double_click_copy, quick_paste) = options;
+        let (show_copy_time, _show_text_length, double_click_copy, quick_paste) = options;
         let id = entry.id;
         let is_image = matches!(entry.content, ClipboardContent::Image(_));
         let is_file = matches!(entry.content, ClipboardContent::Files(_));
-        let title = match &entry.content {
-            ClipboardContent::Text(text) if text_expanded => text.clone(),
-            ClipboardContent::Text(text) => text.clone(),
-            _ => entry.title_with_language(language),
-        };
+        let title = text.as_ref().map_or_else(
+            || SharedString::from(entry.title_with_language(language)),
+            |text| text.title.clone(),
+        );
         let meta = match &entry.content {
-            ClipboardContent::Text(_) if !show_text_length => None,
+            ClipboardContent::Text(_) => text
+                .as_ref()
+                .and_then(|text| text.character_count)
+                .map(|count| crate::i18n::character_count(language, count)),
             ClipboardContent::Image(image) => Some(format!("{} x {}", image.width, image.height)),
             _ => Some(entry.size_label_with_language(language)),
         };
         let copy_time = crate::i18n::relative_time(language, entry.captured_at);
         let favorite = entry.favorite;
         let app = cx.entity().downgrade();
-        let row_height = Self::entry_height(&entry, image_expanded, text_expanded, image_max_width);
         let muted_foreground = cx.theme().muted_foreground;
         let image_content = match &entry.content {
             ClipboardContent::Image(image) => {
@@ -549,17 +785,12 @@ impl ClipboardApp {
             }
             _ => None,
         };
-        // One bounded scan serves all three of the row's text measurements.
-        let text_lines = match &entry.content {
-            ClipboardContent::Text(text) => Some(Self::text_line_estimate(text)),
-            _ => None,
-        };
-        let can_expand_text = text_lines.is_some_and(|lines| lines > COLLAPSED_TEXT_LINES);
+        let text_lines = text.as_ref().map(|text| text.lines);
+        let can_expand_text = text
+            .as_ref()
+            .is_some_and(|text| text.truncated || text.lines > COLLAPSED_TEXT_LINES);
         let collapsed_text_lines =
             text_lines.map_or(0, |lines| lines.clamp(1, COLLAPSED_TEXT_LINES));
-        let expanded_text_overflows = text_expanded
-            && text_lines
-                .is_some_and(|lines| Self::text_row_height(lines) > MAX_EXPANDED_TEXT_ROW_HEIGHT);
         let content = if let ClipboardContent::Files(files) = &entry.content {
             let first_file = files.first().map(String::as_str).unwrap_or("未知文件");
             let file_name = Self::file_name(first_file);
@@ -634,48 +865,35 @@ impl ClipboardApp {
                 .h_full()
                 .py_2()
                 .child(if text_expanded {
-                    if expanded_text_overflows {
-                        expand_reveal(
-                            "text-reveal",
-                            id,
-                            div()
-                                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-                                .relative()
-                                .flex_1()
-                                .min_h_0()
-                                .child(
-                                    div()
-                                        .id(ElementId::NamedInteger("text-scroll".into(), id))
-                                        .size_full()
-                                        .overflow_y_scroll()
-                                        .track_scroll(&text_scroll)
-                                        .pr_3()
-                                        .text_size(px(14.))
-                                        .line_height(px(TEXT_LINE_HEIGHT))
-                                        .child(title),
-                                )
-                                .child(
-                                    ScrollableMask::new(Axis::Vertical, &text_scroll)
-                                        .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
-                                )
-                                .child(
-                                    Scrollbar::vertical(&text_scroll)
-                                        .mode(ScrollbarMode::Scrolling),
-                                ),
-                        )
-                    } else {
-                        expand_reveal(
-                            "text-reveal",
-                            id,
-                            div()
-                                .flex_1()
-                                .min_h_0()
-                                .pr_3()
-                                .text_size(px(14.))
-                                .line_height(px(TEXT_LINE_HEIGHT))
-                                .child(title),
-                        )
-                    }
+                    // Always scroll expanded text, even if platform fallback
+                    // glyphs wrap differently from the cached measurement.
+                    expand_reveal(
+                        "text-reveal",
+                        id,
+                        div()
+                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .child(
+                                div()
+                                    .id(ElementId::NamedInteger("text-scroll".into(), id))
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&text_scroll)
+                                    .pr_3()
+                                    .text_size(px(14.))
+                                    .line_height(px(TEXT_LINE_HEIGHT))
+                                    .child(title),
+                            )
+                            .child(
+                                ScrollableMask::new(Axis::Vertical, &text_scroll)
+                                    .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
+                            )
+                            .child(
+                                Scrollbar::vertical(&text_scroll).mode(ScrollbarMode::Scrolling),
+                            ),
+                    )
                 } else {
                     div()
                         .min_h_0()
@@ -695,24 +913,11 @@ impl ClipboardApp {
                         .flex_none()
                         .text_size(px(11.))
                         .text_color(cx.theme().muted_foreground)
-                        .when(show_copy_time, |this| this.child(copy_time.clone()))
-                        .when(favorite, |this| {
-                            this.child(
-                                Tag::warning()
-                                    .small()
-                                    .rounded_full()
-                                    .ml_2()
-                                    .h(px(14.))
-                                    .py_0()
-                                    .text_size(px(10.))
-                                    .child("收藏"),
-                            )
-                        })
-                        .child(div().flex_1())
                         .when(can_expand_text, |this| {
                             this.child(
                                 h_flex()
                                     .id(ElementId::NamedInteger("text-expand".into(), id))
+                                    .flex_none()
                                     .gap_1()
                                     .px_2()
                                     .py_1()
@@ -734,8 +939,29 @@ impl ClipboardApp {
                                     })),
                             )
                         })
-                        .child(div().flex_1())
-                        .when_some(meta, |this, meta| this.child(meta)),
+                        // Expansion comes first and never shrinks. Optional
+                        // metadata yields the remaining width on narrow rows.
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .when(show_copy_time, |this| this.child(copy_time.clone()))
+                                .when(favorite, |this| {
+                                    this.child(
+                                        Tag::warning()
+                                            .small()
+                                            .rounded_full()
+                                            .ml_2()
+                                            .h(px(14.))
+                                            .py_0()
+                                            .text_size(px(10.))
+                                            .child("收藏"),
+                                    )
+                                })
+                                .child(div().flex_1())
+                                .when_some(meta, |this, meta| this.child(meta)),
+                        ),
                 )
                 .into_any_element()
         };
@@ -943,19 +1169,8 @@ impl ClipboardApp {
                     Self::image_display_size(image.width, image.height, true, image_max_width);
                 image_height.max(MIN_EXPANDED_IMAGE_AREA_HEIGHT) + IMAGE_ROW_CHROME_HEIGHT
             }
-            ClipboardContent::Text(_) => {
-                let text = match &entry.content {
-                    ClipboardContent::Text(text) => text,
-                    _ => unreachable!(),
-                };
-                if text_expanded {
-                    return Self::expanded_text_row_height(text);
-                }
-                let collapsed_text_lines = Self::collapsed_text_lines(text);
-                if collapsed_text_lines == 1 {
-                    return SINGLE_LINE_TEXT_ROW_HEIGHT;
-                }
-                Self::text_row_height(collapsed_text_lines)
+            ClipboardContent::Text(text) => {
+                Self::measured_text_row_height(Self::text_line_estimate(text), text_expanded)
             }
             ClipboardContent::Files(_) => 76.,
         }
@@ -1015,17 +1230,9 @@ impl ClipboardApp {
         cx.notify();
     }
 
-    fn expanded_text_row_height(text: &str) -> f32 {
-        Self::text_row_height(Self::text_line_estimate(text)).min(MAX_EXPANDED_TEXT_ROW_HEIGHT)
-    }
-
     #[cfg(test)]
     fn expanded_text_overflows(text: &str) -> bool {
         Self::text_row_height(Self::text_line_estimate(text)) > MAX_EXPANDED_TEXT_ROW_HEIGHT
-    }
-
-    fn collapsed_text_lines(text: &str) -> usize {
-        Self::text_line_estimate(text).clamp(1, COLLAPSED_TEXT_LINES)
     }
 
     fn text_row_height(line_count: usize) -> f32 {
@@ -1035,13 +1242,26 @@ impl ClipboardApp {
             + TEXT_ROW_CHROME_HEIGHT
     }
 
+    fn measured_text_row_height(lines: usize, expanded: bool) -> f32 {
+        if expanded {
+            Self::text_row_height(lines).min(MAX_EXPANDED_TEXT_ROW_HEIGHT)
+        } else if lines == 1 {
+            SINGLE_LINE_TEXT_ROW_HEIGHT
+        } else {
+            Self::text_row_height(lines.clamp(1, COLLAPSED_TEXT_LINES))
+        }
+    }
+
     fn text_line_estimate(text: &str) -> usize {
-        let text = text.trim_end_matches(['\r', '\n']);
+        let prefix = estimate_scan_prefix(text);
+        if prefix.len() < text.len() {
+            return TEXT_LINE_ESTIMATE_CAP;
+        }
+        let text = prefix.trim_end_matches(['\r', '\n']);
         if text.is_empty() {
             return 1;
         }
 
-        let text = estimate_scan_prefix(text);
         let mut lines = 0;
         for line in text.lines() {
             let unit_budget = (TEXT_LINE_ESTIMATE_CAP - lines) * TEXT_WIDTH_UNITS_PER_PREVIEW_LINE;
@@ -1079,6 +1299,10 @@ impl ClipboardApp {
         let Some(entry) = self.history.entry(id) else {
             return;
         };
+        let Some(session) = self.storage_session.as_ref() else {
+            return;
+        };
+        let storage = session.storage.clone();
         let content = entry.content.clone();
         let should_quick_paste = allow_quick_paste
             && self.settings.quick_paste
@@ -1088,7 +1312,6 @@ impl ClipboardApp {
         let language = self.settings.language;
         self.status = "复制中...".into();
         cx.notify();
-        let storage = self.storage.clone();
         cx.spawn(async move |entity, cx| {
             let result = cx
                 .background_spawn(
@@ -1101,9 +1324,11 @@ impl ClipboardApp {
                     match result {
                         Ok(()) => {
                             if should_promote && let Some(updated) = this.history.promote(id) {
-                                this.update_visible_entry(id);
-                                let reply = this.storage_writer.promote(id, updated.captured_at);
-                                this.persist(reply, |_, (), _| {}, cx);
+                                this.update_visible_entry(id, cx);
+                                if let Some(session) = this.storage_session.as_ref() {
+                                    let reply = session.writer.promote(id, updated.captured_at);
+                                    this.persist(reply, |_, (), _| {}, cx);
+                                }
                             }
                             if should_quick_paste {
                                 if let Some(window) = window {
@@ -1154,30 +1379,36 @@ impl ClipboardApp {
     }
 
     fn toggle_favorite(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(session) = self.storage_session.as_ref() else {
+            return;
+        };
+        let writer = session.writer.clone();
         if let Some(updated) = self.history.toggle_favorite(id) {
-            self.update_visible_entry(id);
-            let reply = self
-                .storage_writer
-                .set_favorites(vec![(id, updated.favorite)]);
+            self.update_visible_entry(id, cx);
+            let reply = writer.set_favorites(vec![(id, updated.favorite)]);
             self.persist(reply, |_, (), _| {}, cx);
         }
         cx.notify();
     }
 
     fn set_favorite_for_entries(&mut self, ids: Vec<u64>, favorite: bool, cx: &mut Context<Self>) {
+        let Some(session) = self.storage_session.as_ref() else {
+            return;
+        };
+        let writer = session.writer.clone();
         let mut updated_entries = Vec::new();
         for id in ids {
             let already_favorite = self.history.entry(id).is_some_and(|entry| entry.favorite);
             if already_favorite != favorite
                 && let Some(updated) = self.history.toggle_favorite(id)
             {
-                self.update_visible_entry(id);
+                self.update_visible_entry(id, cx);
                 updated_entries.push((updated.id, updated.favorite));
             }
         }
 
         if !updated_entries.is_empty() {
-            let reply = self.storage_writer.set_favorites(updated_entries);
+            let reply = writer.set_favorites(updated_entries);
             self.persist(reply, |_, (), _| {}, cx);
         }
         cx.notify();
@@ -1188,21 +1419,24 @@ impl ClipboardApp {
     }
 
     fn delete_entries(&mut self, ids: Vec<u64>, cx: &mut Context<Self>) {
-        if self.history_loading {
+        let Some(session) = self.storage_session.as_ref() else {
             return;
-        }
+        };
+        let writer = session.writer.clone();
         let ids = ids
             .into_iter()
-            .filter(|id| self.history.entry(*id).is_some())
+            .filter(|id| self.history.entry(*id).is_some() && !self.pending_delete_ids.contains(id))
             .collect::<Vec<_>>();
         if ids.is_empty() {
             return;
         }
 
-        ClipboardService::suppress_entry_saves(&self.storage, &ids);
+        // Do not tombstone on GPUI: that would cancel saves already ahead of
+        // this deletion in the FIFO. Exclude IDs only from capture deduplication.
+        self.pending_delete_ids.extend(ids.iter().copied());
         self.status = "删除中...".into();
         cx.notify();
-        let reply = self.storage_writer.delete(ids.clone());
+        let reply = writer.delete(ids.clone());
         cx.spawn(async move |entity, cx| {
             let result = reply
                 .recv()
@@ -1210,13 +1444,16 @@ impl ClipboardApp {
                 .unwrap_or(Err(crate::storage::StorageError::WorkerUnavailable));
             entity
                 .update(cx, |this, cx| {
+                    for id in &ids {
+                        this.pending_delete_ids.remove(id);
+                    }
                     match result {
                         Ok(()) => {
                             this.history.remove_entries(&ids);
                             for id in &ids {
                                 this.selected_entry_ids.remove(id);
                             }
-                            this.remove_visible_entries(&ids);
+                            this.remove_visible_entries(&ids, cx);
                             if this.navigation_entry_id.is_some_and(|id| ids.contains(&id)) {
                                 this.navigation_entry_id = None;
                             }
@@ -1234,7 +1471,9 @@ impl ClipboardApp {
                             this.status = format!("已删除 {} 条记录", ids.len());
                         }
                         Err(error) => {
-                            ClipboardService::allow_entry_saves(&this.storage, &ids);
+                            if let Some(session) = this.storage_session.as_ref() {
+                                ClipboardService::allow_entry_saves(&session.storage, &ids);
+                            }
                             let message = error.to_string();
                             this.report_persistence_error(message, cx);
                         }
@@ -1256,8 +1495,14 @@ impl ClipboardApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardApp, MAX_EXPANDED_TEXT_ROW_HEIGHT, TEXT_LINE_ESTIMATE_CAP};
+    use super::{
+        ClipboardApp, HistoryRenderCache, MAX_EXPANDED_TEXT_ROW_HEIGHT, RowLayoutKey,
+        TEXT_ESTIMATE_SCAN_LIMIT, TEXT_LINE_ESTIMATE_CAP, TextLayoutKey,
+    };
     use crate::model::{ClipboardContent, ClipboardEntry};
+    use gpui_kit::{Font, TestAppContext, px, size};
+    use std::rc::Rc;
+    use std::sync::Arc;
 
     #[test]
     fn english_command_that_fits_one_line_stays_compact() {
@@ -1322,6 +1567,124 @@ mod tests {
             ClipboardApp::text_line_estimate(&many_lines),
             TEXT_LINE_ESTIMATE_CAP
         );
+    }
+
+    #[test]
+    fn huge_trailing_newline_suffix_is_not_trimmed_or_copied() {
+        let text = format!("short{}", "\r\n".repeat(2 * 1024 * 1024));
+        assert_eq!(
+            ClipboardApp::text_line_estimate(&text),
+            TEXT_LINE_ESTIMATE_CAP
+        );
+        let mut cache = HistoryRenderCache::default();
+        let cached = cache.text(1, &text);
+        assert!(cached.truncated);
+        assert_eq!(cached.preview.as_ref(), "short");
+        assert!(cached.preview.len() <= TEXT_ESTIMATE_SCAN_LIMIT);
+    }
+
+    #[test]
+    fn bounded_previews_preserve_utf8_and_reuse_immutable_entry_content() {
+        let entry = ClipboardEntry::new(
+            7,
+            ClipboardContent::Text(format!("a{}", "中🙂".repeat(300_000))),
+        );
+        let mut cache = HistoryRenderCache::default();
+        let first = cache.presentation(&entry, false, false).unwrap();
+        assert!(first.truncated);
+        assert!(first.title.len() <= TEXT_ESTIMATE_SCAN_LIMIT);
+        assert!(first.title.is_char_boundary(first.title.len()));
+        assert!(cache.expanded.is_none());
+
+        let mut metadata_update = entry.clone();
+        metadata_update.favorite = true;
+        let second = cache.presentation(&metadata_update, false, false).unwrap();
+        assert_eq!(first.title.as_ptr(), second.title.as_ptr());
+        assert!(cache.texts[&entry.id].character_count.is_none());
+    }
+
+    #[test]
+    fn character_count_and_expanded_text_are_shared_until_invalidation() {
+        let entry = Arc::new(ClipboardEntry::new(
+            7,
+            ClipboardContent::Text("hello 中🙂".repeat(10_000)),
+        ));
+        let mut cache = HistoryRenderCache::default();
+        let first = cache.presentation(&entry, true, true).unwrap();
+        let second = cache.presentation(&entry, true, true).unwrap();
+        assert_eq!(first.character_count, Some(80_000));
+        assert_eq!(first.title.as_ptr(), second.title.as_ptr());
+        assert_eq!(
+            first.title.len(),
+            match &entry.content {
+                ClipboardContent::Text(text) => text.len(),
+                _ => unreachable!(),
+            }
+        );
+
+        cache.invalidate_rows(std::slice::from_ref(&entry));
+        assert_eq!(cache.texts.len(), 1);
+        assert!(cache.expanded.is_some());
+        cache.invalidate_rows(&[]);
+        assert!(cache.texts.is_empty());
+        assert!(cache.expanded.is_none());
+    }
+
+    #[test]
+    fn row_sizes_are_invalidated_and_pruned_with_visible_entries() {
+        let key = RowLayoutKey {
+            text: TextLayoutKey {
+                width: px(300.),
+                font: Font::default(),
+            },
+            image_width: 800.,
+            expanded_image: None,
+            expanded_text: None,
+        };
+        let mut cache = HistoryRenderCache::default();
+        cache.text(1, "first");
+        cache.text(2, "second");
+        cache.sizes = Some((key, Rc::new(vec![size(px(0.), px(64.)); 2])));
+        let retained = Arc::new(ClipboardEntry::new(
+            2,
+            ClipboardContent::Text("second".into()),
+        ));
+        cache.invalidate_rows(&[retained]);
+        assert!(cache.sizes.is_none());
+        assert!(!cache.texts.contains_key(&1));
+        assert!(cache.texts.contains_key(&2));
+    }
+
+    #[gpui_kit::test]
+    async fn cached_layout_remeasures_when_width_or_font_changes(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, _| {
+            let mut cache = HistoryRenderCache::default();
+            let text = "one two three four five six seven eight nine ten";
+            let wide = TextLayoutKey {
+                width: px(1_000.),
+                font: Font::default(),
+            };
+            assert_eq!(cache.text_lines(1, text, &wide, window), 1);
+            assert_eq!(cache.text_lines(1, text, &wide, window), 1);
+
+            let narrow = TextLayoutKey {
+                width: px(35.),
+                ..wide.clone()
+            };
+            let lines = cache.text_lines(1, text, &narrow, window);
+            assert!(lines > super::COLLAPSED_TEXT_LINES);
+            assert_eq!(cache.texts[&1].layout.as_ref().unwrap().0.width, px(35.));
+            assert_eq!(
+                ClipboardApp::measured_text_row_height(lines, false),
+                ClipboardApp::text_row_height(super::COLLAPSED_TEXT_LINES),
+            );
+            let mut changed_font = narrow.clone();
+            changed_font.font.weight = gpui_kit::FontWeight::BOLD;
+            cache.text_lines(1, text, &changed_font, window);
+            assert!(cache.texts[&1].layout.as_ref().unwrap().0 == changed_font);
+            assert_eq!(cache.text_lines(1, text, &wide, window), 1);
+        });
     }
 
     #[test]

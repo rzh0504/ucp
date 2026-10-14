@@ -13,9 +13,10 @@
   the native HWND integration, close-to-tray interception and activation loop.
 - Enable Kit's `test-support` only through dev-dependencies.
 
-This migration does not change the application version, SQLite schema, data
-directory, history/search algorithms, or clipboard behavior. It does not restore
-selectable expanded text or enable the optional `gpui-fast` backend.
+The Phase 1 dependency commit does not change the application version, SQLite
+schema, data directory, history/search algorithms, or clipboard behavior.
+Subsequent optimization commits are recorded below. None restore selectable
+expanded text or enable the optional `gpui-fast` backend.
 
 Upstream references:
 
@@ -77,6 +78,12 @@ headless tests cannot validate them.
 - [ ] On Linux: verify X11/Wayland client decorations, resizing, maximizing and
       tiled-window menu placement.
 - [ ] On macOS: verify native title-bar controls and application activation.
+- [ ] Copy while startup is loading or retrying; verify the current clipboard is
+      captured after initialization/listener setup succeeds.
+- [ ] Clear while capturing new and identical content, including a full history
+      containing favorites/pins; restart and verify the retained records.
+- [ ] Stress long/repetitive text, huge trailing-newline suffixes, rapid search
+      changes, expansion and narrow-window scrolling.
 
 ## Optimization phases
 
@@ -105,8 +112,46 @@ Validation: `cargo test` passed all 50 tests, including eight new storage/worker
 regressions; `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`
 passed on Windows x86_64 MSVC. Native clipboard/visual checks remain unverified.
 
-### Phase 3 — responsive initialization, search and rendering (in progress)
+### Phase 3 — responsive initialization, search and rendering (completed)
 
-Move database initialization off the UI thread, use consistent linear-time
-Unicode search, and bound/cache text-related rendering work. This phase is not
-included in the Phase 2 completion claim.
+- Render a loading view without synchronously opening/migrating SQLite. Load
+  settings/history, prune, sort and construct history on the background executor;
+  install the complete storage session atomically. Failed startup cannot start
+  capturing with an empty allocator, and offers retry. Settings stay disabled
+  until ready.
+- Construct native listeners off GPUI. A bounded-one nonblocking channel
+  coalesces notifications: this intentionally captures the latest clipboard
+  state, not every intermediate state. Sample the current clipboard once after
+  successful startup/retry. Listener failures remain visible and offer retry.
+- Use Unicode default case folding consistently for query and content, followed
+  by streaming KMP matching. Greek sigma and multi-character expansions such as
+  `ß`/`SS` match consistently. Canonical/compatibility normalization is
+  intentionally not performed.
+- Share immutable entries with `Arc` so background search snapshots do not clone
+  clipboard text. Generation checks reject obsolete results; cancellation checks
+  run between records and every 1024 folded characters inside large records.
+  Pending searches cannot copy stale results with Enter.
+- Cache virtual-list row sizes until data/layout changes. Bound collapsed text
+  previews to 8 KiB at UTF-8 boundaries, before any suffix trimming. Shape bounded
+  previews with GPUI using font and resolved Kit content width, including window
+  decoration insets. Cache exact character counts across filter/search changes.
+  Only explicitly expanded text retains a shared full string; expanded content
+  always supports scrolling, and its expand/collapse control does not shrink.
+- Review follow-ups harden Phase 2: pending deletion IDs participate in neither
+  capture deduplication nor capacity eviction; tombstones are applied by the FIFO
+  worker, not ahead of previously submitted saves. Regression cases cover
+  same-content recapture, full protected histories, and failed deletion after an
+  earlier save.
+
+Validation on Windows x86_64 MSVC: all 71 tests, formatting, strict Clippy and
+the locked release build pass. Tests include deterministic linear-comparison
+bounds, cancellation, Unicode matching, cache reuse/pruning, actual GPUI text
+wrapping and real SQLite failure/ordering cases. No FPS, latency, memory or
+startup-time benchmark is claimed; the native checklist remains unverified.
+
+Remaining boundaries: exact character count still performs one full scan on
+first display of an uncached entry; explicit expansion still lays out full text.
+Cache rebuilds on data/font/width changes are not constant-time. Graceful draining
+of queued writes before the application's forced process exit remains follow-up
+work; the worker draining its queue on drop is not a process-exit durability
+guarantee. System-theme following and other UX review items are not included here.

@@ -59,10 +59,6 @@ impl ClipboardService {
         Ok(entries)
     }
 
-    pub fn suppress_entry_saves(storage: &ClipboardStorage, ids: &[u64]) {
-        storage.suppress_entry_saves(ids);
-    }
-
     pub fn allow_entry_saves(storage: &ClipboardStorage, ids: &[u64]) {
         storage.allow_entry_saves(ids);
     }

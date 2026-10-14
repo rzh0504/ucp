@@ -4,7 +4,7 @@ use crate::model::{
     DEFAULT_BACKGROUND_OPACITY,
 };
 use crate::services::persistence::StorageWriter;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -136,7 +136,7 @@ fn storage_round_trips_settings_and_clipboard_entries() {
         ClipboardContent::Files(files) if files == &["C:\\tmp\\a.txt", "D:\\b.png"]
     ));
 
-    let mut metadata_only_image = Rc::unwrap_or_clone(loaded_history.entry(11).unwrap());
+    let mut metadata_only_image = Arc::unwrap_or_clone(loaded_history.entry(11).unwrap());
     metadata_only_image.favorite = true;
     save_entry(&storage, &metadata_only_image).unwrap();
     assert!(matches!(
@@ -398,6 +398,45 @@ fn snapshot_delete_does_not_clear_a_later_capture() {
     clear.recv_blocking().unwrap().unwrap();
     first.recv_blocking().unwrap().unwrap();
     let loaded = load_entries(storage).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id, 2);
+}
+
+#[test]
+fn failed_delete_does_not_cancel_an_earlier_queued_save() {
+    let fixture = TestStorage::new();
+    let storage = &fixture.storage;
+    storage
+        .with_connection(|connection| {
+            connection.execute_batch(
+                "CREATE TRIGGER reject_delete BEFORE DELETE ON clipboard_entries
+             BEGIN SELECT RAISE(ABORT, 'delete rejected'); END;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let writer = StorageWriter::new(storage.clone());
+    let save = writer.save(text_entry(1, "must be durable"), vec![]);
+    let delete = writer.delete(vec![1]);
+    assert!(delete.recv_blocking().unwrap().is_err());
+    save.recv_blocking().unwrap().unwrap();
+    storage.allow_entry_saves(&[1]);
+    let loaded = load_entries(storage).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].id, 1);
+}
+
+#[test]
+fn snapshot_delete_retains_same_content_recaptured_under_a_new_id() {
+    let fixture = TestStorage::new();
+    let writer = StorageWriter::new(fixture.storage.clone());
+    let first = writer.save(text_entry(1, "same content"), vec![]);
+    let clear = writer.delete(vec![1]);
+    let recapture = writer.save(text_entry(2, "same content"), vec![]);
+    recapture.recv_blocking().unwrap().unwrap();
+    clear.recv_blocking().unwrap().unwrap();
+    first.recv_blocking().unwrap().unwrap();
+    let loaded = load_entries(&fixture.storage).unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].id, 2);
 }

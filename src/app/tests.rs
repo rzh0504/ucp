@@ -17,7 +17,7 @@ struct HistoryView {
     history: ClipboardHistory,
     query: String,
     filter: ClipboardFilter,
-    visible_entries: Vec<Rc<ClipboardEntry>>,
+    visible_entries: Vec<std::sync::Arc<ClipboardEntry>>,
 }
 
 impl HistoryView {
