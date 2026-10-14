@@ -7,7 +7,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, ShowWindow, WS_EX_TOPMOST,
 };
 
-pub fn window_handle(window: &gpui::Window) -> Option<isize> {
+pub fn window_handle(window: &gpui_kit::Window) -> Option<isize> {
     let handle = HasWindowHandle::window_handle(window).ok()?;
     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
         return None;
@@ -23,7 +23,7 @@ pub fn show_window(handle: isize) {
     unsafe { ShowWindow(handle as _, SW_SHOW) };
 }
 
-pub fn set_always_on_top(window: &gpui::Window, always_on_top: bool) -> bool {
+pub fn set_always_on_top(window: &gpui_kit::Window, always_on_top: bool) -> bool {
     let Ok(handle) = HasWindowHandle::window_handle(window) else {
         return false;
     };

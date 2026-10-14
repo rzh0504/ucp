@@ -2,10 +2,9 @@ use crate::model::{AppSettings, ClipboardContent, ClipboardFilter, ClipboardHist
 use crate::platform;
 use crate::services::{ClipboardService, ClipboardStorage};
 use crate::updater::{self, UpdateCheck, UpdateInfo};
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
-    ActiveTheme as _, FocusableExt as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode,
+use gpui_kit::assets::Assets;
+use gpui_kit::component::{
+    ActiveTheme as _, FocusableExt as _, Icon, IconName, Sizable as _, Theme, ThemeMode,
     ThemeRegistry, TitleBar, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogButtonProps,
@@ -15,7 +14,8 @@ use gpui_component::{
     status_bar::StatusBar,
     v_flex,
 };
-use gpui_kit_assets::Assets;
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use std::borrow::Cow;
 
 mod history;
@@ -67,13 +67,18 @@ impl AssetSource for AppAssets {
     }
 }
 
+fn init_ui(cx: &mut App) {
+    // Required on Windows before system notifications can be posted.
+    cx.set_app_identity("dev.ucp.clipboard", "UCP");
+    // Register the per-window presentation plugins before opening any Root.
+    gpui_kit::init(cx);
+    ClipboardApp::install_themes(cx);
+}
+
 pub fn run(visible: bool) {
-    let app = gpui_platform::application().with_assets(AppAssets(Assets));
+    let app = gpui_kit::application().with_assets(AppAssets(Assets));
     app.run(move |cx| {
-        // Required on Windows before system notifications can be posted.
-        cx.set_app_identity("dev.ucp.clipboard", "UCP");
-        gpui_component::init(cx);
-        ClipboardApp::install_themes(cx);
+        init_ui(cx);
         #[cfg(windows)]
         let tray = platform::tray::create().ok();
         #[cfg(windows)]
@@ -85,12 +90,15 @@ pub fn run(visible: bool) {
         };
         cx.spawn(async move |cx| {
             let window = cx
-                .open_window(options, |window, cx| {
-                    window.set_window_title("UCP");
-                    let view = cx.new(|cx| ClipboardApp::new(window, cx));
-                    cx.new(|cx| Root::new(view, window, cx).bordered(false))
+                .update(|cx| {
+                    // Kit supplies the Base Root, window chrome, and all overlays.
+                    gpui_kit::open_window(options, cx, |window, cx| {
+                        window.set_window_title("UCP");
+                        cx.new(|cx| ClipboardApp::new(window, cx))
+                    })
                 })
-                .expect("Failed to open GPUI window");
+                .expect("Failed to open GPUI window")
+                .0;
             #[cfg(windows)]
             {
                 let hwnd = window
@@ -174,7 +182,7 @@ struct ClipboardApp {
     search: Entity<InputState>,
     initial_focus: FocusHandle,
     window_handle: AnyWindowHandle,
-    history_scroll: gpui_component::VirtualListScrollHandle,
+    history_scroll: gpui_kit::component::VirtualListScrollHandle,
     _clipboard_listener: Option<platform::clipboard::ClipboardUpdateListener>,
     _subscriptions: Vec<Subscription>,
 }
@@ -245,28 +253,26 @@ impl ClipboardApp {
         initial_focus.focus(window, cx);
         let subscriptions = vec![cx.subscribe_in(&search, window, {
             let search = search.clone();
-            move |this, _, event: &InputEvent, window, cx| {
-                match event {
-                    InputEvent::Change => {
-                        this.query = search.read(cx).value().to_string();
-                        this.refresh_visible_entries();
-                        this.preload_file_icons(cx);
-                        cx.notify();
-                    }
-                    InputEvent::PressEnter { .. } => {
-                        let Some(entry) = this.visible_entries.first().cloned() else {
-                            return;
-                        };
-                        let id = entry.id;
-                        this.selected_entry_ids.clear();
-                        this.selection_anchor_id = None;
-                        this.navigation_entry_id = None;
-                        let quick_paste = this.settings.quick_paste;
-                        let window_handle = window.window_handle();
-                        this.copy_entry(id, quick_paste, Some(window_handle), cx);
-                    }
-                    _ => {}
+            move |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    this.query = search.read(cx).value().to_string();
+                    this.refresh_visible_entries();
+                    this.preload_file_icons(cx);
+                    cx.notify();
                 }
+                InputEvent::PressEnter { .. } => {
+                    let Some(entry) = this.visible_entries.first().cloned() else {
+                        return;
+                    };
+                    let id = entry.id;
+                    this.selected_entry_ids.clear();
+                    this.selection_anchor_id = None;
+                    this.navigation_entry_id = None;
+                    let quick_paste = this.settings.quick_paste;
+                    let window_handle = window.window_handle();
+                    this.copy_entry(id, quick_paste, Some(window_handle), cx);
+                }
+                _ => {}
             }
         })];
         let (update_tx, update_rx) = async_channel::unbounded();
@@ -304,7 +310,7 @@ impl ClipboardApp {
             search,
             initial_focus,
             window_handle,
-            history_scroll: gpui_component::VirtualListScrollHandle::new(),
+            history_scroll: gpui_kit::component::VirtualListScrollHandle::new(),
             _clipboard_listener: clipboard_listener,
             _subscriptions: subscriptions,
         };
@@ -541,8 +547,6 @@ impl Render for ClipboardApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page;
         let counts = self.history.counts();
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
         v_flex()
             .track_focus(&self.initial_focus)
             .on_key_down(cx.listener(|this, event, window, cx| {
@@ -704,7 +708,5 @@ impl Render for ClipboardApp {
                             }),
                     ),
             )
-            .children(dialog_layer)
-            .children(notification_layer)
     }
 }

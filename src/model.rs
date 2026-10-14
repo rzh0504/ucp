@@ -899,7 +899,10 @@ mod tests {
         assert_eq!(history.filtered("hello", ClipboardFilter::All).len(), 1);
         assert_eq!(history.filtered("WORLD", ClipboardFilter::All).len(), 1);
         assert_eq!(history.filtered("世界", ClipboardFilter::All).len(), 1);
-        assert_eq!(history.filtered("report.pdf", ClipboardFilter::All).len(), 1);
+        assert_eq!(
+            history.filtered("report.pdf", ClipboardFilter::All).len(),
+            1
+        );
         assert_eq!(history.filtered("planet", ClipboardFilter::All).len(), 0);
     }
 

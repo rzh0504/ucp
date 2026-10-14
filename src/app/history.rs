@@ -1,10 +1,7 @@
 use super::ClipboardApp;
-use crate::model::{
-    AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, HistoryCounts,
-};
+use crate::model::{AppLanguage, ClipboardContent, ClipboardEntry, ClipboardFilter, HistoryCounts};
 use crate::services::ClipboardService;
-use gpui::{prelude::FluentBuilder as _, *};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex,
     input::Input,
     menu::{ContextMenuExt as _, PopupMenuItem},
@@ -14,6 +11,7 @@ use gpui_component::{
     tag::Tag,
     v_flex, v_virtual_list,
 };
+use gpui_kit::{prelude::FluentBuilder as _, *};
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
@@ -371,8 +369,8 @@ impl ClipboardApp {
                         None
                     }
                 });
-                if let Some(id) = target
-                    .filter(|id| self.visible_entries.iter().any(|entry| entry.id == *id))
+                if let Some(id) =
+                    target.filter(|id| self.visible_entries.iter().any(|entry| entry.id == *id))
                 {
                     self.selected_entry_ids.clear();
                     self.selection_anchor_id = None;
@@ -657,9 +655,8 @@ impl ClipboardApp {
                                         .child(title),
                                 )
                                 .child(
-                                    ScrollableMask::new(Axis::Vertical, &text_scroll).id(
-                                        ElementId::NamedInteger("text-scroll-mask".into(), id),
-                                    ),
+                                    ScrollableMask::new(Axis::Vertical, &text_scroll)
+                                        .id(ElementId::NamedInteger("text-scroll-mask".into(), id)),
                                 )
                                 .child(
                                     Scrollbar::vertical(&text_scroll)
@@ -1047,8 +1044,7 @@ impl ClipboardApp {
         let text = estimate_scan_prefix(text);
         let mut lines = 0;
         for line in text.lines() {
-            let unit_budget =
-                (TEXT_LINE_ESTIMATE_CAP - lines) * TEXT_WIDTH_UNITS_PER_PREVIEW_LINE;
+            let unit_budget = (TEXT_LINE_ESTIMATE_CAP - lines) * TEXT_WIDTH_UNITS_PER_PREVIEW_LINE;
             let mut units = 0;
             for character in line.chars() {
                 units += if character.is_ascii() { 1 } else { 2 };

@@ -6,7 +6,7 @@ pub mod tray;
 #[cfg(windows)]
 pub mod windows;
 
-pub fn hide_window(window: &gpui::Window) {
+pub fn hide_window(window: &gpui_kit::Window) {
     #[cfg(windows)]
     if let Some(handle) = windows::window_handle(window) {
         windows::hide_window(handle);

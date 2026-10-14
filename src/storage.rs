@@ -8,9 +8,9 @@ mod tests;
 use schema::{column_exists, schema_version};
 pub use settings::{load_settings, save_settings};
 
-use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
 #[cfg(test)]
 use crate::model::ClipboardHistory;
+use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use sha2::{Digest, Sha256};
