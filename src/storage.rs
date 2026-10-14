@@ -8,9 +8,9 @@ mod tests;
 use schema::{column_exists, schema_version};
 pub use settings::{load_settings, save_settings};
 
-use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
 #[cfg(test)]
 use crate::model::ClipboardHistory;
+use crate::model::{ClipboardContent, ClipboardEntry, ClipboardImage};
 use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use sha2::{Digest, Sha256};
@@ -47,6 +47,8 @@ pub enum StorageError {
     Database(#[from] rusqlite::Error),
     #[error("database connection lock is poisoned")]
     ConnectionLock,
+    #[error("persistence worker is unavailable")]
+    WorkerUnavailable,
     #[error("database version {found} is newer than supported version {supported}")]
     UnsupportedSchema { found: i32, supported: i32 },
 }
@@ -190,6 +192,50 @@ pub fn load_entries(storage: &StorageHandle) -> Result<Vec<ClipboardEntry>, Stor
     })
 }
 
+/// Applies the same total-capacity rule as `ClipboardHistory`: protected rows
+/// count toward capacity, but are never removed even when they exceed it.
+pub fn prune_to_capacity(storage: &StorageHandle, capacity: usize) -> Result<(), StorageError> {
+    let preview_urls = storage.with_connection(|connection| {
+        let transaction = connection.transaction()?;
+        let protected: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM clipboard_entries WHERE pinned != 0 OR favorite != 0",
+            [],
+            |row| row.get(0),
+        )?;
+        let ordinary_capacity = capacity.saturating_sub(protected as usize);
+        let ids = {
+            let mut statement = transaction.prepare(
+                "SELECT id FROM clipboard_entries WHERE pinned = 0 AND favorite = 0 \
+                 ORDER BY captured_at_millis DESC, id DESC LIMIT -1 OFFSET ?1",
+            )?;
+            statement
+                .query_map([ordinary_capacity.min(i64::MAX as usize) as i64], |row| {
+                    Ok(row.get::<_, i64>(0)? as u64)
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let preview_urls = image_preview_urls_for_ids(&transaction, &ids)?;
+        for id in ids {
+            transaction.execute("DELETE FROM clipboard_entries WHERE id = ?1", [id as i64])?;
+        }
+        transaction.commit()?;
+        Ok(preview_urls)
+    })?;
+    image_cache::remove_previews(preview_urls);
+    Ok(())
+}
+
+/// Prunes persisted rows before loading. Callers that need the pre-pruning ID
+/// high-water mark should load first, then call `prune_to_capacity` separately.
+#[cfg(test)]
+pub fn load_entries_with_capacity(
+    storage: &StorageHandle,
+    capacity: usize,
+) -> Result<Vec<ClipboardEntry>, StorageError> {
+    prune_to_capacity(storage, capacity)?;
+    load_entries(storage)
+}
+
 pub fn load_image(
     storage: &StorageHandle,
     entry_id: u64,
@@ -259,36 +305,62 @@ pub fn save_entry(
         ClipboardContent::Files(_) => {}
     }
     let content_hash = content_hash_for_entry(entry, image_blob.as_deref());
+    // Encoding and filesystem writes can be expensive; neither needs the
+    // connection mutex. The persistence writer serializes normal mutations.
+    if let ClipboardContent::Image(image) = &entry.content
+        && image.has_bytes()
+        && let Some(url) = image_cache::write_preview(entry.id, image)?
+    {
+        image_preview_url = Some(url);
+    }
 
-    storage.with_connection(|connection| {
+    let (preview_url, obsolete_previews) = storage.with_connection(|connection| {
         if storage.is_pending_delete(entry.id) {
-            return Ok(None);
-        }
-
-        let database_id = if let Some(hash) = content_hash.as_deref() {
-            connection
-                .query_row(
-                    "SELECT id FROM clipboard_entries WHERE content_hash = ?1 AND id <> ?2",
-                    params![hash, entry.id as i64],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?
-                .unwrap_or(entry.id as i64)
-        } else {
-            entry.id as i64
-        };
-        let merge_duplicate_metadata = (database_id != entry.id as i64) as i64;
-        let cached_image_preview_url = match &entry.content {
-            ClipboardContent::Image(image) if image.has_bytes() => {
-                image_cache::write_preview(database_id as u64, image)?
-            }
-            _ => None,
-        };
-        if let Some(url) = cached_image_preview_url.clone() {
-            image_preview_url = Some(url);
+            return Ok((None, Vec::new()));
         }
 
         let transaction = connection.transaction()?;
+        let duplicate = if let Some(hash) = content_hash.as_deref() {
+            transaction
+                .query_row(
+                    "SELECT id, pinned, favorite, image_blob, image_format, image_preview_url \
+                     FROM clipboard_entries WHERE content_hash = ?1 AND id <> ?2",
+                    params![hash, entry.id as i64],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, Option<Vec<u8>>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                        ))
+                    },
+                )
+                .optional()?
+        } else {
+            None
+        };
+        let mut pinned = entry.pinned;
+        let mut favorite = entry.favorite;
+        let mut obsolete_previews = image_preview_urls_for_ids(&transaction, &[entry.id])?;
+        let mut duplicate_image_format = None;
+        if let Some((id, old_pinned, old_favorite, blob, format, preview)) = &duplicate {
+            pinned |= *old_pinned;
+            favorite |= *old_favorite;
+            if image_blob.is_none() {
+                image_blob = blob.clone();
+                duplicate_image_format = format.clone();
+            }
+            if image_preview_url.is_none() {
+                image_preview_url = preview.clone();
+            }
+            obsolete_previews.extend(preview.iter().cloned());
+            // Release the unique content hash before inserting the authoritative
+            // UI ID. Deleting first is safe because this is one transaction.
+            transaction.execute("DELETE FROM clipboard_entries WHERE id = ?1", [id])?;
+        }
+
         transaction.execute(
             "INSERT INTO clipboard_entries (\
                  id, kind, text_content, image_width, image_height, image_blob, image_format, \
@@ -301,7 +373,7 @@ pub fn save_entry(
                    image_height = excluded.image_height, \
                    image_blob = COALESCE(excluded.image_blob, clipboard_entries.image_blob), \
                    image_format = COALESCE(excluded.image_format, clipboard_entries.image_format), \
-                   image_preview_url = excluded.image_preview_url, \
+                   image_preview_url = COALESCE(excluded.image_preview_url, clipboard_entries.image_preview_url), \
                   captured_at_millis = excluded.captured_at_millis, \
                   pinned = CASE \
                       WHEN ?13 != 0 THEN clipboard_entries.pinned OR excluded.pinned \
@@ -313,52 +385,76 @@ pub fn save_entry(
                   END, \
                   content_hash = COALESCE(excluded.content_hash, clipboard_entries.content_hash)",
             params![
-                database_id,
+                entry.id as i64,
                 kind,
                 text_content,
                 image_width,
                 image_height,
                 image_blob.as_deref(),
-                image_format,
+                image_format.or(duplicate_image_format.as_deref()),
                 image_preview_url.as_deref(),
                 entry.captured_at.timestamp_millis(),
-                entry.pinned as i64,
-                entry.favorite as i64,
+                pinned as i64,
+                favorite as i64,
                 content_hash,
-                merge_duplicate_metadata,
+                duplicate.is_some() as i64,
             ],
         )?;
 
         transaction.execute(
             "DELETE FROM clipboard_files WHERE entry_id = ?1",
-            params![database_id],
+            params![entry.id as i64],
         )?;
 
         if let ClipboardContent::Files(files) = &entry.content {
             for (position, file) in files.iter().enumerate() {
                 transaction.execute(
                     "INSERT INTO clipboard_files (entry_id, position, path) VALUES (?1, ?2, ?3)",
-                    params![database_id, position as i64, file],
+                    params![entry.id as i64, position as i64, file],
                 )?;
             }
         }
 
-        let removed_preview_urls = if database_id != entry.id as i64 {
-            image_preview_urls_for_ids(&transaction, &[entry.id])?
-        } else {
-            Vec::new()
-        };
+        let preview_url: Option<String> = transaction.query_row(
+            "SELECT image_preview_url FROM clipboard_entries WHERE id = ?1",
+            [entry.id as i64],
+            |row| row.get(0),
+        )?;
+        obsolete_previews.retain(|url| Some(url) != preview_url.as_ref());
+        transaction.commit()?;
+        Ok((preview_url, obsolete_previews))
+    })?;
+    image_cache::remove_previews(obsolete_previews);
+    Ok(preview_url)
+}
 
-        if database_id != entry.id as i64 {
+/// Updates only favorites, so stale UI snapshots cannot overwrite other fields
+/// or resurrect an entry already deleted by an earlier queued operation.
+pub fn set_favorites(storage: &StorageHandle, changes: &[(u64, bool)]) -> Result<(), StorageError> {
+    storage.with_connection(|connection| {
+        let transaction = connection.transaction()?;
+        for &(id, favorite) in changes {
             transaction.execute(
-                "DELETE FROM clipboard_entries WHERE id = ?1",
-                params![entry.id as i64],
+                "UPDATE clipboard_entries SET favorite = ?1 WHERE id = ?2",
+                params![favorite, id as i64],
             )?;
         }
-
         transaction.commit()?;
-        image_cache::remove_previews(removed_preview_urls);
-        Ok(cached_image_preview_url)
+        Ok(())
+    })
+}
+
+pub fn promote_entry(
+    storage: &StorageHandle,
+    id: u64,
+    captured_at: DateTime<Local>,
+) -> Result<(), StorageError> {
+    storage.with_connection(|connection| {
+        connection.execute(
+            "UPDATE clipboard_entries SET captured_at_millis = ?1 WHERE id = ?2",
+            params![captured_at.timestamp_millis(), id as i64],
+        )?;
+        Ok(())
     })
 }
 
@@ -380,15 +476,6 @@ pub fn delete_entries(storage: &StorageHandle, ids: &[u64]) -> Result<(), Storag
         )?;
 
         transaction.commit()?;
-        image_cache::remove_previews(preview_urls);
-        Ok(())
-    })
-}
-
-pub fn clear_history(storage: &StorageHandle) -> Result<(), StorageError> {
-    storage.with_connection(|connection| {
-        let preview_urls = all_image_preview_urls(connection)?;
-        connection.execute("DELETE FROM clipboard_entries", [])?;
         image_cache::remove_previews(preview_urls);
         Ok(())
     })
@@ -473,14 +560,6 @@ fn sql_placeholders(count: usize) -> String {
     std::iter::repeat_n("?", count)
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn all_image_preview_urls(connection: &Connection) -> Result<Vec<String>, StorageError> {
-    image_preview_urls_matching(
-        connection,
-        "SELECT image_preview_url FROM clipboard_entries WHERE kind = 'image' AND image_preview_url IS NOT NULL",
-        [],
-    )
 }
 
 fn image_preview_urls_older_than(

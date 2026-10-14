@@ -1,11 +1,12 @@
 use crate::model::{AppSettings, ClipboardContent, ClipboardFilter, ClipboardHistory};
 use crate::platform;
+use crate::services::persistence::StorageWriter;
 use crate::services::{ClipboardService, ClipboardStorage};
 use crate::updater::{self, UpdateCheck, UpdateInfo};
-use gpui::prelude::FluentBuilder as _;
-use gpui::*;
-use gpui_component::{
-    ActiveTheme as _, FocusableExt as _, Icon, IconName, Root, Sizable as _, Theme, ThemeMode,
+use gpui_kit::assets::Assets;
+use gpui_kit::base::Disableable as _;
+use gpui_kit::component::{
+    ActiveTheme as _, FocusableExt as _, Icon, IconName, Sizable as _, Theme, ThemeMode,
     ThemeRegistry, TitleBar, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogButtonProps,
@@ -15,7 +16,8 @@ use gpui_component::{
     status_bar::StatusBar,
     v_flex,
 };
-use gpui_kit_assets::Assets;
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use std::borrow::Cow;
 
 mod history;
@@ -67,13 +69,18 @@ impl AssetSource for AppAssets {
     }
 }
 
+fn init_ui(cx: &mut App) {
+    // Required on Windows before system notifications can be posted.
+    cx.set_app_identity("dev.ucp.clipboard", "UCP");
+    // Register the per-window presentation plugins before opening any Root.
+    gpui_kit::init(cx);
+    ClipboardApp::install_themes(cx);
+}
+
 pub fn run(visible: bool) {
-    let app = gpui_platform::application().with_assets(AppAssets(Assets));
+    let app = gpui_kit::application().with_assets(AppAssets(Assets));
     app.run(move |cx| {
-        // Required on Windows before system notifications can be posted.
-        cx.set_app_identity("dev.ucp.clipboard", "UCP");
-        gpui_component::init(cx);
-        ClipboardApp::install_themes(cx);
+        init_ui(cx);
         #[cfg(windows)]
         let tray = platform::tray::create().ok();
         #[cfg(windows)]
@@ -85,12 +92,15 @@ pub fn run(visible: bool) {
         };
         cx.spawn(async move |cx| {
             let _window = cx
-                .open_window(options, |window, cx| {
-                    window.set_window_title("UCP");
-                    let view = cx.new(|cx| ClipboardApp::new(window, cx));
-                    cx.new(|cx| Root::new(view, window, cx).bordered(false))
+                .update(|cx| {
+                    // Kit supplies the Base Root, window chrome, and all overlays.
+                    gpui_kit::open_window(options, cx, |window, cx| {
+                        window.set_window_title("UCP");
+                        cx.new(|cx| ClipboardApp::new(window, cx))
+                    })
                 })
-                .expect("Failed to open GPUI window");
+                .expect("Failed to open GPUI window")
+                .0;
             #[cfg(windows)]
             {
                 let hwnd = _window
@@ -125,9 +135,7 @@ pub fn run(visible: bool) {
                             break;
                         }
                         if should_show {
-                            _window
-                                .update(cx, |_, window, _| window.refresh())
-                                .ok();
+                            _window.update(cx, |_, window, _| window.refresh()).ok();
                             if let Some(hwnd) = hwnd {
                                 platform::windows::show_window(hwnd);
                             }
@@ -145,14 +153,36 @@ pub fn run(visible: bool) {
     });
 }
 
-struct ClipboardApp {
+/// Installed atomically only after initialization, history loading and pruning
+/// succeed. Every later write uses this session's single FIFO worker.
+struct StorageSession {
     storage: ClipboardStorage,
+    writer: StorageWriter,
+}
+
+fn clipboard_update_channel() -> (impl FnMut() + Send + 'static, async_channel::Receiver<()>) {
+    let (sender, receiver) = async_channel::bounded(1);
+    (
+        move || {
+            let _ = sender.try_send(());
+        },
+        receiver,
+    )
+}
+
+struct ClipboardApp {
+    storage_session: Option<StorageSession>,
+    persistence_error: Option<String>,
     settings: AppSettings,
-    settings_save_task: Option<Task<()>>,
     settings_save_revision: u64,
     history: ClipboardHistory,
     history_loading: bool,
+    startup_error: Option<String>,
+    monitor_error: Option<String>,
+    monitor_starting: bool,
     query: String,
+    search_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    search_pending: bool,
     filter: ClipboardFilter,
     page: AppPage,
     status: String,
@@ -161,6 +191,7 @@ struct ClipboardApp {
     editing_global_shortcut: bool,
     update_check: UpdateCheckState,
     selected_entry_ids: std::collections::HashSet<u64>,
+    pending_delete_ids: std::collections::HashSet<u64>,
     selection_anchor_id: Option<u64>,
     navigation_entry_id: Option<u64>,
     expanded_image_id: Option<u64>,
@@ -168,7 +199,8 @@ struct ClipboardApp {
     expanded_text_id: Option<u64>,
     expanded_text_scroll_offset: Option<Point<Pixels>>,
     expanded_text_scroll: ScrollHandle,
-    visible_entries: Vec<std::rc::Rc<crate::model::ClipboardEntry>>,
+    visible_entries: Vec<std::sync::Arc<crate::model::ClipboardEntry>>,
+    history_render_cache: history::HistoryRenderCache,
     file_icon_paths: std::collections::HashMap<u64, std::path::PathBuf>,
     file_icon_loading: std::collections::HashSet<u64>,
     file_icon_failed: std::collections::HashSet<u64>,
@@ -176,18 +208,65 @@ struct ClipboardApp {
     search: Entity<InputState>,
     initial_focus: FocusHandle,
     window_handle: AnyWindowHandle,
-    history_scroll: gpui_component::VirtualListScrollHandle,
+    history_scroll: gpui_kit::component::VirtualListScrollHandle,
     _clipboard_listener: Option<platform::clipboard::ClipboardUpdateListener>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl ClipboardApp {
-    fn refresh_visible_entries(&mut self) {
-        self.visible_entries = self.history.filtered(&self.query, self.filter);
+    fn refresh_visible_entries(&mut self, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
+        let generation = self.search_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        if !self.query.trim().is_empty() {
+            let snapshot = self.history.snapshot();
+            let query = self.query.clone();
+            let filter = self.filter;
+            let current_generation = self.search_generation.clone();
+            self.search_pending = true;
+            // Never let Enter copy a result belonging to the previous query.
+            self.visible_entries.clear();
+            self.history_render_cache
+                .invalidate_rows(&self.history.snapshot());
+            cx.spawn(async move |entity, cx| {
+                let entries = cx
+                    .background_spawn(async move {
+                        ClipboardHistory::filter_snapshot_while(snapshot, &query, filter, || {
+                            current_generation.load(Ordering::Relaxed) == generation
+                        })
+                    })
+                    .await;
+                entity
+                    .update(cx, |this, cx| {
+                        if this.search_generation.load(Ordering::Relaxed) != generation {
+                            return;
+                        }
+                        if let Some(entries) = entries {
+                            this.visible_entries = entries;
+                            this.search_pending = false;
+                            this.history_render_cache
+                                .invalidate_rows(&this.history.snapshot());
+                            this.retain_visible_selection();
+                            this.preload_file_icons(cx);
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            })
+            .detach();
+            return;
+        }
+        self.search_pending = false;
+        self.visible_entries = self.history.filtered("", self.filter);
+        self.history_render_cache
+            .invalidate_rows(&self.history.snapshot());
         self.retain_visible_selection();
     }
 
-    fn update_visible_entry(&mut self, id: u64) {
+    fn update_visible_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+        if !self.query.trim().is_empty() {
+            self.refresh_visible_entries(cx);
+            return;
+        }
         self.visible_entries.retain(|entry| entry.id != id);
         if let Some(entry) = self.history.entry(id)
             && crate::model::ClipboardHistory::entry_matches(&entry, &self.query, self.filter)
@@ -204,12 +283,20 @@ impl ClipboardApp {
                 .unwrap_or(self.visible_entries.len());
             self.visible_entries.insert(insert_at, entry);
         }
+        self.history_render_cache
+            .invalidate_rows(&self.history.snapshot());
         self.retain_visible_selection();
     }
 
-    fn remove_visible_entries(&mut self, ids: &[u64]) {
+    fn remove_visible_entries(&mut self, ids: &[u64], cx: &mut Context<Self>) {
+        if !self.query.trim().is_empty() {
+            self.refresh_visible_entries(cx);
+            return;
+        }
         self.visible_entries
             .retain(|entry| !ids.contains(&entry.id));
+        self.history_render_cache
+            .invalidate_rows(&self.history.snapshot());
         self.retain_visible_selection();
     }
 
@@ -230,11 +317,10 @@ impl ClipboardApp {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (storage, settings) =
-            ClipboardService::initialize().expect("Failed to initialize clipboard service");
+        // No storage, migration, listener setup or blocking work before returning
+        // the initial loading view (including when starting hidden in the tray).
+        let settings = AppSettings::default();
         let history = ClipboardHistory::from_entries(settings.history_limit, Vec::new());
-        #[cfg(windows)]
-        platform::single_instance::configure_global_hotkey(&settings.global_show_shortcut);
         let theme_mode = if matches!(settings.theme, crate::model::AppTheme::Dark) {
             ThemeMode::Dark
         } else {
@@ -247,52 +333,50 @@ impl ClipboardApp {
         initial_focus.focus(window, cx);
         let subscriptions = vec![cx.subscribe_in(&search, window, {
             let search = search.clone();
-            move |this, _, event: &InputEvent, window, cx| {
-                match event {
-                    InputEvent::Change => {
-                        this.query = search.read(cx).value().to_string();
-                        this.refresh_visible_entries();
-                        this.preload_file_icons(cx);
-                        cx.notify();
-                    }
-                    InputEvent::PressEnter { .. } => {
-                        let Some(entry) = this.visible_entries.first().cloned() else {
-                            return;
-                        };
-                        let id = entry.id;
-                        this.selected_entry_ids.clear();
-                        this.selection_anchor_id = None;
-                        this.navigation_entry_id = None;
-                        let quick_paste = this.settings.quick_paste;
-                        let window_handle = window.window_handle();
-                        this.copy_entry(id, quick_paste, Some(window_handle), cx);
-                    }
-                    _ => {}
+            move |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    this.query = search.read(cx).value().to_string();
+                    this.refresh_visible_entries(cx);
+                    this.preload_file_icons(cx);
+                    cx.notify();
                 }
+                InputEvent::PressEnter { .. } => {
+                    let Some(entry) = this.visible_entries.first().cloned() else {
+                        return;
+                    };
+                    let id = entry.id;
+                    this.selected_entry_ids.clear();
+                    this.selection_anchor_id = None;
+                    this.navigation_entry_id = None;
+                    let quick_paste = this.settings.quick_paste;
+                    let window_handle = window.window_handle();
+                    this.copy_entry(id, quick_paste, Some(window_handle), cx);
+                }
+                _ => {}
             }
         })];
-        let (update_tx, update_rx) = async_channel::unbounded();
-        let event_tx = update_tx.clone();
-        let clipboard_listener = platform::clipboard::listen_for_updates(move || {
-            let _ = event_tx.send_blocking(());
-        })
-        .ok();
         let mut app = Self {
-            storage,
+            storage_session: None,
+            persistence_error: None,
             settings,
-            settings_save_task: None,
             settings_save_revision: 0,
             history,
-            history_loading: true,
+            history_loading: false,
+            startup_error: None,
+            monitor_error: None,
+            monitor_starting: false,
             query: String::new(),
+            search_generation: Default::default(),
+            search_pending: false,
             filter: ClipboardFilter::All,
             page: AppPage::History,
             status: String::new(),
-            monitor_paused: false,
+            monitor_paused: true,
             always_on_top: false,
             editing_global_shortcut: false,
             update_check: UpdateCheckState::Idle,
             selected_entry_ids: std::collections::HashSet::new(),
+            pending_delete_ids: std::collections::HashSet::new(),
             selection_anchor_id: None,
             navigation_entry_id: None,
             expanded_image_id: None,
@@ -301,6 +385,7 @@ impl ClipboardApp {
             expanded_text_scroll_offset: None,
             expanded_text_scroll: ScrollHandle::new(),
             visible_entries: Vec::new(),
+            history_render_cache: Default::default(),
             file_icon_paths: std::collections::HashMap::new(),
             file_icon_loading: std::collections::HashSet::new(),
             file_icon_failed: std::collections::HashSet::new(),
@@ -308,42 +393,114 @@ impl ClipboardApp {
             search,
             initial_focus,
             window_handle,
-            history_scroll: gpui_component::VirtualListScrollHandle::new(),
-            _clipboard_listener: clipboard_listener,
+            history_scroll: gpui_kit::component::VirtualListScrollHandle::new(),
+            _clipboard_listener: None,
             _subscriptions: subscriptions,
         };
-        app.load_history(update_rx, cx);
+        app.retry_startup(cx);
         app
     }
 
-    /// Loads the persisted history off the UI thread, then starts consuming
-    /// clipboard updates. Events that arrive while loading wait in the
-    /// channel, so no capture races the initial load.
-    fn load_history(&mut self, updates: async_channel::Receiver<()>, cx: &mut Context<Self>) {
-        let storage = self.storage.clone();
+    /// Opens/migrates SQLite, loads settings and history, and prunes entirely
+    /// off the GPUI thread. A failed startup never installs an empty allocator.
+    fn retry_startup(&mut self, cx: &mut Context<Self>) {
+        if self.history_loading || self.storage_session.is_some() {
+            return;
+        }
+        self.history_loading = true;
+        self.startup_error = None;
+        self.monitor_paused = true;
+        self.status = "正在加载剪贴板历史...".into();
+        cx.notify();
         cx.spawn(async move |entity, cx| {
-            let entries = cx
-                .background_spawn(async move { ClipboardService::load_history_entries(&storage) })
+            let loaded = cx
+                .background_spawn(async {
+                    ClipboardService::initialize().and_then(|(storage, settings)| {
+                        let entries = ClipboardService::load_history_entries(
+                            &storage,
+                            settings.history_limit,
+                        )?;
+                        let writer = StorageWriter::new(storage.clone());
+                        let history =
+                            ClipboardHistory::from_entries(settings.history_limit, entries);
+                        Ok((StorageSession { storage, writer }, settings, history))
+                    })
+                })
                 .await;
             entity
                 .update(cx, |this, cx| {
-                    match entries {
-                        Ok(entries) => {
-                            this.history = ClipboardHistory::from_entries(
-                                this.settings.history_limit,
-                                entries,
-                            );
-                        }
+                    this.history_loading = false;
+                    let (session, settings, history) = match loaded {
+                        Ok(loaded) => loaded,
                         Err(error) => {
                             let message = error.to_localized_string(this.settings.language);
                             this.status = message.clone();
+                            this.startup_error = Some(message.clone());
                             this.show_error("历史加载失败", message, cx);
+                            cx.notify();
+                            return;
+                        }
+                    };
+                    // Settings navigation stays disabled until this atomic install,
+                    // so persisted settings cannot overwrite user changes.
+                    this.settings = settings;
+                    this.history = history;
+                    this.storage_session = Some(session);
+                    Self::apply_theme(this.settings.theme, cx);
+                    #[cfg(windows)]
+                    platform::single_instance::configure_global_hotkey(
+                        &this.settings.global_show_shortcut,
+                    );
+                    this.status.clear();
+                    this.refresh_visible_entries(cx);
+                    this.preload_file_icons(cx);
+                    this.retry_clipboard_monitor(cx);
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Listener construction may wait for a platform thread or process; it must
+    /// not run on GPUI. A single pending event coalesces clipboard bursts while
+    /// a read is in flight without ever blocking the platform listener.
+    fn retry_clipboard_monitor(&mut self, cx: &mut Context<Self>) {
+        if self.storage_session.is_none()
+            || self.monitor_starting
+            || self._clipboard_listener.is_some()
+        {
+            return;
+        }
+        self.monitor_starting = true;
+        self.monitor_error = None;
+        cx.notify();
+        cx.spawn(async move |entity, cx| {
+            let (mut on_update, update_rx) = clipboard_update_channel();
+            // Capture the current state after loading/retry, even if the last
+            // clipboard change happened before the native listener was ready.
+            on_update();
+            let listener = cx
+                .background_spawn(async move { platform::clipboard::listen_for_updates(on_update) })
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    this.monitor_starting = false;
+                    match listener {
+                        Ok(listener) => {
+                            this._clipboard_listener = Some(listener);
+                            this.monitor_paused = false;
+                            this.status.clear();
+                            this.start_clipboard_monitor(update_rx, cx);
+                        }
+                        Err(error) => {
+                            let message = error.to_string();
+                            this.monitor_paused = true;
+                            this.monitor_error = Some(message.clone());
+                            this.status = message.clone();
+                            this.show_error("剪贴板监听启动失败", message, cx);
                         }
                     }
-                    this.history_loading = false;
-                    this.refresh_visible_entries();
-                    this.preload_file_icons(cx);
-                    this.start_clipboard_monitor(updates, cx);
                     cx.notify();
                 })
                 .ok();
@@ -418,51 +575,77 @@ impl ClipboardApp {
     }
 
     fn capture(&mut self, content: ClipboardContent, cx: &mut Context<Self>) {
+        let Some(session) = self.storage_session.as_ref() else {
+            return;
+        };
+        let writer = session.writer.clone();
         let promote_copied_entries = self.settings.promote_copied_entries;
         if self.monitor_paused
-            || !self
-                .history
-                .would_push_change_with_promotion(&content, promote_copied_entries)
+            || !self.history.would_push_change_excluding(
+                &content,
+                promote_copied_entries,
+                &self.pending_delete_ids,
+            )
         {
             return;
         }
-        let result = self
-            .history
-            .push_with_promotion(content, promote_copied_entries);
+        let result =
+            self.history
+                .push_excluding(content, promote_copied_entries, &self.pending_delete_ids);
         let entry = result.entry;
         let result_id = entry.as_ref().map(|entry| entry.id).unwrap_or_default();
         let removed_ids = result.removed_ids;
-        self.update_visible_entry(result_id);
-        self.remove_visible_entries(&removed_ids);
-        let storage = self.storage.clone();
-        cx.spawn(async move |entity, cx| {
-            let saved_preview = cx
-                .background_spawn(async move {
-                    let saved_preview = entry
-                        .as_ref()
-                        .map(|e| ClipboardService::save_entry(&storage, e))
-                        .transpose()
-                        .ok()
-                        .flatten()
-                        .flatten();
-                    if !removed_ids.is_empty() {
-                        let _ = ClipboardService::delete_stored_entries(&storage, &removed_ids);
+        self.update_visible_entry(result_id, cx);
+        self.remove_visible_entries(&removed_ids, cx);
+        if let Some(entry) = entry {
+            // Submission happens on the UI thread, before awaiting the reply.
+            // The worker therefore observes the same order as user actions.
+            let reply = writer.save(entry, removed_ids);
+            self.persist(
+                reply,
+                move |this, preview, cx| {
+                    if let Some(preview_url) = preview
+                        && this.history.set_image_preview_url(result_id, preview_url)
+                    {
+                        this.update_visible_entry(result_id, cx);
+                        cx.notify();
                     }
-                    saved_preview
+                },
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    fn persist<T: Send + 'static>(
+        &self,
+        reply: async_channel::Receiver<Result<T, crate::storage::StorageError>>,
+        on_success: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |entity, cx| {
+            let result = reply
+                .recv()
+                .await
+                .unwrap_or(Err(crate::storage::StorageError::WorkerUnavailable));
+            entity
+                .update(cx, |this, cx| match result {
+                    Ok(value) => on_success(this, value, cx),
+                    Err(error) => this.report_persistence_error(error.to_string(), cx),
                 })
-                .await;
-            if let Some(preview_url) = saved_preview {
-                entity
-                    .update(cx, |this, cx| {
-                        if this.history.set_image_preview_url(result_id, preview_url) {
-                            this.update_visible_entry(result_id);
-                            cx.notify();
-                        }
-                    })
-                    .ok();
-            }
+                .ok();
         })
         .detach();
+    }
+
+    fn report_persistence_error(&mut self, message: String, cx: &mut Context<Self>) {
+        // An unrelated later success cannot restore a previously failed write.
+        // Keep the unsaved indicator and avoid a toast storm during disk failure.
+        if self.persistence_error.is_none() {
+            self.show_error("存储写入失败", message.clone(), cx);
+        }
+        self.persistence_error = Some(message.clone());
+        self.status = message;
         cx.notify();
     }
 
@@ -498,37 +681,24 @@ impl ClipboardApp {
     }
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.storage_session.as_ref() else {
+            return;
+        };
         self.settings = self.settings.clone().normalized();
-        let settings = self.settings.clone();
-        let storage = self.storage.clone();
-        let previous_save = self.settings_save_task.take();
         self.settings_save_revision += 1;
         let revision = self.settings_save_revision;
         self.status = "正在保存设置...".into();
-        self.settings_save_task = Some(cx.spawn(async move |entity, cx| {
-            if let Some(previous_save) = previous_save {
-                previous_save.await;
-            }
-            let result = cx
-                .background_spawn(async move { ClipboardService::save_settings(&storage, &settings) })
-                .await;
-            entity
-                .update(cx, |this, cx| {
-                    if revision != this.settings_save_revision {
-                        return;
-                    }
-                    match result {
-                        Ok(()) => this.status = "设置已保存".into(),
-                        Err(error) => {
-                            let message = error.to_localized_string(this.settings.language);
-                            this.status = message.clone();
-                            this.show_error("设置保存失败", message, cx);
-                        }
-                    }
+        let reply = session.writer.save_settings(self.settings.clone());
+        self.persist(
+            reply,
+            move |this, (), cx| {
+                if revision == this.settings_save_revision {
+                    this.status = "设置已保存".into();
                     cx.notify();
-                })
-                .ok();
-        }));
+                }
+            },
+            cx,
+        );
         cx.notify();
     }
 
@@ -569,11 +739,12 @@ impl Render for ClipboardApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page;
         let counts = self.history.counts();
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
         v_flex()
             .track_focus(&self.initial_focus)
             .on_key_down(cx.listener(|this, event, window, cx| {
+                if this.storage_session.is_none() {
+                    return;
+                }
                 if !this.handle_global_shortcut_key_down(event, cx) {
                     this.handle_history_key_down(event, window, cx);
                 }
@@ -595,11 +766,26 @@ impl Render for ClipboardApp {
             )
             .child(
                 StatusBar::new()
-                    .left(format!("{} 条记录", counts.total))
+                    .left(if self.persistence_error.is_some() {
+                        format!("{} 条记录 · 存储写入失败，部分改动未保存", counts.total)
+                    } else if self.monitor_error.is_some() {
+                        format!("{} 条记录 · 剪贴板监听失败", counts.total)
+                    } else if self.monitor_starting {
+                        format!("{} 条记录 · 正在启动监听...", counts.total)
+                    } else if self.monitor_paused {
+                        format!("{} 条记录 · 监听已暂停", counts.total)
+                    } else {
+                        format!("{} 条记录", counts.total)
+                    })
                     .right(
                         h_flex()
                             .gap_1()
                             .items_center()
+                            .when(self.monitor_error.is_some(), |this| {
+                                this.child(Button::new("retry-monitor").label("重试监听").on_click(
+                                    cx.listener(|this, _, _, cx| this.retry_clipboard_monitor(cx)),
+                                ))
+                            })
                             .child(
                                 Button::new("always-on-top")
                                     .ghost()
@@ -635,6 +821,7 @@ impl Render for ClipboardApp {
                             .child(
                                 Button::new("status-settings")
                                     .ghost()
+                                    .disabled(self.storage_session.is_none())
                                     .large()
                                     .child(
                                         Icon::new(if page == AppPage::History {
@@ -655,6 +842,9 @@ impl Render for ClipboardApp {
                                         "返回历史"
                                     })
                                     .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.storage_session.is_none() {
+                                            return;
+                                        }
                                         this.page = if this.page == AppPage::History {
                                             AppPage::Settings
                                         } else {
@@ -669,7 +859,7 @@ impl Render for ClipboardApp {
                                 let (title, description, confirm_text) = match filter {
                                     ClipboardFilter::All => (
                                         "清空全部历史记录？",
-                                        "此操作将永久删除全部剪贴板历史，且无法撤销。",
+                                        "此操作将永久删除当前历史，且无法撤销。执行期间的新记录会保留。",
                                         "清空全部",
                                     ),
                                     ClipboardFilter::Text => (
@@ -696,6 +886,7 @@ impl Render for ClipboardApp {
                                 this.child(
                                     Button::new("status-clear")
                                         .ghost()
+                                        .disabled(self.storage_session.is_none())
                                         .large()
                                         .child(
                                             Icon::new(IconName::Delete)
@@ -732,7 +923,34 @@ impl Render for ClipboardApp {
                             }),
                     ),
             )
-            .children(dialog_layer)
-            .children(notification_layer)
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::clipboard_update_channel;
+    use crate::platform;
+
+    #[test]
+    fn clipboard_events_coalesce_without_blocking_and_rearm_after_read() {
+        let (mut on_update, updates) = clipboard_update_channel();
+        for _ in 0..10_000 {
+            on_update();
+        }
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates.try_recv(), Ok(()));
+        assert!(updates.try_recv().is_err());
+
+        on_update();
+        assert_eq!(updates.try_recv(), Ok(()));
+        drop(updates);
+        // Listener callbacks may race shutdown; a closed receiver is harmless.
+        on_update();
+    }
+
+    #[test]
+    fn clipboard_listener_can_be_initialized_on_background_executor() {
+        fn assert_send<T: Send>() {}
+        assert_send::<platform::clipboard::ClipboardUpdateListener>();
     }
 }

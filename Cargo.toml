@@ -8,11 +8,9 @@ license-file = "LICENSE"
 [dependencies]
 arboard = "3"
 async-channel = "2"
+caseless = "0.2.2"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-gpui = { package = "gpui-pre", version = "0.3" }
-gpui_platform = { package = "gpui-pre-platform", version = "0.3", features = ["font-kit", "x11", "wayland"] }
-gpui-component = "0.6"
-gpui-kit-assets = "0.6"
+gpui-kit = "=0.7.3"
 smol = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -23,7 +21,7 @@ sha2 = "0.10"
 thiserror = "2"
 
 [dev-dependencies]
-gpui = { package = "gpui-pre", version = "0.3", features = ["test-support"] }
+gpui-kit = { version = "=0.7.3", features = ["test-support"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5", features = ["monitor"] }

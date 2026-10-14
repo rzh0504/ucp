@@ -5,6 +5,7 @@ mod error;
 mod i18n;
 mod model;
 mod platform;
+mod search;
 mod services;
 mod storage;
 mod updater;

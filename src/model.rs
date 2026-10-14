@@ -225,9 +225,9 @@ pub enum ClipboardFilter {
     Favorite,
 }
 
-use std::rc::Rc;
+use std::sync::Arc;
 
-// Eq lets Rc<ClipboardEntry> comparisons take the pointer-equality fast path,
+// Eq lets Arc<ClipboardEntry> comparisons take the pointer-equality fast path,
 // which keeps component memoization cheap for large text/image entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClipboardEntry {
@@ -238,7 +238,7 @@ pub struct ClipboardEntry {
     pub favorite: bool,
 }
 
-// Rc-wrapped version for efficient sharing in UI
+// Shared entries support UI lists and background filtering without text copies.
 impl ClipboardEntry {
     pub fn new(id: u64, content: ClipboardContent) -> Self {
         Self {
@@ -276,7 +276,7 @@ pub struct HistoryCounts {
 pub struct ClipboardHistory {
     capacity: usize,
     next_id: u64,
-    entries: Vec<Rc<ClipboardEntry>>,
+    entries: Vec<Arc<ClipboardEntry>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -307,7 +307,7 @@ impl ClipboardHistory {
         let mut history = Self {
             capacity,
             next_id,
-            entries: entries.into_iter().map(Rc::new).collect(),
+            entries: entries.into_iter().map(Arc::new).collect(),
         };
         history.sort_entries();
         history.truncate();
@@ -319,10 +319,20 @@ impl ClipboardHistory {
         self.push_with_promotion(content, true)
     }
 
+    #[cfg(test)]
     pub fn push_with_promotion(
         &mut self,
         content: ClipboardContent,
         promote_existing: bool,
+    ) -> PushResult {
+        self.push_excluding(content, promote_existing, &Default::default())
+    }
+
+    pub fn push_excluding(
+        &mut self,
+        content: ClipboardContent,
+        promote_existing: bool,
+        excluded: &std::collections::HashSet<u64>,
     ) -> PushResult {
         let content = content.normalized();
         if content.is_empty() {
@@ -332,17 +342,17 @@ impl ClipboardHistory {
         if let Some(position) = self
             .entries
             .iter()
-            .position(|entry| entry.content == content)
+            .position(|entry| !excluded.contains(&entry.id) && entry.content == content)
         {
             if !promote_existing || !self.should_promote_position(position) {
                 return PushResult::default();
             }
 
             let rc_entry = self.entries.remove(position);
-            let mut entry = Rc::unwrap_or_clone(rc_entry);
+            let mut entry = Arc::unwrap_or_clone(rc_entry);
             entry.captured_at = Local::now();
             let updated_entry = entry.clone();
-            self.entries.insert(0, Rc::new(entry));
+            self.entries.insert(0, Arc::new(entry));
             return PushResult {
                 changed: true,
                 entry: Some(updated_entry),
@@ -353,8 +363,8 @@ impl ClipboardHistory {
         let entry = ClipboardEntry::new(self.next_id, content);
         let inserted_entry = entry.clone();
         self.next_id += 1;
-        self.entries.insert(0, Rc::new(entry));
-        let removed_ids = self.truncate();
+        self.entries.insert(0, Arc::new(entry));
+        let removed_ids = self.truncate_excluding(excluded);
 
         PushResult {
             changed: true,
@@ -368,10 +378,20 @@ impl ClipboardHistory {
         self.would_push_change_with_promotion(content, true)
     }
 
+    #[cfg(test)]
     pub fn would_push_change_with_promotion(
         &self,
         content: &ClipboardContent,
         promote_existing: bool,
+    ) -> bool {
+        self.would_push_change_excluding(content, promote_existing, &Default::default())
+    }
+
+    pub fn would_push_change_excluding(
+        &self,
+        content: &ClipboardContent,
+        promote_existing: bool,
+        excluded: &std::collections::HashSet<u64>,
     ) -> bool {
         let content = content.normalized_ref();
         if content.is_empty() {
@@ -380,15 +400,37 @@ impl ClipboardHistory {
 
         self.entries
             .iter()
-            .position(|entry| entry.content == *content)
+            .position(|entry| !excluded.contains(&entry.id) && entry.content == *content)
             .is_none_or(|position| promote_existing && self.should_promote_position(position))
     }
 
-    pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<Rc<ClipboardEntry>> {
-        let normalized_query = query.trim().to_lowercase();
-        let mut entries = self
-            .entries
-            .iter()
+    pub fn filtered(&self, query: &str, filter: ClipboardFilter) -> Vec<Arc<ClipboardEntry>> {
+        Self::filter_snapshot(self.snapshot(), query, filter)
+    }
+
+    /// Only shared pointers are copied on GPUI; text matching can run elsewhere.
+    pub fn snapshot(&self) -> Vec<Arc<ClipboardEntry>> {
+        self.entries.clone()
+    }
+
+    pub fn filter_snapshot(
+        entries: Vec<Arc<ClipboardEntry>>,
+        query: &str,
+        filter: ClipboardFilter,
+    ) -> Vec<Arc<ClipboardEntry>> {
+        Self::filter_snapshot_while(entries, query, filter, || true).unwrap()
+    }
+
+    pub fn filter_snapshot_while(
+        entries: Vec<Arc<ClipboardEntry>>,
+        query: &str,
+        filter: ClipboardFilter,
+        is_current: impl Fn() -> bool,
+    ) -> Option<Vec<Arc<ClipboardEntry>>> {
+        let normalized_query = crate::search::SearchQuery::new(query);
+        let mut entries = entries
+            .into_iter()
+            .take_while(|_| is_current())
             .filter(|entry| matches_filter(entry, filter))
             .filter(|entry| {
                 if normalized_query.is_empty() {
@@ -399,13 +441,23 @@ impl ClipboardHistory {
                     return false;
                 }
 
-                content_matches_query(&entry.content, normalized_query.as_str())
+                match &entry.content {
+                    ClipboardContent::Text(text) => {
+                        normalized_query.matches_while(text, &is_current)
+                    }
+                    ClipboardContent::Files(files) => files.iter().any(|file| {
+                        is_current() && normalized_query.matches_while(file, &is_current)
+                    }),
+                    ClipboardContent::Image(_) => false,
+                }
             })
-            .cloned()
             .collect::<Vec<_>>();
 
-        sort_rc_entries(&mut entries);
-        entries
+        if !is_current() {
+            return None;
+        }
+        sort_entries(&mut entries);
+        Some(entries)
     }
 
     pub fn entry_matches(entry: &ClipboardEntry, query: &str, filter: ClipboardFilter) -> bool {
@@ -413,7 +465,7 @@ impl ClipboardHistory {
             return false;
         }
 
-        let normalized_query = query.trim().to_lowercase();
+        let normalized_query = crate::search::SearchQuery::new(query);
         normalized_query.is_empty()
             || (entry.kind() != ClipboardKind::Image
                 && content_matches_query(&entry.content, &normalized_query))
@@ -462,7 +514,7 @@ impl ClipboardHistory {
         counts
     }
 
-    pub fn entry(&self, id: u64) -> Option<Rc<ClipboardEntry>> {
+    pub fn entry(&self, id: u64) -> Option<Arc<ClipboardEntry>> {
         self.entries.iter().find(|entry| entry.id == id).cloned()
     }
 
@@ -484,10 +536,10 @@ impl ClipboardHistory {
             }
 
             let rc_entry = self.entries.remove(position);
-            let mut entry = Rc::unwrap_or_clone(rc_entry);
+            let mut entry = Arc::unwrap_or_clone(rc_entry);
             entry.captured_at = Local::now();
             let updated_entry = entry.clone();
-            self.entries.insert(0, Rc::new(entry));
+            self.entries.insert(0, Arc::new(entry));
             Some(updated_entry)
         } else {
             None
@@ -501,24 +553,24 @@ impl ClipboardHistory {
             return false;
         };
         let rc_entry = self.entries.remove(position);
-        let mut entry = Rc::unwrap_or_clone(rc_entry);
+        let mut entry = Arc::unwrap_or_clone(rc_entry);
         let ClipboardContent::Image(image) = &mut entry.content else {
-            self.entries.insert(position, Rc::new(entry));
+            self.entries.insert(position, Arc::new(entry));
             return false;
         };
         image.preview_url = Some(preview_url);
         image.bytes = None;
-        self.entries.insert(position, Rc::new(entry));
+        self.entries.insert(position, Arc::new(entry));
         true
     }
 
     pub fn toggle_favorite(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
             let rc_entry = self.entries.remove(position);
-            let mut entry = Rc::unwrap_or_clone(rc_entry);
+            let mut entry = Arc::unwrap_or_clone(rc_entry);
             entry.favorite = !entry.favorite;
             let updated_entry = entry.clone();
-            self.entries.insert(position, Rc::new(entry));
+            self.entries.insert(position, Arc::new(entry));
             Some(updated_entry)
         } else {
             None
@@ -529,10 +581,10 @@ impl ClipboardHistory {
     pub fn toggle_pin(&mut self, id: u64) -> Option<ClipboardEntry> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id == id) {
             let rc_entry = self.entries.remove(position);
-            let mut entry = Rc::unwrap_or_clone(rc_entry);
+            let mut entry = Arc::unwrap_or_clone(rc_entry);
             entry.pinned = !entry.pinned;
             let updated_entry = entry.clone();
-            self.entries.insert(position, Rc::new(entry));
+            self.entries.insert(position, Arc::new(entry));
             Some(updated_entry)
         } else {
             None
@@ -543,6 +595,15 @@ impl ClipboardHistory {
         let before = self.entries.len();
         self.entries.retain(|entry| entry.id != id);
         self.entries.len() != before
+    }
+
+    /// Applies an immutable deletion snapshot, preserving captures added later.
+    pub fn remove_entries(&mut self, ids: &[u64]) {
+        let ids = ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        self.entries.retain(|entry| !ids.contains(&entry.id));
     }
 
     pub fn clear(&mut self) {
@@ -573,18 +634,25 @@ impl ClipboardHistory {
     }
 
     fn truncate(&mut self) -> Vec<u64> {
-        let mut removed_ids = Vec::new();
+        self.truncate_excluding(&Default::default())
+    }
 
-        while self.entries.len() > self.capacity {
-            let Some(position) = self
-                .entries
-                .iter()
-                .rposition(|entry| !entry.pinned && !entry.favorite)
-            else {
+    fn truncate_excluding(&mut self, excluded: &std::collections::HashSet<u64>) -> Vec<u64> {
+        let mut removed_ids = Vec::new();
+        let mut active_count = self
+            .entries
+            .iter()
+            .filter(|entry| !excluded.contains(&entry.id))
+            .count();
+        while active_count > self.capacity {
+            let Some(position) = self.entries.iter().rposition(|entry| {
+                !excluded.contains(&entry.id) && !entry.pinned && !entry.favorite
+            }) else {
                 break;
             };
 
             removed_ids.push(self.entries.remove(position).id);
+            active_count -= 1;
         }
 
         removed_ids
@@ -601,62 +669,15 @@ fn matches_filter(entry: &ClipboardEntry, filter: ClipboardFilter) -> bool {
     }
 }
 
-fn content_matches_query(content: &ClipboardContent, normalized_query: &str) -> bool {
+fn content_matches_query(content: &ClipboardContent, query: &crate::search::SearchQuery) -> bool {
     match content {
-        ClipboardContent::Text(text) => contains_ignore_case(text, normalized_query),
-        ClipboardContent::Files(files) => files
-            .iter()
-            .any(|file| contains_ignore_case(file, normalized_query)),
+        ClipboardContent::Text(text) => query.matches(text),
+        ClipboardContent::Files(files) => files.iter().any(|file| query.matches(file)),
         ClipboardContent::Image(_) => false,
     }
 }
 
-/// Case-insensitive substring search against an already lowercased needle.
-///
-/// Search runs on every keystroke over every entry, so this folds the
-/// haystack char by char instead of allocating a lowercased copy of
-/// arbitrarily large clipboard text. Matches start at character boundaries;
-/// a needle can no longer start inside one character's multi-char lowercase
-/// expansion, which no practical query does.
-fn contains_ignore_case(haystack: &str, needle_lower: &str) -> bool {
-    if needle_lower.is_empty() {
-        return true;
-    }
-
-    haystack
-        .char_indices()
-        .any(|(start, _)| matches_at_ignore_case(&haystack[start..], needle_lower))
-}
-
-fn matches_at_ignore_case(haystack: &str, needle_lower: &str) -> bool {
-    let mut needle = needle_lower.chars();
-    let mut expected = needle.next();
-    for character in haystack.chars() {
-        for folded in character.to_lowercase() {
-            match expected {
-                Some(wanted) if folded == wanted => expected = needle.next(),
-                Some(_) => return false,
-                None => return true,
-            }
-        }
-        if expected.is_none() {
-            return true;
-        }
-    }
-    expected.is_none()
-}
-
-fn sort_entries(entries: &mut [Rc<ClipboardEntry>]) {
-    entries.sort_by(|left, right| {
-        right
-            .pinned
-            .cmp(&left.pinned)
-            .then_with(|| right.captured_at.cmp(&left.captured_at))
-            .then_with(|| right.id.cmp(&left.id))
-    });
-}
-
-fn sort_rc_entries(entries: &mut [Rc<ClipboardEntry>]) {
+fn sort_entries(entries: &mut [Arc<ClipboardEntry>]) {
     entries.sort_by(|left, right| {
         right
             .pinned
@@ -682,9 +703,95 @@ fn format_bytes(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     const TEXT_CONTENT_CHAR_COUNT: usize = 200_000;
+
+    #[test]
+    fn background_search_shares_content_and_discards_cancelled_snapshots() {
+        fn assert_send<T: Send>() {}
+        assert_send::<Vec<Arc<ClipboardEntry>>>();
+        let mut history = ClipboardHistory::new(10);
+        history.push(ClipboardContent::Text("a".repeat(100_000)));
+        let snapshot = history.snapshot();
+        assert!(Arc::ptr_eq(&snapshot[0], &history.entries[0]));
+        let checks = std::cell::Cell::new(0);
+        let result = ClipboardHistory::filter_snapshot_while(
+            snapshot,
+            "missing",
+            ClipboardFilter::All,
+            || {
+                checks.set(checks.get() + 1);
+                checks.get() < 3
+            },
+        );
+        assert!(
+            result.is_none(),
+            "partial cancelled results must not be applied"
+        );
+    }
+
+    #[test]
+    fn recapture_during_snapshot_deletion_allocates_a_new_identity() {
+        for promote in [false, true] {
+            let mut history = ClipboardHistory::new(10);
+            let old = history
+                .push(ClipboardContent::Text("same content".into()))
+                .entry
+                .unwrap();
+            let pending = std::collections::HashSet::from([old.id]);
+            let content = ClipboardContent::Text("same content".into());
+            assert!(history.would_push_change_excluding(&content, promote, &pending));
+            let new = history
+                .push_excluding(content, promote, &pending)
+                .entry
+                .unwrap();
+            assert_ne!(new.id, old.id);
+            history.remove_entries(&[old.id]);
+            assert_eq!(history.entries.len(), 1);
+            assert_eq!(history.entries[0].id, new.id);
+        }
+    }
+
+    #[test]
+    fn capacity_pruning_preserves_the_allocator_high_water_mark() {
+        let mut protected = ClipboardEntry::new(1, ClipboardContent::Text("protected".into()));
+        protected.favorite = true;
+        let pruned = ClipboardEntry::new(100, ClipboardContent::Text("pruned".into()));
+        let mut history = ClipboardHistory::from_entries(1, vec![protected, pruned]);
+        let entry = history
+            .push(ClipboardContent::Text("new".into()))
+            .entry
+            .unwrap();
+        assert_eq!(entry.id, 101);
+    }
+
+    #[test]
+    fn pending_protected_deletions_do_not_evict_new_captures_at_capacity() {
+        let mut protected = ClipboardEntry::new(1, ClipboardContent::Text("same".into()));
+        protected.favorite = true;
+        let mut history = ClipboardHistory::from_entries(1, vec![protected]);
+        let pending = std::collections::HashSet::from([1]);
+        let result = history.push_excluding(ClipboardContent::Text("same".into()), true, &pending);
+        let new_id = result.entry.unwrap().id;
+        assert!(result.removed_ids.is_empty());
+        history.remove_entries(&[1]);
+        assert_eq!(history.entries.len(), 1);
+        assert_eq!(history.entries[0].id, new_id);
+    }
+
+    #[test]
+    fn history_search_uses_the_same_unicode_fold_for_query_and_content() {
+        let mut history = ClipboardHistory::new(10);
+        history.push(ClipboardContent::Text("ΟΣ Straße".into()));
+        for query in ["ΟΣ", "ος", "οσ", "STRASSE"] {
+            assert_eq!(history.filtered(query, ClipboardFilter::All).len(), 1);
+            assert!(ClipboardHistory::entry_matches(
+                &history.entries[0],
+                query,
+                ClipboardFilter::All
+            ));
+        }
+    }
 
     #[test]
     fn duplicate_text_is_not_duplicated() {
@@ -807,7 +914,7 @@ mod tests {
             vec![regular_id]
         );
         for entry in &mut history.entries {
-            Rc::make_mut(entry).captured_at = Local::now() - ChronoDuration::days(31);
+            Arc::make_mut(entry).captured_at = Local::now() - ChronoDuration::days(31);
         }
 
         let removed = history.remove_older_than_days(30, true);
@@ -899,7 +1006,10 @@ mod tests {
         assert_eq!(history.filtered("hello", ClipboardFilter::All).len(), 1);
         assert_eq!(history.filtered("WORLD", ClipboardFilter::All).len(), 1);
         assert_eq!(history.filtered("世界", ClipboardFilter::All).len(), 1);
-        assert_eq!(history.filtered("report.pdf", ClipboardFilter::All).len(), 1);
+        assert_eq!(
+            history.filtered("report.pdf", ClipboardFilter::All).len(),
+            1
+        );
         assert_eq!(history.filtered("planet", ClipboardFilter::All).len(), 0);
     }
 

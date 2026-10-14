@@ -18,7 +18,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-Initialize GPUI Component with `gpui_component::init(cx)` before creating views, and wrap each window's root entity in `gpui_component::Root`.
+Initialize the UI with `gpui_kit::init(cx)` before creating views. Open windows with `gpui_kit::open_window`, returning application content from the builder; Kit supplies the Base Root and automatically hosts component overlays. Do not wrap another Root or manually render dialog/notification layers.
 
 The history list is virtualized. Keep row height stable and avoid synchronous clipboard, image encoding, or SQLite work on the GPUI thread.
 
